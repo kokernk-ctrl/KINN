@@ -1,0 +1,31 @@
+// conditions.kin — if / else if / else chains and boolean operators.
+
+// expect:
+// negative
+// zero
+// small
+// large
+// true
+
+*mode = S;
+
+func classify(n: int) -> string {
+    if n < 0 {
+        return "negative";
+    } else if n == 0 {
+        return "zero";
+    } else if n < 10 {
+        return "small";
+    } else {
+        return "large";
+    }
+}
+
+func main() {
+    print(classify(-3));
+    print(classify(0));
+    print(classify(7));
+    print(classify(42));
+
+    print(not false and (1 < 2 or 3 > 4));
+}

@@ -1,0 +1,13 @@
+// errors/div_zero.kin — type checks fine, fails at runtime with E4001.
+// Used to verify that runtime errors are reported with a source line
+// and that `kinn run` exits with code 3.
+
+// runtime-error: E4001
+
+*mode = S;
+
+func main() {
+    let x = 10;
+    let y = 0;
+    print(x / y);
+}

@@ -1,0 +1,19 @@
+// hello.kin — the first Kin program.
+// Run with: kinn run examples/hello.kin
+
+// expect:
+// Hello, Kin!
+// world
+// 42
+
+*mode = B;
+
+func main() {
+    print("Hello, Kin!");
+
+    let name: string = "world";
+    print(name);
+
+    let answer = 6 * 7;
+    print(answer);
+}

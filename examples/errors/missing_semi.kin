@@ -1,0 +1,10 @@
+// errors/missing_semi.kin — intentionally broken: statements end with `;`.
+
+// error: E2002
+
+*mode = B;
+
+func main() {
+    let x = 1
+    print(x);
+}

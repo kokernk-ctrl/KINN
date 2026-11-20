@@ -1,0 +1,12 @@
+# Rust
+compiler/target/
+
+# Node / KINN Studio
+studio/node_modules/
+studio/dist/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.log

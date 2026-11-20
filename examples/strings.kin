@@ -1,0 +1,30 @@
+// strings.kin — concatenation, comparison and functions returning strings.
+
+// expect:
+// Hello, Kin!
+// equal
+// not equal
+// KINN
+
+*mode = B;
+
+func greet(name: string) -> string {
+    return "Hello, " + name + "!";
+}
+
+func main() {
+    print(greet("Kin"));
+
+    if "abc" == "abc" {
+        print("equal");
+    }
+    if "abc" != "abd" {
+        print("not equal");
+    }
+
+    let project = "kinn";
+    let shout: string = "KINN";
+    if project == "kinn" {
+        print(shout);
+    }
+}

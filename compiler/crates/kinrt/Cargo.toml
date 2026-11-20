@@ -1,0 +1,8 @@
+[package]
+name = "kinrt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "KINN runtime: KIR module format, stack virtual machine and builtins"
+
+[dependencies]
