@@ -1,0 +1,32 @@
+// loops.kin — while, break and continue (KINN Studio sample).
+
+*mode = S;
+
+func main() {
+    var total = 0;
+    var i = 1;
+    while i <= 10 {
+        if i == 5 {
+            i = i + 1;
+            continue;
+        }
+        total = total + i;
+        i = i + 1;
+    }
+    print(total);
+
+    var n = 100;
+    var steps = 0;
+    while true {
+        if n == 1 {
+            break;
+        }
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    print(steps);
+}

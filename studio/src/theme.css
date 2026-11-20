@@ -1,0 +1,561 @@
+/* ==========================================================================
+   KINN Studio — design system
+   Terminal-inspired: near-black graphite surfaces, one discreet orange
+   accent, monospace everywhere, minimal 120ms transitions, no motion.
+   ========================================================================== */
+
+:root {
+  /* surfaces */
+  --bg-0: #0b0d10;
+  --bg-1: #101318;
+  --bg-2: #151922;
+  --bg-3: #1b2129;
+
+  /* lines */
+  --border: #232935;
+  --border-strong: #313948;
+
+  /* ink */
+  --text: #d7dce3;
+  --text-dim: #9aa3af;
+  --text-faint: #67707c;
+
+  /* accent + status */
+  --accent: #ff7a1a;
+  --accent-soft: rgba(255, 122, 26, 0.13);
+  --ok: #3dd68c;
+  --warn: #e6b450;
+  --err: #f0564a;
+
+  /* syntax (muted terminal palette) */
+  --tk-kw: #ff8c42;
+  --tk-ty: #7daea3;
+  --tk-num: #d8a657;
+  --tk-str: #a9b665;
+  --tk-bool: #d3869b;
+  --tk-op: #c7ccd4;
+  --tk-punct: #8b93a1;
+  --tk-comment: #58606f;
+  --tk-mode: #ff8c42;
+
+  --mono: "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace,
+    "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   top bar
+   -------------------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 44px;
+  padding: 0 14px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  user-select: none;
+}
+
+.brand-mark {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  position: relative;
+  flex: none;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+.brand-name {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+.brand-name em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.project-name {
+  color: var(--text-faint);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: var(--bg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 30vw;
+}
+
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   buttons
+   -------------------------------------------------------------------------- */
+
+.btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.btn:hover, .btn:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+.btn:active { background: var(--accent-soft); }
+
+.btn-disabled {
+  color: var(--text-faint);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.btn-disabled:hover, .btn-disabled:focus-visible {
+  color: var(--text-faint);
+  border-color: var(--border-strong);
+  background: var(--bg-2);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-faint);
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+}
+.btn-ghost:hover { border-color: transparent; background: var(--bg-2); }
+
+/* --------------------------------------------------------------------------
+   mobile tab bar (hidden on desktop)
+   -------------------------------------------------------------------------- */
+
+.tabbar {
+  display: none;
+  flex: none;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  font: inherit;
+  font-size: 12px;
+  flex: 1;
+  padding: 9px 0;
+  background: transparent;
+  color: var(--text-faint);
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   workbench layout
+   -------------------------------------------------------------------------- */
+
+.workbench {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr) 400px;
+  min-height: 0;
+  flex: 1;
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+}
+
+.pane-explorer { border-right: 1px solid var(--border); }
+.pane-side { border-left: 1px solid var(--border); }
+
+.pane-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   explorer
+   -------------------------------------------------------------------------- */
+
+.tree {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 5px 12px 5px 20px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.tree-item:hover { background: var(--bg-2); color: var(--text); }
+.tree-item.active {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.tree-item .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: auto;
+  visibility: hidden;
+  flex: none;
+}
+.tree-item.dirty .dot { visibility: visible; }
+
+/* --------------------------------------------------------------------------
+   editor
+   -------------------------------------------------------------------------- */
+
+.editor-header { justify-content: space-between; }
+.editor-header > span:first-child { color: var(--text-dim); }
+
+.mode-badge {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  background: var(--accent-soft);
+}
+
+.editor-wrap {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--bg-0);
+}
+
+.gutter {
+  flex: none;
+  width: 48px;
+  overflow: hidden;
+  padding: 10px 8px 10px 0;
+  text-align: right;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  user-select: none;
+  background: var(--bg-0);
+  border-right: 1px solid var(--border);
+}
+
+.editor-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.highlight, .editor-input {
+  margin: 0;
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+  white-space: pre;
+  word-wrap: normal;
+}
+
+.highlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+}
+
+.editor-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent);
+  overflow: auto;
+}
+.editor-input::selection {
+  background: rgba(255, 122, 26, 0.25);
+  color: transparent;
+}
+
+.statusbar {
+  flex: none;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+}
+.statusbar #status-saved { margin-left: auto; }
+.statusbar #status-saved.dirty { color: var(--accent); }
+
+/* syntax colors */
+.tk-kw { color: var(--tk-kw); }
+.tk-ty { color: var(--tk-ty); }
+.tk-num { color: var(--tk-num); }
+.tk-str { color: var(--tk-str); }
+.tk-bool { color: var(--tk-bool); }
+.tk-op { color: var(--tk-op); }
+.tk-punct { color: var(--tk-punct); }
+.tk-comment { color: var(--tk-comment); font-style: italic; }
+.tk-mode { color: var(--tk-mode); font-weight: 700; }
+
+/* --------------------------------------------------------------------------
+   problems
+   -------------------------------------------------------------------------- */
+
+.problems {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 96px;
+  max-height: 45%;
+}
+
+.problems .count {
+  background: var(--bg-3);
+  border-radius: 8px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.problems-list {
+  flex: 1;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.problems-empty {
+  padding: 8px 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.problem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  padding: 5px 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.problem:hover { background: var(--bg-2); }
+.problem .sev { font-weight: 700; margin-right: 6px; }
+.problem.error .sev { color: var(--err); }
+.problem.error { border-left-color: var(--err); }
+.problem.warning .sev { color: var(--warn); }
+.problem.warning { border-left-color: var(--warn); }
+.problem.info .sev { color: var(--text-dim); }
+.problem .loc { color: var(--text-faint); margin-left: 6px; }
+
+/* --------------------------------------------------------------------------
+   terminal
+   -------------------------------------------------------------------------- */
+
+.terminal {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.terminal-hint { margin-left: auto; letter-spacing: 0; text-transform: none; }
+.terminal-hint code { color: var(--accent); }
+
+.terminal-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.terminal-output { white-space: pre-wrap; word-break: break-word; }
+
+.terminal-output .cmd { color: var(--text); }
+.terminal-output .cmd::before { content: "kinn> "; color: var(--accent); }
+.terminal-output .out { color: var(--text-dim); }
+.terminal-output .ok { color: var(--ok); }
+.terminal-output .warn { color: var(--warn); }
+.terminal-output .err { color: var(--err); }
+.terminal-output .dim { color: var(--text-faint); }
+.terminal-output .accent { color: var(--accent); }
+
+.terminal-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.prompt { color: var(--accent); user-select: none; flex: none; }
+
+.terminal-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   toast
+   -------------------------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--bg-3);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  max-width: min(80vw, 480px);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* --------------------------------------------------------------------------
+   scrollbars
+   -------------------------------------------------------------------------- */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 5px;
+  border: 2px solid var(--bg-1);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* --------------------------------------------------------------------------
+   responsive: below 900px switch to single column + tab navigation
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .tabbar { display: flex; }
+  .workbench {
+    display: flex;
+    flex-direction: column;
+  }
+  .pane { display: none; flex: 1; }
+  .pane.visible { display: flex; }
+  .pane-explorer, .pane-side { border: none; }
+  .pane-side { border-top: 1px solid var(--border); }
+  .project-name { display: none; }
+  .topbar { gap: 8px; }
+  .topbar-actions { gap: 6px; }
+  .btn { padding: 4px 9px; }
+  .gutter { width: 38px; }
+}
+
+/* respect users who prefer no animation at all */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

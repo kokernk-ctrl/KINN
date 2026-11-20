@@ -1,0 +1,8 @@
+// broken.kin — deliberately broken sample to demonstrate the PROBLEMS
+// panel and editor checks: an unclosed brace and an unterminated string.
+
+*mode = B;
+
+func main() {
+    let greeting = "Hello, Kin!;
+    print(greeting);

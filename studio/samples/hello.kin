@@ -1,0 +1,13 @@
+// hello.kin — the first Kin program (KINN Studio sample).
+
+*mode = B;
+
+func main() {
+    print("Hello, Kin!");
+
+    let name: string = "world";
+    print(name);
+
+    let answer = 6 * 7;
+    print(answer);
+}
