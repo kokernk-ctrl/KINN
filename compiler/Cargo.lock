@@ -10,5 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kinn"
+version = "0.1.0"
+dependencies = [
+ "kinc",
+ "kinrt",
+]
+
+[[package]]
 name = "kinrt"
 version = "0.1.0"

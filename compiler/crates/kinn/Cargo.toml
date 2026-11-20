@@ -1,0 +1,14 @@
+[package]
+name = "kinn"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "KINN command-line interface"
+
+[[bin]]
+name = "kinn"
+path = "src/main.rs"
+
+[dependencies]
+kinc = { path = "../kinc" }
+kinrt = { path = "../kinrt" }
