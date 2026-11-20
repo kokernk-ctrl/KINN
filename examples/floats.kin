@@ -1,0 +1,26 @@
+// floats.kin — float arithmetic and formatting.
+// Kin has no implicit int/float conversion: use float literals like 2.0.
+
+// expect:
+// 12.5
+// 0.5
+// 2.0
+// 3.25
+
+*mode = S;
+
+func scaled_area(r: float) -> float {
+    return r * r * 2.0;
+}
+
+func main() {
+    print(scaled_area(2.5));
+
+    let half: float = 1.0 / 2.0;
+    print(half);
+
+    let whole: float = 2.0;
+    print(whole);
+
+    print(1.5 + 1.75);
+}

@@ -1,0 +1,9 @@
+[package]
+name = "kinc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "KINN compiler: lexer, parser, type checker and KIR backend"
+
+[dependencies]
+kinrt = { path = "../kinrt" }
