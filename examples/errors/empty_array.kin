@@ -1,0 +1,11 @@
+// errors/empty_array.kin — an empty array literal needs a type
+// annotation; the element type cannot be inferred.
+
+// error: E3022
+
+*mode = S;
+
+func main() {
+    let a = [];
+    print(len(a));
+}

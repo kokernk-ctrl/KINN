@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg">
+
+    <!-- top bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:background="@color/bg_elevated">
+
+        <TextView
+            android:id="@+id/brand"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="KINN STUDIO"
+            android:textColor="@color/accent"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/project_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:textColor="@color/fg_dim"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:ellipsize="start"
+            android:text="projects" />
+
+        <Button
+            android:id="@+id/btn_check"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/action_check"
+            android:textColor="@color/fg" />
+
+        <Button
+            android:id="@+id/btn_run"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/action_run" />
+
+        <Button
+            android:id="@+id/btn_docs"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/action_docs"
+            android:textColor="@color/fg_dim" />
+    </LinearLayout>
+
+    <!-- section tabs -->
+    <LinearLayout
+        android:id="@+id/tabbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/bg">
+
+        <Button
+            android:id="@+id/tab_files"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_files" />
+
+        <Button
+            android:id="@+id/tab_editor"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_editor" />
+
+        <Button
+            android:id="@+id/tab_problems"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_problems" />
+
+        <Button
+            android:id="@+id/tab_terminal"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_terminal" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- FILES -->
+        <LinearLayout
+            android:id="@+id/section_files"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="8dp">
+
+                <Button
+                    android:id="@+id/btn_new_project"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="+ project"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_new_file"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="+ file"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_import"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_import"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_export"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_export"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/projects_header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="PROJECTS"
+                android:textColor="@color/fg_dim"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="4dp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/projects_list"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="FILES"
+                android:textColor="@color/fg_dim"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="12dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="4dp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/files_list"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+        </LinearLayout>
+
+        <!-- EDITOR -->
+        <LinearLayout
+            android:id="@+id/section_editor"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/active_file"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="main.kin"
+                android:textColor="@color/fg"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:background="@color/bg_elevated" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/gutter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:fontFamily="monospace"
+                        android:textSize="13sp"
+                        android:textColor="@color/fg_dim"
+                        android:paddingHorizontal="6dp"
+                        android:paddingVertical="8dp"
+                        android:gravity="top" />
+
+                    <EditText
+                        android:id="@+id/editor"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:minWidth="260dp"
+                        android:background="@android:color/transparent"
+                        android:fontFamily="monospace"
+                        android:textSize="13sp"
+                        android:textColor="@color/fg"
+                        android:inputType="textMultiLine|textNoSuggestions"
+                        android:gravity="top"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="8dp"
+                        android:importantForAutofill="no"
+                        android:hint="@string/editor_hint"
+                        android:imeOptions="flagNoExtractUi" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <TextView
+                android:id="@+id/editor_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/fg_dim"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp"
+                android:background="@color/bg_elevated"
+                android:text="saved on device" />
+        </LinearLayout>
+
+        <!-- PROBLEMS -->
+        <LinearLayout
+            android:id="@+id/section_problems"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/problems_header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="PROBLEMS 0"
+                android:textColor="@color/fg_dim"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:padding="12dp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/problems_list"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+        </LinearLayout>
+
+        <!-- TERMINAL -->
+        <LinearLayout
+            android:id="@+id/section_terminal"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ScrollView
+                android:id="@+id/terminal_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/terminal_output"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp"
+                    android:textColor="@color/fg"
+                    android:padding="8dp" />
+            </ScrollView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="6dp"
+                android:background="@color/bg_elevated">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/terminal_prompt"
+                    android:textColor="@color/accent"
+                    android:fontFamily="monospace"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/terminal_input"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@android:color/transparent"
+                    android:fontFamily="monospace"
+                    android:textSize="13sp"
+                    android:textColor="@color/fg"
+                    android:inputType="text"
+                    android:imeOptions="actionGo"
+                    android:importantForAutofill="no"
+                    android:hint="help" />
+
+                <ImageButton
+                    android:id="@+id/terminal_send"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:src="@android:drawable/ic_menu_send"
+                    android:contentDescription="run command"
+                    android:background="?attr/selectableItemBackgroundBorderless" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

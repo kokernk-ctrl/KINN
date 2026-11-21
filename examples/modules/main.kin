@@ -1,0 +1,23 @@
+// modules/main.kin — multi-file project example.
+// Run with: kinn run examples/modules/main.kin
+// `import` paths are relative to the importing file and cannot escape
+// the entry file's directory.
+
+// expect:
+// 7
+// 25
+// 5
+// 15
+
+import "math.kin" as math;
+
+func triple(x: int) -> int {
+    return math.add(x, math.add(x, x));
+}
+
+func main() {
+    print(math.add(3, 4));
+    print(math.square(5));
+    print(math.clamp(99, 1, 5));
+    print(triple(5));
+}

@@ -1,0 +1,11 @@
+// errors/import_missing.kin — the imported file does not exist.
+
+// error: E3017
+
+*mode = S;
+
+import "no_such_module.kin" as n;
+
+func main() {
+    print(1);
+}

@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">KINN Studio</string>
+    <string name="tab_files">Files</string>
+    <string name="tab_editor">Editor</string>
+    <string name="tab_problems">Problems</string>
+    <string name="tab_terminal">Terminal</string>
+    <string name="action_run">Run</string>
+    <string name="action_check">Check</string>
+    <string name="action_docs">Docs</string>
+    <string name="action_import">Import</string>
+    <string name="action_export">Export</string>
+    <string name="new_file_hint">file name (e.g. math.kin)</string>
+    <string name="new_project_hint">project name</string>
+    <string name="terminal_prompt">kinn&gt;</string>
+    <string name="editor_hint">Kin source</string>
+</resources>

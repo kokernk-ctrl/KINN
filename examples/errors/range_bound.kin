@@ -1,0 +1,11 @@
+// errors/range_bound.kin — range bounds must be int.
+
+// error: E3027
+
+*mode = S;
+
+func main() {
+    for i in 0.5..3 {
+        print(i);
+    }
+}

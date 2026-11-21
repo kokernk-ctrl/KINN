@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- K mark: orange square outline with center square, matching the web icon -->
+    <path
+        android:strokeColor="#FF7A1A"
+        android:strokeWidth="7"
+        android:fillColor="#00000000"
+        android:pathData="M34,34 h40 v40 h-40 z" />
+    <path
+        android:fillColor="#FF7A1A"
+        android:pathData="M49,49 h10 v10 h-10 z" />
+</vector>

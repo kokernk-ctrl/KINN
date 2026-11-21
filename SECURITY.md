@@ -8,43 +8,96 @@ Please do not open public issues for vulnerabilities.
 
 ## Threat model
 
-KINN is offline-first: the compiler and Studio run entirely on your
-machine. Nothing in this repository phones home, requires an account,
-or transmits your code anywhere.
+KINN is offline-first: the compiler, the web Studio (compiler included,
+via WebAssembly) and the Android app (on-device compilation) run
+entirely on your machine. Nothing in this repository phones home,
+requires an account, or transmits your code anywhere. The Android app
+requests **no permissions** — no INTERNET — and all project data lives
+in app-private storage.
 
 ## Token and secret hygiene
 
 - Never commit tokens, passwords or keys. This repository contains no
-  secrets, and CI (when added) will enforce a secret scan.
-- The bootstrap GitHub token used to create this repository was
-  provided out-of-band by the owner and was never written to any file,
-  commit, log or document. It is recommended practice to rotate any
-  token shared over a chat channel after use.
+  secrets.
+- The bootstrap GitHub token used for repository automation is
+  provided out-of-band by the owner and is never written to any file,
+  commit, log or document. Rotate any token shared over a chat channel
+  after use.
 - If you believe a secret has leaked, rotate it immediately at the
   provider — assume it is compromised, then clean history.
 
+## Android release signing
+
+Release APKs are signed **only** with credentials supplied as encrypted
+GitHub Actions secrets:
+
+| Secret | Meaning |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | base64 of the release keystore (`.jks`/`.keystore`) |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias inside the keystore |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+Generating a keystore (do this locally, never in CI):
+
+```bash
+keytool -genkeypair -v \
+  -keystore kinn-release.keystore \
+  -alias kinn \
+  -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 kinn-release.keystore   # paste as the ANDROID_KEYSTORE_BASE64 secret
+```
+
+The workflow (`.github/workflows/android.yml`) decodes the keystore at
+runtime, passes passwords through environment variables only, and
+verifies every APK with `apksigner verify --print-certs`, publishing
+the certificate fingerprints in the `signature-report.txt` artifact
+alongside SHA-256 checksums. **When the secrets are absent, the
+release APK is left unsigned and named `...-UNSIGNED.apk`** — the
+pipeline never invents a signing identity, and debug APKs are always
+clearly labeled as debug-signed. Installing an unsigned APK requires
+signing it yourself (see INSTALL.md).
+
+CI does not and cannot publish a GitHub Release without explicit
+owner-approved workflow changes — artifacts stay on the run page.
+
 ## Supply chain
 
-- The Rust workspace (`compiler/`) has **zero external dependencies**.
-  `cargo build` never touches the network. There is nothing to
-  supply-chain-attack in the compiler itself.
-- KINN Studio (`studio/`) has zero runtime dependencies; dev-only
+- The Rust compiler core (`kinrt`, `kinc`, `kinn`, `kinn-ffi`) has
+  **zero external dependencies**. `cargo build` never touches the
+  network. The single exception is `kinn-android` (JNI glue only),
+  which depends on the `jni` crate (ADR-0014); it contains no compiler
+  logic and is built only for Android targets in CI.
+- KINN Studio (web) has zero runtime dependencies; dev-only
   dependencies are `vite`, `typescript` and `vitest`, pinned through
   `package-lock.json`.
+- The Android app uses only AndroidX/Material libraries from Google's
+  Maven; no analytics, no ads, no crash-reporting SDKs.
 - Generated build artifacts (`compiler/target`, `studio/dist`,
-  `studio/node_modules`) are gitignored and must never be committed.
+  `studio/node_modules`, `studio/public/kinn.wasm`, `android/.gradle`,
+  `android/app/build`, `android/local.properties`,
+  `android/app/src/main/jniLibs`) are gitignored and must never be
+  committed.
 
 ## Compiler safety notes
 
-- Kin 0.1 has no unsafe constructs, no FFI and no file/network access
-  in the language; programs can loop forever but cannot escape the VM.
-- The VM enforces a call-depth limit (E4002) and checked integer
-  arithmetic (E4004). Float division by zero is an error, not `inf`
-  (a documented deviation from IEEE-754, ADR-0009).
+- Kin has no unsafe constructs, no FFI and no file/network access in
+  the language; programs can loop forever but cannot escape the VM.
+- Import paths are validated (relative `.kin` paths only, no `..`, no
+  absolute paths) and cannot escape the project root; cycles and
+  over-deep chains are rejected (E3017/E3018).
+- The VM enforces a call-depth limit (E4002), checked integer
+  arithmetic (E4004) and array bounds checks (E4005). Float division by
+  zero is an error, not `inf` (a documented deviation from IEEE-754,
+  ADR-0009).
+- The FFI boundary (`kinn-ffi`) is panic-safe: panics are caught and
+  reported as E5000 diagnostics inside the JSON result, never
+  unwinding into a host (browser or Android).
 - Graphics work (0.5+) will introduce native code; a security review
   is part of that milestone's exit criteria.
 
 ## Scope
 
-This policy covers the KINN repository (compiler, runtime, CLI, Studio,
-documentation). Third-party forks are out of scope.
+This policy covers the KINN repository (compiler, runtime, CLI, FFI,
+Studio web, Studio Android, CI, documentation). Third-party forks are
+out of scope.

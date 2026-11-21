@@ -1,0 +1,50 @@
+// for_loops.kin — `for` over ranges and arrays.
+// `a..b` is exclusive, `a..=b` is inclusive; `continue` and `break` work.
+
+// expect:
+// 0
+// 1
+// 2
+// 3
+// 4
+// 1
+// 2
+// 3
+// 0
+// 1
+// 3
+// 4
+// sum: 60
+
+*mode = S;
+
+func main() {
+    // Exclusive range 0..5.
+    for i in 0..5 {
+        print(i);
+    }
+
+    // Inclusive range 1..=3.
+    for i in 1..=3 {
+        print(i);
+    }
+
+    // continue skips 2, break stops at 5.
+    for i in 0..10 {
+        if i == 2 {
+            continue;
+        }
+        if i == 5 {
+            break;
+        }
+        print(i);
+    }
+
+    // Loop over array elements, with bounds from len().
+    let xs = [10, 20, 30];
+    var total = 0;
+    for i in 0..len(xs) {
+        total = total + xs[i];
+    }
+    print("sum: " + (total as string));
+}

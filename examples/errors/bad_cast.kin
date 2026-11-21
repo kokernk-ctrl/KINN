@@ -1,0 +1,10 @@
+// errors/bad_cast.kin — `string` cannot be cast to `int` in 0.2.
+
+// error: E3025
+
+*mode = S;
+
+func main() {
+    let s = "42";
+    print(s as int);
+}

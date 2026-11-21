@@ -1,4 +1,8 @@
-//! The Kin 0.1 abstract syntax tree, plus a debug tree printer.
+//! The Kin abstract syntax tree, plus a debug tree printer.
+//!
+//! 0.2.0 adds: array types and literals, indexing, index assignment,
+//! `for` loops over ranges and arrays, explicit casts, imports and
+//! qualified (module) calls.
 
 /// Programming mode selected with the `*mode = B | S | A;` directive.
 ///
@@ -36,36 +40,50 @@ impl Default for Mode {
 ///
 /// `Error` is an internal poison type produced by the checker after a
 /// previous error so that one mistake does not cascade into many.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `[T]` is an array of `T` (arrays use reference semantics).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Float,
     Bool,
     Str,
     Void,
+    Array(Box<Type>),
     Error,
 }
 
 impl Type {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> String {
         match self {
-            Type::Int => "int",
-            Type::Float => "float",
-            Type::Bool => "bool",
-            Type::Str => "string",
-            Type::Void => "void",
-            Type::Error => "<error>",
+            Type::Int => "int".to_string(),
+            Type::Float => "float".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Str => "string".to_string(),
+            Type::Void => "void".to_string(),
+            Type::Array(t) => format!("[{}]", t.as_str()),
+            Type::Error => "<error>".to_string(),
         }
     }
 }
 
-/// A parsed program: an optional mode directive plus function declarations.
+/// A parsed program: an optional mode directive, imports, and function
+/// declarations.
 #[derive(Debug, Clone)]
 pub struct Program {
     pub mode: Mode,
     /// `true` when the file contained an explicit `*mode = ...;` line.
     pub mode_declared: bool,
+    pub imports: Vec<ImportDecl>,
     pub funcs: Vec<Func>,
+}
+
+/// `import "path.kin" as alias;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDecl {
+    pub path: String,
+    pub alias: String,
+    pub line: u32,
+    pub col: u32,
 }
 
 /// A function declaration.
@@ -111,6 +129,15 @@ pub enum Stmt {
         line: u32,
         col: u32,
     },
+    /// `base[index] = value;` — element assignment (arrays are references,
+    /// so the binding itself may be `let`).
+    IndexAssign {
+        base: Expr,
+        index: Expr,
+        value: Expr,
+        line: u32,
+        col: u32,
+    },
     If {
         cond: Expr,
         then_branch: Block,
@@ -121,6 +148,14 @@ pub enum Stmt {
     },
     While {
         cond: Expr,
+        body: Block,
+        line: u32,
+        col: u32,
+    },
+    /// `for var in iterable { ... }` — see [`ForIter`].
+    For {
+        var: String,
+        iter: ForIter,
         body: Block,
         line: u32,
         col: u32,
@@ -152,13 +187,29 @@ pub enum Stmt {
     },
 }
 
+/// What a `for` loop iterates over.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForIter {
+    /// `start..end` (exclusive) or `start..=end` (inclusive). Both bounds
+    /// must be `int`. Ranges are only allowed in `for` headers.
+    Range {
+        start: Expr,
+        end: Expr,
+        inclusive: bool,
+    },
+    /// An expression that must evaluate to an array.
+    Expr(Expr),
+}
+
 impl Stmt {
     pub fn line(&self) -> u32 {
         match self {
             Stmt::VarDecl { line, .. }
             | Stmt::Assign { line, .. }
+            | Stmt::IndexAssign { line, .. }
             | Stmt::If { line, .. }
             | Stmt::While { line, .. }
+            | Stmt::For { line, .. }
             | Stmt::Return { line, .. }
             | Stmt::Break { line, .. }
             | Stmt::Continue { line, .. }
@@ -171,8 +222,10 @@ impl Stmt {
         match self {
             Stmt::VarDecl { col, .. }
             | Stmt::Assign { col, .. }
+            | Stmt::IndexAssign { col, .. }
             | Stmt::If { col, .. }
             | Stmt::While { col, .. }
+            | Stmt::For { col, .. }
             | Stmt::Return { col, .. }
             | Stmt::Break { col, .. }
             | Stmt::Continue { col, .. }
@@ -214,6 +267,18 @@ pub enum ExprKind {
     BoolLit(bool),
     StrLit(String),
     Ident(String),
+    /// `[a, b, c]`
+    ArrayLit(Vec<Expr>),
+    /// `base[index]`
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// `expr as type`
+    Cast {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     Unary {
         op: UnOp,
         expr: Box<Expr>,
@@ -224,6 +289,12 @@ pub enum ExprKind {
         rhs: Box<Expr>,
     },
     Call {
+        name: String,
+        args: Vec<Expr>,
+    },
+    /// `module.function(args)` — a call through an import alias.
+    ModCall {
+        module: String,
         name: String,
         args: Vec<Expr>,
     },
@@ -294,6 +365,9 @@ pub fn dump(p: &Program) -> String {
         p.mode.as_str(),
         if p.mode_declared { "" } else { ", default" }
     ));
+    for im in &p.imports {
+        s.push_str(&format!("import \"{}\" as {}\n", im.path, im.alias));
+    }
     for f in &p.funcs {
         let params = f
             .params
@@ -318,11 +392,14 @@ fn dump_stmt(s: &mut String, st: &Stmt, depth: usize) {
     match st {
         Stmt::VarDecl { mutable, name, ty, init, .. } => {
             let kw = if *mutable { "var" } else { "let" };
-            let ty = ty.map(|t| format!(": {}", t.as_str())).unwrap_or_default();
+            let ty = ty.as_ref().map(|t| format!(": {}", t.as_str())).unwrap_or_default();
             s.push_str(&format!("{}{} {}{} = {}\n", ind, kw, name, ty, expr_str(init)));
         }
         Stmt::Assign { name, op, value, .. } => {
             s.push_str(&format!("{}{} {} {}\n", ind, name, op, expr_str(value)));
+        }
+        Stmt::IndexAssign { base, index, value, .. } => {
+            s.push_str(&format!("{}{}[{}] = {}\n", ind, expr_str(base), expr_str(index), expr_str(value)));
         }
         Stmt::If { cond, then_branch, else_branch, .. } => {
             s.push_str(&format!("{}if {}\n", ind, expr_str(cond)));
@@ -334,6 +411,18 @@ fn dump_stmt(s: &mut String, st: &Stmt, depth: usize) {
         }
         Stmt::While { cond, body, .. } => {
             s.push_str(&format!("{}while {}\n", ind, expr_str(cond)));
+            dump_block(s, body, depth + 1);
+        }
+        Stmt::For { var, iter, body, .. } => {
+            match iter {
+                ForIter::Range { start, end, inclusive } => {
+                    let dots = if *inclusive { "..=" } else { ".." };
+                    s.push_str(&format!("{}for {} in {} {} {}\n", ind, var, expr_str(start), dots, expr_str(end)));
+                }
+                ForIter::Expr(e) => {
+                    s.push_str(&format!("{}for {} in {}\n", ind, var, expr_str(e)));
+                }
+            }
             dump_block(s, body, depth + 1);
         }
         Stmt::Return { value, .. } => match value {
@@ -354,6 +443,14 @@ fn expr_str(e: &Expr) -> String {
         ExprKind::BoolLit(v) => v.to_string(),
         ExprKind::StrLit(v) => format!("{:?}", v),
         ExprKind::Ident(n) => n.clone(),
+        ExprKind::ArrayLit(items) => {
+            let items = items.iter().map(expr_str).collect::<Vec<_>>().join(", ");
+            format!("[{}]", items)
+        }
+        ExprKind::Index { base, index } => {
+            format!("{}[{}]", expr_str(base), expr_str(index))
+        }
+        ExprKind::Cast { expr, ty } => format!("({} as {})", expr_str(expr), ty.as_str()),
         ExprKind::Unary { op, expr } => format!("({} {})", op, expr_str(expr)),
         ExprKind::Binary { op, lhs, rhs } => {
             format!("({} {} {})", expr_str(lhs), op, expr_str(rhs))
@@ -361,6 +458,10 @@ fn expr_str(e: &Expr) -> String {
         ExprKind::Call { name, args } => {
             let args = args.iter().map(expr_str).collect::<Vec<_>>().join(", ");
             format!("{}({})", name, args)
+        }
+        ExprKind::ModCall { module, name, args } => {
+            let args = args.iter().map(expr_str).collect::<Vec<_>>().join(", ");
+            format!("{}.{}({})", module, name, args)
         }
     }
 }

@@ -1,0 +1,11 @@
+// errors/index_oob.kin — type checks fine, fails at runtime with E4005
+// (array index out of bounds).
+
+// runtime-error: E4005
+
+*mode = S;
+
+func main() {
+    let a = [1, 2, 3];
+    print(a[5]);
+}

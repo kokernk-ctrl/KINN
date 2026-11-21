@@ -176,3 +176,134 @@ of E1001–E1006 and E3002.
 | call depth | 1024 frames |
 | string literal | must fit on one line |
 | identifiers | ASCII letters, digits, `_` |
+
+---
+
+# Kin 0.2 additions
+
+Normative additions shipped in KINN 0.2.0 on top of the 0.1
+specification above. The 0.1 rules remain valid except where amended
+below. Everything here is implemented and tested.
+
+## A1. Multi-file programs (modules)
+
+```
+import_decl := 'import' string_lit 'as' ident ';'
+```
+
+- Import declarations appear after the optional mode directive and
+  before all functions (E2012 otherwise). The path must end in `.kin`,
+  be relative, and stay inside the entry file's directory (E3017
+  otherwise; no `..`, no absolute paths, no `\`).
+- Paths resolve against the importing file's directory. Circular
+  imports are errors reporting the full chain (E3018); chains deeper
+  than 32 files are rejected; a file imported twice is parsed once.
+- Modules export all top-level functions. Calls are qualified:
+  `math.add(1, 2)` where `math` is the import alias (E3020 unknown
+  module, E3021 unknown function). An imported file's `main` is inert;
+  only the entry's `main` runs. Duplicate aliases in one file are
+  errors (E3019).
+- Cross-file globals and selective/re-named exports do not exist in
+  0.2 (ADR-0015).
+
+## A2. Arrays
+
+```
+array_type  := '[' type ']'
+array_lit   := '[' expr (',' expr)* ']' | '[' ']'   ; empty needs an
+                                                      ; annotation (E3022)
+index_expr  := postfix '[' expr ']'
+index_assign:= postfix '[' expr ']' '=' expr ';'
+```
+
+- Arrays have **reference semantics** (ADR-0014): assignment and
+  parameter passing share the array. `==`/`!=` compare contents deeply.
+- Elements must have one type (E3028). Indexing requires an `int`
+  index (E3023) and an array base (E3024). `a[i] = v;` assigns an
+  element; compound assignment to elements is rejected (E2014), as is
+  assignment to any other expression (E2013).
+- Runtime: bounds are checked — index out of `[0, len)` is E4005 with
+  the length in the message. `len(array)` is the element count;
+  `len(string)` counts Unicode characters (not bytes).
+
+## A3. `for` loops and ranges
+
+```
+for_stmt := 'for' ident 'in' for_iter block
+for_iter := expr '..' expr        ; exclusive
+          | expr '..=' expr       ; inclusive
+          | expr                  ; must be an array (E3026)
+```
+
+- Range bounds must be `int` (E3027). Ranges exist only in `for`
+  headers; elsewhere `..` is a syntax error.
+- The iterable expression is evaluated once. The loop variable is a
+  fresh immutable binding each iteration (assignment is E3004); it is
+  not visible outside the loop (E3001).
+- `break` and `continue` work as in `while`; `continue` proceeds to
+  the increment.
+
+## A4. Casts
+
+```
+cast_expr := cast_expr 'as' type      ; binds tighter than binary ops,
+                                      ; looser than unary (like Rust)
+```
+
+Supported casts (checked at compile time, E3025 otherwise — including
+same-type casts, which are "unnecessary"):
+
+| From | To | Semantics |
+| --- | --- | --- |
+| int | float | exact widening |
+| float | int | truncate toward zero; saturate at i64 bounds; NaN → 0 |
+| int | string | decimal digits |
+| float | string | same formatting as `print` (`2.0` keeps the point) |
+| bool | string | `true` / `false` |
+
+String→number casts do not exist in 0.2 (P-013).
+
+## A5. Native functions
+
+`print` (as in 0.1) plus a native table, all reserved against
+redefinition (E3016):
+
+| Name | Signature | Notes |
+| --- | --- | --- |
+| `len` | `(string) -> int`, `([T]) -> int` | string length counts characters |
+| `abs` | `(int) -> int`, `(float) -> float` | `abs(i64::MIN)` overflows (E4004) |
+| `min` / `max` | `(T, T) -> T`, T in {int, float} | both operands same type |
+
+## A6. Parser recovery
+
+The parser reports multiple syntax errors per file: after a failing
+statement it skips to `;`, `}`, a statement keyword, or a top-level
+`func`/`import`, then continues. After 25 errors it stops with E2099.
+Compilation still fails on any error — recovery improves diagnostics,
+never accepts broken input.
+
+## A7. New diagnostic codes (complete for 0.2 additions)
+
+| Code | Stage | Meaning |
+| --- | --- | --- |
+| E2012 | parser | `import` after functions |
+| E2013 | parser | invalid assignment target |
+| E2014 | parser | compound assignment to an array element |
+| E2015 | parser | malformed import (path not a string) |
+| E2099 | parser | too many syntax errors |
+| E3017 | project | import path invalid/unloadable |
+| E3018 | project | circular or too-deep imports |
+| E3019 | project | duplicate import alias |
+| E3020 | checker | unknown module in qualified call |
+| E3021 | checker | unknown function in module |
+| E3022 | checker | empty array literal without annotation |
+| E3023 | checker | array index not int |
+| E3024 | checker | indexing a non-array |
+| E3025 | checker | unsupported/unnecessary cast |
+| E3026 | checker | `for` iterable not a range or array |
+| E3027 | checker | range bound not int |
+| E3028 | checker | mixed element types in array literal |
+| E4005 | runtime | array index out of bounds |
+| E5000 | ffi | compiler panic caught at the FFI boundary |
+| E5002 | ffi | JNI bridge error |
+| E5003 | host | malformed FFI result |

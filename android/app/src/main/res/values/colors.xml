@@ -1,0 +1,13 @@
+<resources>
+    <!-- Terminal-inspired palette, matching the web Studio theme. -->
+    <color name="bg">#0B0D10</color>
+    <color name="bg_elevated">#14181D</color>
+    <color name="bg_input">#1B2026</color>
+    <color name="fg">#E6EDF3</color>
+    <color name="fg_dim">#8B949E</color>
+    <color name="accent">#FF7A1A</color>
+    <color name="ok">#3FB950</color>
+    <color name="warn">#D29922</color>
+    <color name="err">#F85149</color>
+    <color name="border">#30363D</color>
+</resources>

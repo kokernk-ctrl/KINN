@@ -115,7 +115,7 @@ impl Lexer {
                 while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
                     text.push(self.bump().unwrap());
                 }
-                if self.peek() == Some('.') {
+                if self.peek() == Some('.') && self.peek2() != Some('.') {
                     self.diags.push(Diagnostic::error(
                         "E1004",
                         format!("malformed number literal `{}` (a second `.` is not allowed)", text),
@@ -125,6 +125,9 @@ impl Lexer {
                     ));
                     return;
                 }
+            } else if self.peek2() == Some('.') {
+                // `0..` — the `.` starts a range, not a float. Emit the
+                // integer as-is; the main loop lexes the `..` next.
             } else {
                 self.diags.push(Diagnostic::error(
                     "E1004",
@@ -307,9 +310,26 @@ impl Lexer {
             ')' => Some(TokKind::RParen),
             '{' => Some(TokKind::LBrace),
             '}' => Some(TokKind::RBrace),
+            '[' => Some(TokKind::LBracket),
+            ']' => Some(TokKind::RBracket),
             ',' => Some(TokKind::Comma),
             ':' => Some(TokKind::Colon),
             ';' => Some(TokKind::Semi),
+            '.' => {
+                if self.peek() == Some('.') {
+                    self.bump();
+                    text.push('.');
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        text.push('=');
+                        Some(TokKind::DotDotEq)
+                    } else {
+                        Some(TokKind::DotDot)
+                    }
+                } else {
+                    Some(TokKind::Dot)
+                }
+            }
             other => {
                 self.diags.push(Diagnostic::error(
                     "E1001",
@@ -353,6 +373,8 @@ fn keyword(word: &str) -> Option<TokKind> {
         "if" => TokKind::If,
         "else" => TokKind::Else,
         "while" => TokKind::While,
+        "for" => TokKind::For,
+        "in" => TokKind::In,
         "return" => TokKind::Return,
         "break" => TokKind::Break,
         "continue" => TokKind::Continue,
@@ -361,6 +383,8 @@ fn keyword(word: &str) -> Option<TokKind> {
         "and" => TokKind::And,
         "or" => TokKind::Or,
         "not" => TokKind::Not,
+        "as" => TokKind::As,
+        "import" => TokKind::Import,
         "int" => TokKind::IntTy,
         "float" => TokKind::FloatTy,
         "bool" => TokKind::BoolTy,
@@ -508,5 +532,52 @@ mod tests {
     #[test]
     fn star_is_a_token_for_mode_directives() {
         assert_eq!(kinds("*")[0], TokKind::Star);
+    }
+
+    #[test]
+    fn new_0_2_tokens() {
+        let ks = kinds("for in as import");
+        assert_eq!(
+            ks,
+            vec![TokKind::For, TokKind::In, TokKind::As, TokKind::Import, TokKind::Eof]
+        );
+        let ks = kinds("[ ] . .. ..=");
+        assert_eq!(
+            ks,
+            vec![
+                TokKind::LBracket, TokKind::RBracket, TokKind::Dot, TokKind::DotDot,
+                TokKind::DotDotEq, TokKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn ranges_are_not_mistaken_for_floats() {
+        // `0..10` must lex as INT, DOT_DOT, INT — not a malformed float.
+        let ks = kinds("0..10");
+        assert_eq!(
+            ks,
+            vec![TokKind::Int(0), TokKind::DotDot, TokKind::Int(10), TokKind::Eof]
+        );
+        // `0..=9` inclusive range
+        let ks = kinds("0..=9");
+        assert_eq!(
+            ks,
+            vec![TokKind::Int(0), TokKind::DotDotEq, TokKind::Int(9), TokKind::Eof]
+        );
+        // floats still work, including before a range
+        let ks = kinds("1.5..2.5");
+        assert_eq!(
+            ks,
+            vec![
+                TokKind::Float(1.5),
+                TokKind::DotDot,
+                TokKind::Float(2.5),
+                TokKind::Eof,
+            ]
+        );
+        // a real malformed number is still an error
+        let (_, diags) = tokenize("1.2.3");
+        assert!(diags.iter().any(|d| d.code == "E1004"));
     }
 }

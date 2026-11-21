@@ -1,0 +1,120 @@
+name: linux
+
+# Linux packaging of the kinn CLI: the test suite runs on the runner
+# (verification on the platform), then a DEB package is built with
+# dpkg-deb and an AppImage is attempted with linuxdeploy (experimental
+# until verified end to end on a clean machine).
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "kinn for Linux (x86_64, deb + appimage)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            compiler/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-linux-${{ hashFiles('compiler/Cargo.lock') }}
+
+      - name: Run the test suite on Linux
+        working-directory: compiler
+        run: cargo test --workspace
+
+      - name: Build release binary
+        working-directory: compiler
+        run: cargo build --release -p kinn
+
+      - name: Smoke-test the binary
+        run: |
+          compiler/target/release/kinn version
+          compiler/target/release/kinn run examples/modules/main.kin
+
+      - name: Build the DEB package
+        run: |
+          set -e
+          PKG=kinn_0.2.0_amd64
+          mkdir -p "$PKG/DEBIAN" "$PKG/usr/local/bin" "$PKG/usr/share/doc/kinn" "$PKG/usr/share/kinn/examples"
+          cp compiler/target/release/kinn "$PKG/usr/local/bin/kinn"
+          cp README.md CHANGELOG.md "$PKG/usr/share/doc/kinn/"
+          cp docs/*.md "$PKG/usr/share/doc/kinn/"
+          cp examples/*.kin "$PKG/usr/share/kinn/examples/"
+          cp -r examples/errors examples/modules "$PKG/usr/share/kinn/examples/"
+          cat > "$PKG/DEBIAN/control" <<CONTROL
+          Package: kinn
+          Version: 0.2.0
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Maintainer: KINN contributors
+          Description: The KINN compiler CLI (Kin language)
+           Kin is an offline-first programming language. This package
+           ships the kinn command: run, check, tokens, ast, kir.
+           Examples live in /usr/share/kinn/examples.
+          Depends: libc6
+          CONTROL
+          fakeroot dpkg-deb --build "$PKG" > /dev/null
+          dpkg-deb --info "$PKG.deb"
+
+      - name: Install and test the DEB package
+        run: |
+          set -e
+          sudo apt-get install -y ./kinn_0.2.0_amd64.deb > /dev/null
+          kinn version
+          kinn run /usr/share/kinn/examples/for_loops.kin | tail -n1
+          test "$(kinn run /usr/share/kinn/examples/modules/main.kin)" = "$(printf '7\n25\n5\n15\n')"
+
+      - name: Build the AppImage (experimental)
+        continue-on-error: true
+        run: |
+          set -e
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          chmod +x linuxdeploy-x86_64.AppImage
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp compiler/target/release/kinn AppDir/usr/bin/
+          cp scripts/linux/kinn-terminal.desktop AppDir/usr/share/applications/
+          cp scripts/linux/kinn-icon.png AppDir/usr/share/icons/hicolor/256x256/apps/
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/kinn-terminal.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/kinn-icon.png \
+            --output appimage
+          # linuxdeploy names the output after the desktop file (KINN-x86_64.AppImage);
+          # do not glob ./*.AppImage — the linuxdeploy tool itself matches.
+          mv -v KINN-x86_64.AppImage kinn-0.2.0-x86_64.AppImage
+          ./kinn-0.2.0-x86_64.AppImage version
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          mkdir -p linux-artifacts
+          mv kinn_0.2.0_amd64.deb linux-artifacts/
+          if [ -f kinn-0.2.0-x86_64.AppImage ]; then
+            mv kinn-0.2.0-x86_64.AppImage linux-artifacts/
+          fi
+          # also a plain tarball for distros without deb/appimage needs
+          tar -czf linux-artifacts/kinn-0.2.0-x86_64-linux.tar.gz \
+            -C compiler/target/release kinn \
+            --transform 's|^docs|kinn/docs|' 2>/dev/null || \
+          tar -czf linux-artifacts/kinn-0.2.0-x86_64-linux.tar.gz -C compiler/target/release kinn
+          cd linux-artifacts
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinn-linux
+          path: linux-artifacts/

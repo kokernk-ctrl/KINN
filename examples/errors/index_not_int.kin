@@ -1,0 +1,10 @@
+// errors/index_not_int.kin — array indices must be int.
+
+// error: E3023
+
+*mode = S;
+
+func main() {
+    let a = [1, 2, 3];
+    print(a[true]);
+}

@@ -170,3 +170,109 @@ fn mode_is_reported_on_the_compiled_program() {
     let c = driver::compile("func main() { }").unwrap();
     assert_eq!(c.mode, Mode::S);
 }
+
+// -- 0.2.0 end-to-end --------------------------------------------------------
+
+#[test]
+fn while_true_divergence_compiles_and_runs() {
+    // The exact program from PROBLEM_REGISTRY P-002: no false E3012.
+    let src = "func spin() -> int { while true { return 1; } }\nfunc main() { print(spin()); }";
+    assert_eq!(run_src(src), "1\n");
+}
+
+#[test]
+fn slots_are_reused_after_scope_exit() {
+    // P-003: three sequential one-variable scopes must share one slot.
+    let src = "func main() {\n    { let a = 1; print(a); }\n    { let b = 2; print(b); }\n    { let c = 3; print(c); }\n}";
+    let c = driver::compile(src).expect("compiles");
+    let main = &c.module.funcs[c.module.find("main").unwrap()];
+    assert_eq!(main.nlocals, 1, "expected slot reuse, got {} locals", main.nlocals);
+    assert_eq!(run_src(src), "1\n2\n3\n");
+}
+
+#[test]
+fn for_loops_over_ranges_and_arrays() {
+    let src = "func main() { for i in 0..5 { print(i); } for i in 1..=3 { print(i); } }";
+    assert_eq!(run_src(src), "0\n1\n2\n3\n4\n1\n2\n3\n");
+
+    let src = "func main() { for s in [\"a\", \"b\"] { print(s); } }";
+    assert_eq!(run_src(src), "a\nb\n");
+}
+
+#[test]
+fn for_continue_jumps_to_the_increment() {
+    // If `continue` jumped to the condition without incrementing, this
+    // would loop forever.
+    let src = "func main() {\n    for i in 0..6 {\n        if i % 2 == 0 { continue; }\n        print(i);\n    }\n}";
+    assert_eq!(run_src(src), "1\n3\n5\n");
+}
+
+#[test]
+fn for_break_exits_the_loop() {
+    let src = "func main() { for i in 0..100 { if i == 3 { break; } print(i); } }";
+    assert_eq!(run_src(src), "0\n1\n2\n");
+}
+
+#[test]
+fn arrays_end_to_end() {
+    let src = "func main() {\n    let a = [1, 2];\n    let b = a;\n    b[0] = 9;\n    print(a[0]);\n    if a == [9, 2] { print(true); }\n    print(len(a) + len(\"ab\"));\n}";
+    assert_eq!(run_src(src), "9\ntrue\n4\n");
+}
+
+#[test]
+fn array_bounds_errors_carry_the_line() {
+    let src = "func main() {\n    let a = [1];\n    print(a[3]);\n}";
+    let c = driver::compile(src).expect("compiles");
+    let mut buf = Vec::new();
+    let err = vm::run(&c.module, &mut buf).expect_err("must fail");
+    assert_eq!(err.code, "E4005");
+    assert_eq!(err.line, 3);
+}
+
+#[test]
+fn arrays_pass_through_functions_by_reference() {
+    let src = "func fill(xs: [int], v: int) { xs[0] = v; }\nfunc main() { let a = [0, 0]; fill(a, 7); print(a[0]); }";
+    assert_eq!(run_src(src), "7\n");
+}
+
+#[test]
+fn casts_end_to_end() {
+    let src = "func main() { print(2 as float); print(2.9 as int); print(42 as string); print(true as string); }";
+    assert_eq!(run_src(src), "2.0\n2\n42\ntrue\n");
+}
+
+#[test]
+fn natives_end_to_end() {
+    let src = "func main() { print(abs(-5)); print(abs(-1.5)); print(min(4, 2)); print(max(1.5, 2.5)); print(len(\"héll\")); }";
+    assert_eq!(run_src(src), "5\n1.5\n2\n2.5\n4\n");
+}
+
+#[test]
+fn modules_link_and_run() {
+    let dir = format!("{}/modules", EXAMPLES_DIR);
+    let mut loader = |path: &str| std::fs::read_to_string(path).map_err(|e| e.to_string());
+    let entry = format!("{}/main.kin", dir);
+    let entry_src = std::fs::read_to_string(&entry).unwrap();
+    let (compiled, diags) = kinc::driver::compile_project(&entry, &entry_src, &mut loader);
+    let compiled = compiled.expect("module example must compile");
+    let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+    assert!(errs.is_empty(), "{:#?}", errs);
+
+    let mut buf = Vec::new();
+    vm::run(&compiled.module, &mut buf).expect("module example must run");
+    let out = String::from_utf8(buf).unwrap();
+    assert_eq!(out, "7\n25\n5\n15\n");
+
+    // Imported functions appear under qualified names in the module.
+    assert!(compiled.module.find("math::add").is_some());
+    assert!(compiled.module.find("triple").is_some());
+    assert!(compiled.module.find("main").is_some());
+}
+
+#[test]
+fn multiple_syntax_errors_are_reported_through_the_driver() {
+    let src = "func main() {\n    let x = ;\n    let y = ;\n}\n";
+    let diags = driver::compile(src).expect_err("must fail");
+    let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+    assert_eq!(errs.len(), 2, "{:#?}", diags);
+}

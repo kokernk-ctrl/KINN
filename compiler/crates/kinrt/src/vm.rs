@@ -11,9 +11,11 @@
 //! `Return` can simply truncate back to the frame's base after popping the
 //! return value.
 
-use crate::kir::{Instr, Module};
+use crate::kir::{CastTarget, Instr, Module, NativeId};
 use crate::value::Value;
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 
 /// Maximum call depth before the VM reports a stack overflow.
 pub const MAX_CALL_DEPTH: usize = 1024;
@@ -256,6 +258,100 @@ pub fn run(module: &Module, out: &mut dyn std::io::Write) -> Result<(), KinError
                     KinError::new("E4003", format!("output error: {}", e), line)
                 })?;
             }
+
+            Instr::ArrNew(n) => {
+                let count = n as usize;
+                if stack.len() < count {
+                    return Err(KinError::new(
+                        "E4999",
+                        "internal error: ArrNew underflow (compiler bug)".to_string(),
+                        line,
+                    ));
+                }
+                let at = stack.len() - count;
+                let elems: Vec<Value> = stack.split_off(at);
+                stack.push(Value::Array(Rc::new(RefCell::new(elems))));
+            }
+            Instr::ArrGet => {
+                let idx = stack.pop().expect("vm bug: ArrGet underflow");
+                let arr = stack.pop().expect("vm bug: ArrGet underflow");
+                let i = match idx {
+                    Value::Int(i) => i,
+                    v => {
+                        return Err(internal("ArrGet", &v, &Value::Unit, line));
+                    }
+                };
+                match &arr {
+                    Value::Array(a) => {
+                        let borrowed = a.borrow();
+                        if i < 0 || i as usize >= borrowed.len() {
+                            return Err(KinError::new(
+                                "E4005",
+                                format!(
+                                    "array index {} out of bounds (len {})",
+                                    i,
+                                    borrowed.len()
+                                ),
+                                line,
+                            ));
+                        }
+                        stack.push(borrowed[i as usize].clone());
+                    }
+                    v => return Err(internal("ArrGet", v, &Value::Unit, line)),
+                }
+            }
+            Instr::ArrSet => {
+                let value = stack.pop().expect("vm bug: ArrSet underflow");
+                let idx = stack.pop().expect("vm bug: ArrSet underflow");
+                let arr = stack.pop().expect("vm bug: ArrSet underflow");
+                let i = match idx {
+                    Value::Int(i) => i,
+                    v => return Err(internal("ArrSet", &v, &Value::Unit, line)),
+                };
+                match &arr {
+                    Value::Array(a) => {
+                        let len = a.borrow().len();
+                        if i < 0 || i as usize >= len {
+                            return Err(KinError::new(
+                                "E4005",
+                                format!("array index {} out of bounds (len {})", i, len),
+                                line,
+                            ));
+                        }
+                        a.borrow_mut()[i as usize] = value;
+                    }
+                    v => return Err(internal("ArrSet", v, &Value::Unit, line)),
+                }
+            }
+
+            Instr::Native(id) => {
+                let result = exec_native(id, &mut stack, line)?;
+                stack.push(result);
+            }
+
+            Instr::Cast(target) => {
+                let v = stack.pop().expect("vm bug: cast on empty stack");
+                let out_val = match (&v, target) {
+                    (Value::Int(i), CastTarget::Float) => Value::Float(*i as f64),
+                    (Value::Float(f), CastTarget::Int) => {
+                        // Truncate toward zero; saturate at the i64 bounds,
+                        // NaN converts to 0 (documented Rust `as` semantics).
+                        Value::Int(*f as i64)
+                    }
+                    (Value::Int(i), CastTarget::Str) => Value::Str(i.to_string()),
+                    (Value::Float(_), CastTarget::Str) => Value::Str(v.format()),
+                    (Value::Bool(_), CastTarget::Str) => Value::Str(v.format()),
+                    _ => {
+                        return Err(internal(
+                            &format!("cast to {}", target.name()),
+                            &v,
+                            &Value::Unit,
+                            line,
+                        ));
+                    }
+                };
+                stack.push(out_val);
+            }
         }
     }
 }
@@ -263,6 +359,45 @@ pub fn run(module: &Module, out: &mut dyn std::io::Write) -> Result<(), KinError
 enum NumPair {
     Ints(i64, i64),
     Floats(f64, f64),
+}
+
+/// Execute a native builtin. Pops its operands from `stack` and returns
+/// the result (the caller pushes it).
+fn exec_native(id: NativeId, stack: &mut Vec<Value>, line: u32) -> Result<Value, KinError> {
+    match id {
+        NativeId::Len => {
+            let v = stack.pop().expect("vm bug: len underflow");
+            match v {
+                Value::Array(a) => Ok(Value::Int(a.borrow().len() as i64)),
+                Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+                v => Err(internal("len", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Abs => {
+            let v = stack.pop().expect("vm bug: abs underflow");
+            match v {
+                Value::Int(i) => int_op(line, "integer overflow in `abs`", i.checked_abs()),
+                Value::Float(f) => Ok(Value::Float(f.abs())),
+                v => Err(internal("abs", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Min => {
+            let (a, b) = pop2(stack);
+            match (a, b) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x.min(y))),
+                (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.min(y))),
+                (a, b) => Err(internal("min", &a, &b, line)),
+            }
+        }
+        NativeId::Max => {
+            let (a, b) = pop2(stack);
+            match (a, b) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x.max(y))),
+                (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.max(y))),
+                (a, b) => Err(internal("max", &a, &b, line)),
+            }
+        }
+    }
 }
 
 fn as_num_pair(op: &str, a: Value, b: Value, line: u32) -> Result<NumPair, KinError> {
@@ -510,5 +645,184 @@ mod tests {
         let m = Module { funcs: vec![func("main", 0, 0, code, lines)] };
         let err = run_module(&m).unwrap_err();
         assert_eq!(err.line, 7);
+    }
+
+    // -- 0.2.0: arrays, natives, casts ------------------------------------
+
+    #[test]
+    fn array_create_read_write() {
+        // a = [10, 20]; print(a[1]); a[0] = 5; print(a[0]);
+        let m = module_nl(
+            vec![
+                Instr::Const(Value::Int(10)),
+                Instr::Const(Value::Int(20)),
+                Instr::ArrNew(2),
+                Instr::Store(0),
+                Instr::Load(0),
+                Instr::Const(Value::Int(1)),
+                Instr::ArrGet,
+                Instr::Print,
+                Instr::Load(0),
+                Instr::Const(Value::Int(0)),
+                Instr::Const(Value::Int(5)),
+                Instr::ArrSet,
+                Instr::Load(0),
+                Instr::Const(Value::Int(0)),
+                Instr::ArrGet,
+                Instr::Print,
+            ],
+            1,
+        );
+        assert_eq!(run_module(&m).unwrap(), "20\n5\n");
+    }
+
+    #[test]
+    fn arrays_have_reference_semantics_in_the_vm() {
+        // a = [1]; b = a; b[0] = 9; print(a[0]);
+        let m = module_nl(
+            vec![
+                Instr::Const(Value::Int(1)),
+                Instr::ArrNew(1),
+                Instr::Store(0),
+                Instr::Load(0),
+                Instr::Store(1),
+                Instr::Load(1),
+                Instr::Const(Value::Int(0)),
+                Instr::Const(Value::Int(9)),
+                Instr::ArrSet,
+                Instr::Load(0),
+                Instr::Const(Value::Int(0)),
+                Instr::ArrGet,
+                Instr::Print,
+            ],
+            2,
+        );
+        assert_eq!(run_module(&m).unwrap(), "9\n");
+    }
+
+    #[test]
+    fn out_of_bounds_read_and_write_are_errors() {
+        let m = module(vec![
+            Instr::Const(Value::Int(1)),
+            Instr::ArrNew(1),
+            Instr::Const(Value::Int(5)),
+            Instr::ArrGet,
+        ]);
+        let err = run_module(&m).unwrap_err();
+        assert_eq!(err.code, "E4005");
+        assert!(err.message.contains("len 1"));
+
+        let m = module(vec![
+            Instr::Const(Value::Int(1)),
+            Instr::ArrNew(1),
+            Instr::Const(Value::Int(-1)),
+            Instr::Const(Value::Int(7)),
+            Instr::ArrSet,
+        ]);
+        assert_eq!(run_module(&m).unwrap_err().code, "E4005");
+    }
+
+    #[test]
+    fn array_equality_is_deep() {
+        // [1, 2] == [1, 2]
+        let m = module(vec![
+            Instr::Const(Value::Int(1)),
+            Instr::Const(Value::Int(2)),
+            Instr::ArrNew(2),
+            Instr::Const(Value::Int(1)),
+            Instr::Const(Value::Int(2)),
+            Instr::ArrNew(2),
+            Instr::Eq,
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "true\n");
+    }
+
+    #[test]
+    fn native_len_abs_min_max() {
+        // len([1,2,3])
+        let m = module(vec![
+            Instr::Const(Value::Int(1)),
+            Instr::Const(Value::Int(2)),
+            Instr::Const(Value::Int(3)),
+            Instr::ArrNew(3),
+            Instr::Native(NativeId::Len),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "3\n");
+
+        // len("héllo") counts characters, not bytes
+        let m = module(vec![
+            Instr::Const(Value::Str("héllo".to_string())),
+            Instr::Native(NativeId::Len),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "5\n");
+
+        // abs(-7)
+        let m = module(vec![
+            Instr::Const(Value::Int(-7)),
+            Instr::Native(NativeId::Abs),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "7\n");
+
+        // min(3, 2), max(2.5, 1.5)
+        let m = module(vec![
+            Instr::Const(Value::Int(3)),
+            Instr::Const(Value::Int(2)),
+            Instr::Native(NativeId::Min),
+            Instr::Print,
+            Instr::Const(Value::Float(2.5)),
+            Instr::Const(Value::Float(1.5)),
+            Instr::Native(NativeId::Max),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "2\n2.5\n");
+    }
+
+    #[test]
+    fn abs_of_min_int_overflows() {
+        let m = module(vec![
+            Instr::Const(Value::Int(i64::MIN)),
+            Instr::Native(NativeId::Abs),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap_err().code, "E4004");
+    }
+
+    #[test]
+    fn casts_numeric_and_to_string() {
+        let m = module(vec![
+            Instr::Const(Value::Int(2)),
+            Instr::Cast(CastTarget::Float),
+            Instr::Print, // 2.0
+            Instr::Const(Value::Float(2.9)),
+            Instr::Cast(CastTarget::Int),
+            Instr::Print, // 2 (truncate toward zero)
+            Instr::Const(Value::Float(-2.9)),
+            Instr::Cast(CastTarget::Int),
+            Instr::Print, // -2
+            Instr::Const(Value::Int(42)),
+            Instr::Cast(CastTarget::Str),
+            Instr::Print,
+            Instr::Const(Value::Float(2.0)),
+            Instr::Cast(CastTarget::Str),
+            Instr::Print, // 2.0 keeps its decimal point
+            Instr::Const(Value::Bool(true)),
+            Instr::Cast(CastTarget::Str),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "2.0\n2\n-2\n42\n2.0\ntrue\n");
+    }
+
+    #[test]
+    fn float_to_int_saturates() {
+        let m = module(vec![
+            Instr::Const(Value::Float(1e300)),
+            Instr::Cast(CastTarget::Int),
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), format!("{}\n", i64::MAX));
     }
 }

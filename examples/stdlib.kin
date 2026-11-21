@@ -1,0 +1,28 @@
+// stdlib.kin — the 0.2 native function table: len, abs, min, max.
+// len works on strings (counting characters) and arrays.
+
+// expect:
+// 5
+// 3
+// 7
+// 2.5
+// 3
+// 9
+// 1.5
+
+*mode = S;
+
+func main() {
+    // len: string characters and array elements.
+    print(len("héllo"));
+    print(len([1, 2, 3]));
+
+    // abs on int and float.
+    print(abs(-7));
+    print(abs(-2.5));
+
+    // min and max on matching types.
+    print(min(3, 9));
+    print(max(3, 9));
+    print(min(1.5, 2.5));
+}

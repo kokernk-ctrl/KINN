@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=KINN
+GenericName=Kin language compiler
+Comment=Compile and run Kin programs (offline-first)
+Exec=kinn run
+Terminal=true
+Categories=Development;Utility;
+Icon=kinn-icon
+NoDisplay=true

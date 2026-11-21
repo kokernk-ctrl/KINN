@@ -3,6 +3,58 @@
 
 use crate::value::Value;
 
+/// A native (builtin) function invoked by [`Instr::Native`].
+///
+/// Native functions are type-checked by the compiler; the VM only ever
+/// sees operands with the shapes described here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeId {
+    /// `len(x)`: array or string → int (string length counts Unicode
+    /// characters, consistent with source positions).
+    Len,
+    /// `abs(x)`: int → int (overflow-checked) or float → float.
+    Abs,
+    /// `min(a, b)`: two ints or two floats.
+    Min,
+    /// `max(a, b)`: two ints or two floats.
+    Max,
+}
+
+impl NativeId {
+    pub fn name(&self) -> &'static str {
+        match self {
+            NativeId::Len => "len",
+            NativeId::Abs => "abs",
+            NativeId::Min => "min",
+            NativeId::Max => "max",
+        }
+    }
+}
+
+/// The target type of a [`Instr::Cast`]. The VM picks the exact
+/// conversion from the operand value and this target; the checker has
+/// already rejected impossible combinations.
+///
+/// `FloatToInt` truncates toward zero and saturates at the i64 bounds
+/// (NaN converts to 0), matching Rust's `as` semantics. String casts use
+/// the same formatting as `print`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastTarget {
+    Int,
+    Float,
+    Str,
+}
+
+impl CastTarget {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CastTarget::Int => "int",
+            CastTarget::Float => "float",
+            CastTarget::Str => "string",
+        }
+    }
+}
+
 /// One KIR instruction.
 ///
 /// Jumps are absolute positions inside the enclosing function's code
@@ -50,6 +102,19 @@ pub enum Instr {
     Pop,
     /// Pop one value and write it, followed by a newline, to the output.
     Print,
+    /// Pop `n` values (the last one is the final element) and push an
+    /// array of them, in source order.
+    ArrNew(u16),
+    /// Pop an index, pop an array, push the element at that index.
+    /// Out-of-bounds access is a runtime error (E4005).
+    ArrGet,
+    /// Pop a value, an index and an array; store the value into the array.
+    /// Out-of-bounds access is a runtime error (E4005).
+    ArrSet,
+    /// Invoke a native builtin. Operands like a function call.
+    Native(NativeId),
+    /// Pop one value and convert it to the target type.
+    Cast(CastTarget),
 }
 
 /// A compiled function.

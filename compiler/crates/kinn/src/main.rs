@@ -1,21 +1,26 @@
 //! kinn — the KINN command-line interface.
 //!
 //! Commands:
-//! - `kinn run <file.kin>`      compile and execute
+//! - `kinn run <file.kin>`      compile and execute (with imports)
 //! - `kinn check <file.kin>`    compile only, report diagnostics
 //! - `kinn tokens <file.kin>`   print the token stream (debug)
 //! - `kinn ast <file.kin>`      print the AST (debug)
 //! - `kinn kir <file.kin>`      print the lowered KIR (debug)
 //! - `kinn version`             print the version
 //!
+//! `run`, `check` and `kir` load multi-file projects: `import
+//! "lib.kin" as l;` resolves relative to the importing file, staying
+//! inside the entry file's directory.
+//!
 //! Exit codes: 0 ok, 1 compile diagnostics, 2 usage error, 3 runtime error.
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.2.0";
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -44,6 +49,27 @@ fn main() -> ExitCode {
             }
         },
     }
+}
+
+/// Filesystem loader for `import` resolution: paths are already
+/// normalized by `kinc::project` and stay inside the entry file's
+/// directory.
+fn fs_loader(path: &str) -> Result<String, String> {
+    fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+/// Collect the sources referenced by diagnostics (for rendering).
+fn sources_for(diags: &[kinc::diagnostics::Diagnostic]) -> HashMap<String, String> {
+    let mut sources = HashMap::new();
+    for d in diags {
+        if d.file.is_empty() || sources.contains_key(&d.file) {
+            continue;
+        }
+        if let Ok(src) = fs::read_to_string(&d.file) {
+            sources.insert(d.file.clone(), src);
+        }
+    }
+    sources
 }
 
 fn dispatch(cmd: &str, path: &str) -> ExitCode {
@@ -97,12 +123,37 @@ fn ast(src: &str) -> ExitCode {
     }
 }
 
+/// Shared implementation for `check` and `run`: compile the project.
+fn compile_entry(src: &str, path: &str) -> (Option<kinc::driver::Compiled>, Vec<kinc::diagnostics::Diagnostic>) {
+    kinc::driver::compile_project(path, src, &mut fs_loader)
+}
+
+fn render_diags(
+    diags: &[kinc::diagnostics::Diagnostic],
+    compiled: Option<&kinc::driver::Compiled>,
+    entry_src: &str,
+    path: &str,
+) -> String {
+    match compiled {
+        Some(c) if !c.sources.is_empty() => {
+            kinc::diagnostics::render_project(diags, &c.sources, c.mode)
+        }
+        _ => {
+            let sources = sources_for(diags);
+            if sources.is_empty() {
+                kinc::diagnostics::render(diags, entry_src, path, kinc::ast::Mode::S)
+            } else {
+                kinc::diagnostics::render_project(diags, &sources, kinc::ast::Mode::S)
+            }
+        }
+    }
+}
+
 fn check(src: &str, path: &str) -> ExitCode {
-    let (compiled, diags) = kinc::driver::compile_full(src);
-    let mode = compiled.as_ref().map(|c| c.mode).unwrap_or(kinc::ast::Mode::S);
+    let (compiled, diags) = compile_entry(src, path);
     let has_err = kinc::diagnostics::has_errors(&diags);
     if !diags.is_empty() {
-        eprint!("{}", kinc::diagnostics::render(&diags, src, path, mode));
+        eprint!("{}", render_diags(&diags, compiled.as_ref(), src, path));
     }
     if has_err {
         ExitCode::from(1)
@@ -113,15 +164,16 @@ fn check(src: &str, path: &str) -> ExitCode {
 }
 
 fn run(src: &str, path: &str) -> ExitCode {
-    let compiled = match kinc::driver::compile_full(src) {
-        (Some(c), diags) => {
+    let (compiled, diags) = compile_entry(src, path);
+    let compiled = match compiled {
+        Some(c) => {
             if !diags.is_empty() {
-                eprint!("{}", kinc::diagnostics::render(&diags, src, path, c.mode));
+                eprint!("{}", render_diags(&diags, Some(&c), src, path));
             }
             c
         }
-        (None, diags) => {
-            eprint!("{}", kinc::diagnostics::render(&diags, src, path, kinc::ast::Mode::S));
+        None => {
+            eprint!("{}", render_diags(&diags, None, src, path));
             return ExitCode::from(1);
         }
     };
@@ -142,13 +194,16 @@ fn run(src: &str, path: &str) -> ExitCode {
 }
 
 fn kir(src: &str, path: &str) -> ExitCode {
-    match kinc::driver::compile(src) {
-        Ok(compiled) => {
+    match kinc::driver::compile_project(path, src, &mut fs_loader) {
+        (Some(compiled), diags) => {
+            if !diags.is_empty() {
+                eprint!("{}", render_diags(&diags, Some(&compiled), src, path));
+            }
             print!("{}", kinrt::listing::listing(&compiled.module));
             ExitCode::SUCCESS
         }
-        Err(diags) => {
-            eprint!("{}", kinc::diagnostics::render(&diags, src, path, kinc::ast::Mode::S));
+        (None, diags) => {
+            eprint!("{}", render_diags(&diags, None, src, path));
             ExitCode::from(1)
         }
     }
@@ -161,7 +216,8 @@ fn print_help() {
     println!("  kinn <command> [file]");
     println!();
     println!("COMMANDS:");
-    println!("  run <file.kin>     compile and execute the program");
+    println!("  run <file.kin>     compile and execute the program (imports resolve");
+    println!("                     relative to the entry file)");
     println!("  check <file.kin>   compile and report diagnostics");
     println!("  tokens <file.kin>  print the token stream (debug)");
     println!("  ast <file.kin>     print the parsed AST (debug)");

@@ -1,0 +1,31 @@
+// casts.kin — explicit conversions with `as`.
+// float -> int truncates toward zero; `as string` uses print formatting.
+
+// expect:
+// 2.0
+// 2
+// -2
+// 42
+// 2.0
+// true
+// 7.5
+
+*mode = S;
+
+func main() {
+    // int -> float keeps arithmetic types aligned.
+    let f = 2 as float;
+    print(f);
+
+    // float -> int truncates toward zero.
+    print(2.9 as int);
+    print(-2.9 as int);
+
+    // Numbers and bools to string.
+    print(42 as string);
+    print(2.0 as string);
+    print(true as string);
+
+    // Casts compose with arithmetic: (3 as float) / 2.0 + 6.0 = 7.5
+    print((3 as float) / 2.0 + 6.0);
+}

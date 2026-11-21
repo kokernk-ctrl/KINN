@@ -1,0 +1,17 @@
+[package]
+name = "kinn-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "C-ABI bridge to the Kin compiler and VM for WebAssembly and native hosts (Android, desktop)"
+license = "TBD"
+
+# The compiler core stays zero-dependency; this bridge crate only uses
+# std (plus dev-dependencies for tests).
+[dependencies]
+kinc = { path = "../kinc" }
+kinrt = { path = "../kinrt" }
+
+[lib]
+# rlib for native tests + cdylib for wasm (.wasm) and Android (.so).
+crate-type = ["rlib", "cdylib"]
