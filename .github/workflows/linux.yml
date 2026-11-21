@@ -50,6 +50,7 @@ jobs:
           cp README.md CHANGELOG.md "$PKG/usr/share/doc/kinn/"
           cp docs/*.md "$PKG/usr/share/doc/kinn/"
           cp examples/*.kin "$PKG/usr/share/kinn/examples/"
+          cp -r examples/errors examples/modules "$PKG/usr/share/kinn/examples/"
           cat > "$PKG/DEBIAN/control" <<CONTROL
           Package: kinn
           Version: 0.2.0

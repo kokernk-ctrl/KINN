@@ -37,10 +37,12 @@ jobs:
       # the build needs.
       - name: Install SDK pieces (NDK, platform, build-tools)
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0" > /dev/null
-          sdkmanager --version
-          echo "ANDROID_HOME=$ANDROID_HOME"
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort | tail -1)
+          echo "sdkmanager at: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME" | tee -a "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
