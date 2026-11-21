@@ -6,6 +6,7 @@
 //! backend that cannot express something rejects it instead of emitting
 //! output that misrepresents the source.
 
+pub mod android;
 pub mod web;
 
 /// One generated artifact: a path relative to the build output
