@@ -319,3 +319,13 @@ fn build_reads_the_kinn_toml_manifest() {
     assert!(stdout.contains("project `manifest-test`"));
     assert!(dir.join("build/web/index.html").exists());
 }
+
+#[test]
+fn android_export_degrades_honestly_without_a_toolchain() {
+    // The local android build provider must degrade honestly when
+    // Gradle/the SDK are absent (they are absent in CI and sandboxes).
+    let missing = kinn(&["build", &format!("{}/web/site.kin", EXAMPLES), "--target", "android", "--out", "/tmp/kinn-cli-test-provider"]);
+    assert_eq!(missing.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(stdout.contains("status: project exported"), "{}", stdout);
+}

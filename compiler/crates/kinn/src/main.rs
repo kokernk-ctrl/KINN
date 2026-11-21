@@ -408,13 +408,73 @@ fn build_command(args: &[String]) -> ExitCode {
             "open {}/index.html in a browser, or host the folder as-is — it is plain HTML/CSS",
             out_dir.display()
         ),
-        "android" => println!(
-            "this is an exported Gradle project — build the APK with Android Studio, `gradle assembleDebug`, or the remote CI workflow (see {}/README.md)",
-            out_dir.display()
-        ),
+        "android" => match try_local_gradle_build(&out_dir) {
+            Some(apk) => println!(
+                "local build provider: debug APK at {} (debug-signed — verify with apksigner before any distribution)",
+                apk.display()
+            ),
+            None => println!(
+                "status: project exported — build the APK with Android Studio, `gradle assembleDebug`, or the remote CI workflow (see {}/README.md)"
+            , out_dir.display()),
+        },
         _ => {}
     }
     ExitCode::SUCCESS
+}
+
+/// Local build provider (docs/BACKEND_ANDROID.md §3): when Gradle and
+/// the Android SDK are installed, build the exported project's debug
+/// APK and return its path. Any missing piece or failure degrades to
+/// the honest `project exported` status — never an APK claim.
+fn try_local_gradle_build(out_dir: &Path) -> Option<PathBuf> {
+    let gradle = find_on_path("gradle")?;
+    let sdk = env::var("ANDROID_HOME")
+        .or_else(|_| env::var("ANDROID_SDK_ROOT"))
+        .ok()?;
+    if !Path::new(&sdk).exists() {
+        return None;
+    }
+    println!(
+        "local build provider found: gradle + ANDROID_HOME={} — assembling debug APK…",
+        sdk
+    );
+    let status = std::process::Command::new(gradle)
+        .args(["-p", &out_dir.to_string_lossy(), "assembleDebug", "--no-daemon"])
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            let apk_dir = out_dir.join("app/build/outputs/apk/debug");
+            let apk = std::fs::read_dir(&apk_dir)
+                .ok()?
+                .filter_map(|e| e.ok())
+                .find(|e| e.path().extension().map(|x| x == "apk").unwrap_or(false))
+                .map(|e| e.path());
+            if apk.is_none() {
+                println!("gradle reported success but produced no APK — status stays: project exported");
+            }
+            apk
+        }
+        Ok(_) => {
+            println!("local Gradle build failed — status stays: project exported");
+            None
+        }
+        Err(e) => {
+            println!("cannot launch gradle: {} — status stays: project exported", e);
+            None
+        }
+    }
+}
+
+/// Minimal PATH search (no external dependencies).
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Write generated files, creating directories as needed.

@@ -48,6 +48,44 @@ jobs:
           "$BIN" run examples/for_loops.kin > out.txt
           grep -q "sum: 60" out.txt
 
+      # 0.3.0: smoke-test the actual build targets with the release CLI.
+      - name: Smoke-test the build targets (web + android export)
+        shell: bash
+        run: |
+          BIN=compiler/target/release/kinn
+          if [[ "$RUNNER_OS" == "Windows" ]]; then BIN="$BIN.exe"; fi
+          "$BIN" targets
+          "$BIN" build examples/web/site.kin --target web --out web-dist
+          test -f web-dist/index.html
+          test -f web-dist/about.html
+          test -f web-dist/styles.css
+          grep -q 'aria-current="page"' web-dist/index.html
+          grep -q '<title>Welcome to KINN · MyWebsite</title>' web-dist/index.html
+          "$BIN" build examples/web/site.kin --target android --out android-export
+          test -f android-export/app/src/main/AndroidManifest.xml
+          test -f android-export/app/src/main/java/dev/kinn/site/mywebsite/MainActivity.kt
+          ! grep -q uses-permission android-export/app/src/main/AndroidManifest.xml
+
+  backend-build:
+    name: build targets (web + android, debug CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test the targets end-to-end with the debug CLI
+        run: |
+          cargo build -p kinn
+          BIN=compiler/target/debug/kinn
+          "$BIN" build examples/web/site.kin --target web --out ci-web-dist
+          test -f ci-web-dist/index.html
+          "$BIN" build examples/web/site.kin --target android --out ci-android-export
+          test -f ci-android-export/settings.gradle.kts
+      - name: Upload the generated web dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinn-example-web-dist
+          path: ci-web-dist/
+
   studio-tests:
     name: studio tests (with real wasm backend)
     runs-on: ubuntu-latest
@@ -81,7 +119,7 @@ jobs:
         working-directory: studio
         run: npm run build:wasm
 
-      - name: Test Studio (51 tests incl. 10 against the real compiler)
+      - name: Test Studio (66 tests incl. 15 against the real compiler and target backends)
         working-directory: studio
         run: npm test
 
