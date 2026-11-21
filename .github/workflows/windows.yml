@@ -49,7 +49,7 @@ jobs:
           $out = "windows-artifacts"
           New-Item -ItemType Directory -Force -Path "$out", "$out/docs", "$out/examples" | Out-Null
           Copy-Item compiler/target/release/kinn.exe "$out/"
-          Copy-Item README.md CHANGELOG.md "$out/"
+          Copy-Item README.md,CHANGELOG.md "$out/"
           Copy-Item docs/*.md "$out/docs/"
           Copy-Item examples/*.kin "$out/examples/"
           Copy-Item examples/errors "$out/examples/errors" -Recurse

@@ -90,3 +90,55 @@ checks) are documented and tested. Tools may match on them.
 **Status: open.** No license is chosen yet; the repository is
 all-rights-reserved until the owner decides. Blocks external
 contributions; tracked as a GitHub issue.
+
+## ADR-0013 — String interpolation: deferred to 0.3
+
+**Status: accepted (2026-11-21, 0.2.0).** The 0.2 roadmap carried
+"string interpolation decision (ADR) + implementation". The decision:
+**defer**. Rationale: 0.2 already lands modules, arrays, `for` and
+casts; `as string` casts plus `+` concatenation cover the honest
+need meanwhile, and interpolation deserves its own design pass
+(escaping rules, expression grammar inside holes, mode-B friendliness)
+rather than being rushed. Not silently dropped — tracked as P-004 in
+the registry and re-listed under 0.3.
+
+## ADR-0014 — Arrays use reference semantics with deep equality
+
+**Status: accepted (2026-11-21, 0.2.0).** `let b = a;` makes `b` share
+`a`'s array (Java/Python model, matching most beginner expectations for
+"containers"), while `==` compares **contents deeply** (documented).
+Value/copy semantics were rejected for 0.2: they would make element
+assignment through parameters impossible and invite hidden-copy
+surprises later. Element mutation is allowed even through `let`-bound
+variables: the binding is immutable, the contents are not.
+
+## ADR-0015 — Modules: path-based imports, functions-only exports
+
+**Status: accepted (2026-11-21, 0.2.0).** `import "lib.kin" as m;`
+(quoted relative path, alias mandatory, declared before functions).
+Exports are all top-level functions; imported `main` is inert. Cross-
+file globals, renaming exports and selective exports are deliberately
+out of scope for 0.2 (registry-tracked). Qualified names in KIR use
+the entry-relative path stem (`math::add`) so identical names in
+different files cannot collide.
+
+## ADR-0016 — One FFI crate, three hosts; the `jni` exception
+
+**Status: accepted (2026-11-21, 0.2.0).** `kinn-ffi` (C ABI, zero
+deps) exposes the same `kinn_check`/`kinn_run` to WebAssembly and
+native hosts, so the CLI, web Studio and Android app share one
+compiler implementation and one diagnostics format (JSON). The
+Android-only glue crate `kinn-android` is the single permitted
+external dependency (`jni` 0.21) in the workspace: hand-rolled JNI
+struct layouts were judged riskier than a well-audited crate. The
+compiler core (kinrt/kinc/kinn/kinn-ffi) remains dependency-free.
+
+## ADR-0017 — Release signing: secrets or honestly unsigned
+
+**Status: accepted (2026-11-21, 0.2.0).** CI signs release APKs only
+when the owner-provided `ANDROID_KEYSTORE_*` encrypted secrets exist;
+otherwise the release APK is named `...-UNSIGNED.apk` and the
+signature report says so. The pipeline never generates its own
+"release" key, and never labels a debug-signed build as production.
+Public GitHub Releases remain an explicit owner decision, not a CI
+side effect.
