@@ -1,0 +1,83 @@
+name: windows
+
+# Windows build of the kinn CLI: the test suite runs on a Windows runner
+# first (real verification on the platform), then the release binary is
+# packaged as a zip and an NSIS installer.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: kinn for Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            compiler/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-windows-${{ hashFiles('compiler/Cargo.lock') }}
+
+      - name: Run the test suite on Windows
+        working-directory: compiler
+        run: cargo test --workspace
+
+      - name: Build release binary
+        working-directory: compiler
+        run: cargo build --release -p kinn
+
+      - name: Smoke-test the binary
+        shell: pwsh
+        run: |
+          $bin = "compiler/target/release/kinn.exe"
+          & $bin version
+          & $bin run examples/modules/main.kin
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $out = "windows-artifacts"
+          New-Item -ItemType Directory -Force -Path "$out/examples" | Out-Null
+          Copy-Item compiler/target/release/kinn.exe "$out/"
+          Copy-Item README.md "$out/"
+          Copy-Item docs/*.md "$out/docs/" -Recurse -Force
+          New-Item -ItemType Directory -Force -Path "$out/docs" | Out-Null
+          Copy-Item docs/*.md "$out/docs/"
+          Copy-Item examples/*.kin "$out/examples/"
+          Compress-Archive -Path "$out/*" -DestinationPath "kinn-0.2.0-x86_64-windows.zip" -Force
+          Get-FileHash "kinn-0.2.0-x86_64-windows.zip" -Algorithm SHA256 | Format-List
+
+      - name: Build NSIS installer
+        shell: cmd
+        run: |
+          choco install nsis -y --no-progress
+          set PATH=C:\Program Files (x86)\NSIS;%PATH%
+          makensis scripts/windows/kinn.nsi
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-artifacts | Out-Null
+          Move-Item kinn-0.2.0-x86_64-windows.zip windows-artifacts/ -Force
+          if (Test-Path kinn-0.2.0-x86_64-setup.exe) {
+            Move-Item kinn-0.2.0-x86_64-setup.exe windows-artifacts/ -Force
+            (Get-FileHash windows-artifacts/kinn-0.2.0-x86_64-setup.exe -Algorithm SHA256).Hash + "  kinn-0.2.0-x86_64-setup.exe" | Out-File windows-artifacts/SHA256SUMS -Append
+          }
+          (Get-FileHash windows-artifacts/kinn-0.2.0-x86_64-windows.zip -Algorithm SHA256).Hash + "  kinn-0.2.0-x86_64-windows.zip" | Out-File windows-artifacts/SHA256SUMS -Append
+          Get-Content windows-artifacts/SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinn-windows
+          path: windows-artifacts/

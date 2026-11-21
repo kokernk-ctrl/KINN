@@ -1,0 +1,126 @@
+name: android
+
+# Builds the KINN Studio Android app: debug APK (debug-signed), release
+# APK (signed with the ANDROID_KEYSTORE_* secrets when they exist,
+# otherwise left unsigned and clearly labeled), signature verification
+# with apksigner, and artifact upload.
+#
+# Secret setup (repository Settings -> Secrets and variables -> Actions):
+#   ANDROID_KEYSTORE_BASE64  base64 of the release .keystore/.jks file
+#   ANDROID_KEYSTORE_PASSWORD  keystore password
+#   ANDROID_KEY_ALIAS          key alias
+#   ANDROID_KEY_PASSWORD       key password
+# See docs/SECURITY.md for how to generate a keystore. Without these
+# secrets the pipeline still produces a debug-signed debug APK and an
+# UNSIGNED release APK — never a silently fake identity.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build + sign + verify APK (arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK pieces (NDK, platform, build-tools)
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            compiler/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-android-${{ hashFiles('compiler/Cargo.lock') }}
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build the native compiler for arm64
+        working-directory: compiler
+        run: cargo ndk -t arm64-v8a -p 26 -o ../android/app/src/main/jniLibs build --release -p kinn-android
+
+      - name: Check signing secrets
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decode the release keystore
+        if: steps.secrets.outputs.have == 'true'
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/release.keystore"
+          ls -la "$GITHUB_WORKSPACE/release.keystore"
+
+      - name: Build APKs (debug + release)
+        working-directory: android
+        env:
+          KINN_STORE_FILE: ${{ steps.secrets.outputs.have == 'true' && format('{0}/release.keystore', github.workspace) || '' }}
+          KINN_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KINN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KINN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Collect and verify the APKs
+        working-directory: android
+        run: |
+          set -e
+          OUT=android-artifacts
+          mkdir -p "$OUT"
+          DEBUG_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
+          cp "$DEBUG_APK" "$OUT/kinn-studio-0.2.0-debug.apk"
+          RELEASE_APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          # Name by actual signing state.
+          if ls app/build/outputs/apk/release/*unsigned*.apk > /dev/null 2>&1; then
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.2.0-release-UNSIGNED.apk"
+          else
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.2.0-release.apk"
+          fi
+
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          {
+            echo "== kinn-studio-0.2.0-debug.apk (debug-signed) =="
+            "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.2.0-debug.apk" || true
+            echo
+            if [ -f "$OUT/kinn-studio-0.2.0-release.apk" ]; then
+              echo "== kinn-studio-0.2.0-release.apk (release-signed) =="
+              "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.2.0-release.apk"
+            else
+              echo "== kinn-studio-0.2.0-release-UNSIGNED.apk =="
+              echo "NOT SIGNED: configure the ANDROID_KEYSTORE_* secrets to produce"
+              echo "a signed release build (see docs/SECURITY.md)."
+            fi
+          } > "$OUT/signature-report.txt" 2>&1
+          cat "$OUT/signature-report.txt"
+
+          cd "$OUT"
+          sha256sum *.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinn-studio-android
+          path: android/android-artifacts/
