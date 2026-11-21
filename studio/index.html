@@ -22,6 +22,7 @@
         <button class="btn" id="btn-check" type="button" title="Full compiler check on the active file (Ctrl+Enter)">Check</button>
         <button class="btn" id="btn-tokens" type="button" title="Dump the token stream of the active file into the terminal">Tokens</button>
         <button class="btn" id="btn-run" type="button" title="Compile and run the active file in Studio (real compiler via WebAssembly)">Run</button>
+        <button class="btn btn-build" id="btn-build-web" type="button" title="Build the website for the web target (real backend, same as the CLI)">Build Web</button>
       </div>
     </header>
 
@@ -29,6 +30,7 @@
       <button class="tab active" data-tab="files" type="button">Files</button>
       <button class="tab" data-tab="editor" type="button">Editor</button>
       <button class="tab" data-tab="side" type="button">Terminal</button>
+      <button class="tab" data-tab="preview" type="button" title="Preview of the last web build">Preview</button>
     </nav>
 
     <main class="workbench">
@@ -77,6 +79,22 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="pane pane-preview" data-pane="preview" aria-label="Web build preview">
+        <div class="pane-header preview-header">
+          PREVIEW
+          <label class="preview-page-label" for="preview-page">page</label>
+          <select class="preview-page" id="preview-page" aria-label="Previewed page"></select>
+          <span class="preview-actions">
+            <button class="btn btn-ghost" id="btn-download-web" type="button" disabled
+              title="Download the generated site as a .zip (real multi-page dist for hosting)">Download .zip</button>
+            <button class="btn btn-ghost" id="btn-export-android" type="button" disabled
+              title="Export the Android Gradle project as a .zip (build the APK with Android Studio, Gradle, or CI — this is a project, not an APK)">Export Android</button>
+          </span>
+        </div>
+        <iframe class="preview-frame" id="preview-frame" title="Preview of the built website"
+          sandbox="allow-scripts"></iframe>
       </section>
     </main>
   </div>

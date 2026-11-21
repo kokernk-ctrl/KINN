@@ -32,7 +32,7 @@ describe.skipIf(!hasWasm)('KinnBackend against the real kinn.wasm', () => {
   ];
 
   it('reports its version', () => {
-    expect(backend.version()).toBe('0.2.0');
+    expect(backend.version()).toBe('0.3.0');
   });
 
   it('checks a valid program', () => {
@@ -113,6 +113,42 @@ describe.skipIf(!hasWasm)('KinnBackend against the real kinn.wasm', () => {
       { name: 'main.kin', content: 'func main() { print("héllo → 世界"); print(len("héllo")); }' },
     ]);
     expect(result.stdout).toBe('héllo → 世界\n5\n');
+  });
+
+  it('builds a website for the web target (0.3 backends)', () => {
+    const site = `*mode = B;
+website "Studio Site" {
+  page Home {
+    title "Hi"
+    button "Go" open Next
+  }
+  page Next { link "Back" open Home }
+}`;
+    const result = backend.buildWeb('site.kin', [{ name: 'site.kin', content: site }]);
+    expect(result.ok).toBe(true);
+    expect(result.site).toBe('Studio Site');
+    expect(result.pages).toBe(2);
+    const paths = result.files.map((f) => f.path).sort();
+    expect(paths).toEqual(['app.js', 'index.html', 'next.html', 'styles.css']);
+    expect(result.files.find((f) => f.path === 'index.html')!.content).toContain('<title>Hi · Studio Site</title>');
+  });
+
+  it('exports an android project (not an apk) through wasm', () => {
+    const result = backend.buildAndroid('site.kin', [
+      {
+        name: 'site.kin',
+        content: 'website "S" { page Home { text "hi" } }',
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.files.some((f) => f.path.endsWith('MainActivity.kt'))).toBe(true);
+    expect(result.files.some((f) => f.path.endsWith('AndroidManifest.xml'))).toBe(true);
+  });
+
+  it('reports E3038 when the project has no website', () => {
+    const result = backend.buildWeb('main.kin', [{ name: 'main.kin', content: 'func main() { print(1); }' }]);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((d) => d.code === 'E3038')).toBe(true);
   });
 });
 
