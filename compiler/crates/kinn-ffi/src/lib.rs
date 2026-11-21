@@ -577,8 +577,23 @@ mod tests {
         assert!(json.contains("\"line\":2"), "{}", json);
     }
 
+    /// The module registry is process-global and Rust runs tests in
+    /// parallel threads: a `kinn_clear_modules()` in one test used to be
+    /// able to wipe a module another test had just registered (macOS CI
+    /// flake, found on the first post-S2 push). Registry-touching tests
+    /// hold this lock for their whole body.
+    fn module_registry_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
+        LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
     #[test]
     fn modules_register_and_resolve() {
+        let _modules = module_registry_lock();
         let math = "func add(a: int, b: int) -> int { return a + b; }".to_string();
         unsafe {
             kinn_set_module(
@@ -599,6 +614,7 @@ mod tests {
 
     #[test]
     fn missing_module_is_an_e3017() {
+        let _modules = module_registry_lock();
         kinn_clear_modules();
         let json = run_json(
             "main.kin",

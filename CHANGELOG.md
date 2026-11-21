@@ -73,6 +73,12 @@ implementation began with S1.**
   new parser test (position, hint, the good cast spelling as
   contrast, and the short hint when no identifier follows).
 - B.4 wording corrected per the B.3 ruling (errata item 6).
+- CI repairs found by the first S1+S2 push (F-016): linux.yml's DEB
+  smoke test golden updated to the five-line modules example output
+  (S1 added the const-export line `95` but the workflow was missed);
+  kinn-ffi's module-registry tests now hold a test-only lock — a
+  parallel `kinn_clear_modules()` used to be able to wipe a module
+  another test had just registered (macOS flake).
 
 ### Errata — S2 deviations from the approved architecture doc
 

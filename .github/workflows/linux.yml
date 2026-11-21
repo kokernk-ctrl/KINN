@@ -73,7 +73,7 @@ jobs:
           sudo apt-get install -y ./kinn_0.2.0_amd64.deb > /dev/null
           kinn version
           kinn run /usr/share/kinn/examples/for_loops.kin | tail -n1
-          test "$(kinn run /usr/share/kinn/examples/modules/main.kin)" = "$(printf '7\n25\n5\n15\n')"
+          test "$(kinn run /usr/share/kinn/examples/modules/main.kin)" = "$(printf '7\n25\n5\n15\n95\n')"
 
       - name: Build the AppImage (experimental)
         continue-on-error: true
