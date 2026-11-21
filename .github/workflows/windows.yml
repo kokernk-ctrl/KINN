@@ -69,8 +69,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path windows-artifacts | Out-Null
           Move-Item kinn-0.2.0-x86_64-windows.zip windows-artifacts/ -Force
-          if (Test-Path kinn-0.2.0-x86_64-setup.exe) {
-            Move-Item kinn-0.2.0-x86_64-setup.exe windows-artifacts/ -Force
+          # makensis writes OutFile relative to the script directory.
+          if (Test-Path scripts/windows/kinn-0.2.0-x86_64-setup.exe) {
+            Move-Item scripts/windows/kinn-0.2.0-x86_64-setup.exe windows-artifacts/ -Force
             (Get-FileHash windows-artifacts/kinn-0.2.0-x86_64-setup.exe -Algorithm SHA256).Hash + "  kinn-0.2.0-x86_64-setup.exe" | Out-File windows-artifacts/SHA256SUMS -Append
           }
           (Get-FileHash windows-artifacts/kinn-0.2.0-x86_64-windows.zip -Algorithm SHA256).Hash + "  kinn-0.2.0-x86_64-windows.zip" | Out-File windows-artifacts/SHA256SUMS -Append
