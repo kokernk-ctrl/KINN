@@ -32,13 +32,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # The Android SDK is preinstalled on ubuntu-latest (ANDROID_HOME is
+      # already exported with sdkmanager on PATH); we only add the pieces
+      # the build needs.
       - name: Install SDK pieces (NDK, platform, build-tools)
         run: |
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          sdkmanager --version
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

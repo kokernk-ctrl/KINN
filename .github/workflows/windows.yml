@@ -47,13 +47,13 @@ jobs:
         shell: pwsh
         run: |
           $out = "windows-artifacts"
-          New-Item -ItemType Directory -Force -Path "$out/examples" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out", "$out/docs", "$out/examples" | Out-Null
           Copy-Item compiler/target/release/kinn.exe "$out/"
-          Copy-Item README.md "$out/"
-          Copy-Item docs/*.md "$out/docs/" -Recurse -Force
-          New-Item -ItemType Directory -Force -Path "$out/docs" | Out-Null
+          Copy-Item README.md CHANGELOG.md "$out/"
           Copy-Item docs/*.md "$out/docs/"
           Copy-Item examples/*.kin "$out/examples/"
+          Copy-Item examples/errors "$out/examples/errors" -Recurse
+          Copy-Item examples/modules "$out/examples/modules" -Recurse
           Compress-Archive -Path "$out/*" -DestinationPath "kinn-0.2.0-x86_64-windows.zip" -Force
           Get-FileHash "kinn-0.2.0-x86_64-windows.zip" -Algorithm SHA256 | Format-List
 

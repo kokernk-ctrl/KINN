@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    name: kinn for Linux (x86_64: deb + appimage)
+    name: "kinn for Linux (x86_64, deb + appimage)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
