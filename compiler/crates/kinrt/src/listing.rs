@@ -53,6 +53,11 @@ fn brief(i: &Instr) -> String {
         Instr::Return => "Return".into(),
         Instr::Pop => "Pop".into(),
         Instr::Print => "Print".into(),
+        Instr::ArrNew(n) => format!("ArrNew({})", n),
+        Instr::ArrGet => "ArrGet".into(),
+        Instr::ArrSet => "ArrSet".into(),
+        Instr::Native(id) => format!("Native({})", id.name()),
+        Instr::Cast(op) => format!("Cast({})", op.name()),
     }
 }
 
