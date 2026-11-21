@@ -88,7 +88,8 @@ whitelist (D6). S1 and S2 are landed; S3 is next.**
       B.0 gate completed to 79 words, E2002 `as`-cast hint, B.4
       errata recorded in CHANGELOG)
 - [ ] S3 App semantics: checker rules E3040–E3070, W3040–W3044
-      (E3051/E3052 presence rules already landed with S2)
+      (E3051/E3052 presence rules already landed with S2; E3062
+      empty-app-name rule assigned to S3 — S2 review finding, F-015)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

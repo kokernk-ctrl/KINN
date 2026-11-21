@@ -677,6 +677,7 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E3059 | store key not a declared state field |
 | E3060 | store type/shape mismatch against state |
 | E3061 | field kind/state type mismatch (e.g. `kind number` bound to `Str`) |
+| E3062 | app name empty or whitespace-only (mirrors E3033; assigned at S3, found in the S2 review — F-015) |
 | E3070 | target does not support `app` (android) |
 | W3040 | `while` inside an event handler |
 | W3041 | handler local shadows a state name |
