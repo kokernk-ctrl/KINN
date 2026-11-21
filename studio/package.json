@@ -1,7 +1,7 @@
 {
   "name": "kinn-studio",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "KINN Studio — terminal-inspired offline-first editor shell for the Kin language",
   "scripts": {

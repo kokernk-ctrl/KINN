@@ -78,7 +78,7 @@ fn command_without_file_exits_two() {
 fn version_prints_version() {
     let out = kinn(&["version"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.2.0");
+    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.3.0");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn kir_prints_the_disassembly() {
     assert!(stdout.contains("JumpIfFalse"));
 }
 
-// -- 0.2.0 -------------------------------------------------------------------
+// -- 0.3.0 -------------------------------------------------------------------
 
 #[test]
 fn run_arrays_example() {
@@ -180,4 +180,152 @@ fn array_bounds_runtime_error_exits_three() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("E4005"));
     assert!(stderr.contains("-->"));
+}
+
+// -- 0.3.0 build targets ------------------------------------------------------
+
+fn tempdir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("kinn-cli-test-{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn build_web_generates_a_real_dist() {
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/site.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        "/tmp/kinn-cli-test-web-dist",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("built web site \"MyWebsite\" (2 pages)"));
+    assert!(stdout.contains("index.html"));
+    assert!(stdout.contains("styles.css"));
+    let dist = std::path::Path::new("/tmp/kinn-cli-test-web-dist");
+    for f in ["index.html", "about.html", "styles.css", "app.js"] {
+        assert!(dist.join(f).exists(), "missing {}", f);
+    }
+    let index = std::fs::read_to_string(dist.join("index.html")).unwrap();
+    assert!(index.contains("<title>Welcome to KINN · MyWebsite</title>"));
+    assert!(index.contains("aria-current=\"page\""));
+}
+
+#[test]
+fn build_android_exports_a_gradle_project() {
+    let dir = tempdir("android");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/site.kin", EXAMPLES),
+        "--target",
+        "android",
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let manifest = std::fs::read_to_string(dir.join("app/src/main/AndroidManifest.xml")).unwrap();
+    assert!(!manifest.contains("uses-permission"));
+    let kt = std::fs::read_to_string(
+        dir.join("app/src/main/java/dev/kinn/site/mywebsite/MainActivity.kt"),
+    )
+    .unwrap();
+    assert!(kt.contains("class MainActivity"));
+    assert!(dir.join("README.md").exists());
+}
+
+#[test]
+fn build_without_target_defaults_to_web() {
+    let dir = tempdir("default");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/site.kin", EXAMPLES),
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(dir.join("index.html").exists());
+}
+
+#[test]
+fn build_rejects_unknown_targets_and_lists_supported() {
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/site.kin", EXAMPLES),
+        "--target",
+        "ios",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unknown build target `ios`"));
+    // The supported-target list is printed to stdout (targets_command).
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("web"));
+    assert!(stdout.contains("android"));
+}
+
+#[test]
+fn build_on_a_console_program_explains_the_missing_website() {
+    let dir = tempdir("nosite");
+    let out = kinn(&[
+        "build",
+        &format!("{}/hello.kin", EXAMPLES),
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("declares no `website`"));
+}
+
+#[test]
+fn run_of_a_website_only_program_gives_guidance() {
+    let out = kinn(&["run", &format!("{}/web/site.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("website \"MyWebsite\""));
+    assert!(stderr.contains("--target web"));
+}
+
+#[test]
+fn targets_command_lists_both_targets() {
+    let out = kinn(&["targets"]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("web"));
+    assert!(stdout.contains("android"));
+}
+
+#[test]
+fn build_reads_the_kinn_toml_manifest() {
+    let dir = tempdir("manifest");
+    std::fs::write(
+        dir.join("kinn.toml"),
+        "name = \"manifest-test\"\nentry = \"site.kin\"\ntarget = \"web\"\n",
+    )
+    .unwrap();
+    let site = std::fs::read_to_string(format!("{}/web/site.kin", EXAMPLES)).unwrap();
+    std::fs::write(dir.join("site.kin"), site).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kinn"))
+        .args(["build"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("project `manifest-test`"));
+    assert!(dir.join("build/web/index.html").exists());
+}
+
+#[test]
+fn android_export_degrades_honestly_without_a_toolchain() {
+    // The local android build provider must degrade honestly when
+    // Gradle/the SDK are absent (they are absent in CI and sandboxes).
+    let missing = kinn(&["build", &format!("{}/web/site.kin", EXAMPLES), "--target", "android", "--out", "/tmp/kinn-cli-test-provider"]);
+    assert_eq!(missing.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(stdout.contains("status: project exported"), "{}", stdout);
 }

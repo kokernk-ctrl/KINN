@@ -33,6 +33,22 @@ export interface RunResult extends CheckResult {
   runtimeError?: { code: string; message: string; line: number };
 }
 
+/** One generated artifact from a target backend (path + UTF-8 content). */
+export interface OutputFile {
+  path: string;
+  content: string;
+}
+
+/** Result of `kinn_build_web` / `kinn_build_android` (same JSON as FFI). */
+export interface BuildResult {
+  ok: boolean;
+  site: string;
+  pages: number;
+  files: OutputFile[];
+  diagnostics: CompilerDiagnostic[];
+  text: string;
+}
+
 /** One project file: its project-relative path and its content. */
 export interface ProjectFile {
   name: string;
@@ -47,6 +63,8 @@ interface WasmExports {
   kinn_clear_modules(): void;
   kinn_check(srcPtr: number, srcLen: number, entryPtr: number, entryLen: number): number;
   kinn_run(srcPtr: number, srcLen: number, entryPtr: number, entryLen: number): number;
+  kinn_build_web(srcPtr: number, srcLen: number, entryPtr: number, entryLen: number): number;
+  kinn_build_android(srcPtr: number, srcLen: number, entryPtr: number, entryLen: number): number;
   kinn_version(): number;
 }
 
@@ -137,7 +155,7 @@ export class KinnBackend {
   }
 
   private call(
-    fn: 'kinn_check' | 'kinn_run',
+    fn: 'kinn_check' | 'kinn_run' | 'kinn_build_web' | 'kinn_build_android',
     entry: string,
     src: string,
     files: ProjectFile[],
@@ -162,6 +180,18 @@ export class KinnBackend {
   run(entry: string, files: ProjectFile[]): RunResult {
     const src = files.find((f) => f.name === entry)?.content ?? '';
     return JSON.parse(this.call('kinn_run', entry, src, files));
+  }
+
+  /** Generate the web distribution (same backend as `kinn build --target web`). */
+  buildWeb(entry: string, files: ProjectFile[]): BuildResult {
+    const src = files.find((f) => f.name === entry)?.content ?? '';
+    return JSON.parse(this.call('kinn_build_web', entry, src, files));
+  }
+
+  /** Generate the Android Gradle project (project export — not an APK). */
+  buildAndroid(entry: string, files: ProjectFile[]): BuildResult {
+    const src = files.find((f) => f.name === entry)?.content ?? '';
+    return JSON.parse(this.call('kinn_build_android', entry, src, files));
   }
 }
 

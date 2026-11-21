@@ -5,6 +5,7 @@
     <string name="tab_problems">Problems</string>
     <string name="tab_terminal">Terminal</string>
     <string name="action_run">Run</string>
+    <string name="action_build">Run Web</string>
     <string name="action_check">Check</string>
     <string name="action_docs">Docs</string>
     <string name="action_import">Import</string>

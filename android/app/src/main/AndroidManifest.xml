@@ -23,5 +23,11 @@
             android:name=".DocsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
+
+        <!-- Offline preview of a generated web build (file:// only). -->
+        <activity
+            android:name=".PreviewActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
     </application>
 </manifest>

@@ -54,6 +54,13 @@
             android:text="@string/action_run" />
 
         <Button
+            android:id="@+id/btn_build_web"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/action_build" />
+
+        <Button
             android:id="@+id/btn_docs"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"

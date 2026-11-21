@@ -25,7 +25,7 @@ func main() {
 }
 ```
 
-## Status — what actually works today (0.2.0)
+## Status — what actually works today (0.3.0)
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -36,18 +36,23 @@ func main() {
 | Backend + runtime | **Implemented** | interpreter backend: stack VM (`kinrt`), checked overflow, array bounds checks |
 | Modules / multi-file projects | **Implemented** | `import "file.kin" as m;` with cycle detection, path confinement |
 | Language 0.2 | **Implemented** | arrays, indexing, `for` over ranges/arrays, casts, `len`/`abs`/`min`/`max` |
-| CLI (`kinn`) | **Implemented** | `run`, `check`, `tokens`, `ast`, `kir`, `version`; multi-file projects |
-| KINN Studio (web) | **Implemented** | editor, terminal, problems; **runs and checks programs for real** via `kinn.wasm`; IndexedDB persistence; project import/export |
-| KINN Studio (Android) | **Implemented** | Kotlin app: projects, editor, problems, terminal, offline docs, SAF import/export; on-device compiler on ARM64 via JNI; graceful degradation elsewhere |
-| CI | **Implemented** | Rust matrix (Linux/macOS/Windows), Studio+wasm, Android APK (sign+verify), Windows zip/installer, Linux deb/appimage |
+| Language 0.3 web module | **Implemented** | declarative `website { page { … } }`: parse/check/lower with contextual keywords — see [docs/BACKEND_WEB.md](docs/BACKEND_WEB.md) |
+| **Web target backend** | **Implemented** | `kinn build --target web` → real HTML5/CSS dist (semantic markup, accessibility, navigation); verified in a browser; JS-free by design (ADR-0020) |
+| **Android target backend** | **Implemented (project) / APK via CI** | `kinn build --target android` → complete Gradle project with native Kotlin UI, no permissions; real APK built + signature-verified in CI — see [docs/BACKEND_ANDROID.md](docs/BACKEND_ANDROID.md) |
+| Package foundation | **Implemented (manifest)** | `kinn.toml` + module spec ([docs/MODULE_SYSTEM.md](docs/MODULE_SYSTEM.md)); manager/registry deliberately not built yet |
+| CLI (`kinn`) | **Implemented** | `run`, `check`, `build --target`, `targets`, `tokens`, `ast`, `kir`, `version`; multi-file projects; `kinn.toml` manifests |
+| KINN Studio (web) | **Implemented** | editor, terminal, problems; real check/run/build via `kinn.wasm`; **target build + preview panel + zip export**; IndexedDB persistence; project import/export |
+| KINN Studio (Android) | **Implemented** | Kotlin app: projects, editor, problems, terminal, offline docs, SAF import/export; on-device compiler via JNI; **web build + offline preview + Android project export** |
+| CI | **Implemented** | Rust matrix (Linux/macOS/Windows), Studio+wasm, **web/android target smoke**, Android Studio APK (sign+verify), **backend APK from exported Kin project**, Windows zip/installer, Linux deb/appimage |
 | Programming modes B/S/A | **Partially implemented** | directive parsed/validated; changes diagnostics verbosity and Beginner lint — see `docs/PROGRAMMING_MODES.md` |
 | Graphics (OpenGL ES 3.0) | **Planned (0.5)** | no graphics code shipped yet, by design |
-| Native code generation | **Planned (0.3 investigation)** | today everything runs on the KIR VM |
+| Native code generation | **Planned (0.4+)** | console programs run on the KIR VM; web/android targets have real backends since 0.3 |
 | Studio desktop shell | **Planned** | the web shell runs in any browser; a wrapper app is 0.3+ |
 
-Every claim above is backed by tests: **190 Rust tests** (compiler, VM,
-FFI, CLI) and **51 Studio tests** (10 of them running the real compiler
-in WebAssembly), all passing — see [AUDIT_REPORT.md](AUDIT_REPORT.md).
+Every claim above is backed by tests: **250 Rust tests** (compiler, VM,
+FFI, CLI, target backends) and **66 Studio tests** (15 of them running
+the real compiler and target backends in WebAssembly), all passing —
+see [AUDIT_REPORT.md](AUDIT_REPORT.md).
 
 ## Quick start
 
@@ -61,7 +66,11 @@ cargo build --release
 ./target/release/kinn run ../examples/hello.kin
 ./target/release/kinn run ../examples/modules/main.kin   # multi-file
 
-cargo test          # 190 tests
+# 0.3: build a real website from Kin source
+./target/release/kinn build ../examples/web/site.kin --target web
+# → ../examples/web/build/web/ (index.html, about.html, styles.css, app.js)
+
+cargo test          # 250 tests
 ```
 
 ### KINN Studio (web)
@@ -74,7 +83,7 @@ checks).
 cd studio
 npm install
 npm run build:wasm   # compiles the real compiler to public/kinn.wasm
-npm test             # 51 tests (10 against the real wasm compiler)
+npm test             # 66 tests (15 against the real wasm compiler + backends)
 npm run dev          # development server
 npm run build        # production build (dist/)
 ```
@@ -120,6 +129,7 @@ studio/              KINN Studio web shell (TypeScript, Vite, zero runtime deps)
 examples/            runnable Kin programs; `// expect:` blocks are verified by tests
 examples/errors/     programs that must fail with the declared diagnostic code
 examples/modules/    multi-file project example
+examples/web/        declarative website example (kinn build --target web)
 scripts/             NSIS installer script, Linux desktop entry + icon
 .github/workflows/   CI: test matrix, Android APK pipeline, Windows/Linux packages
 docs/                design documents (see index below)
@@ -135,7 +145,11 @@ and AI assistants), [CHANGELOG.md](CHANGELOG.md),
 - [VISION.md](docs/VISION.md) — why KINN exists and what it refuses to be
 - [LANGUAGE_DESIGN.md](docs/LANGUAGE_DESIGN.md) — language philosophy and principles
 - [SYNTAX.md](docs/SYNTAX.md) — quick syntax reference with examples
-- [LANGUAGE_SPEC_0.1.md](docs/LANGUAGE_SPEC_0.1.md) — normative spec: grammar, semantics, error codes (0.1) + 0.2 additions
+- [LANGUAGE_SPEC_0.1.md](docs/LANGUAGE_SPEC_0.1.md) — normative spec: grammar, semantics, error codes (0.1) + 0.2/0.3 additions
+- [MULTI_TARGET_ARCHITECTURE.md](docs/MULTI_TARGET_ARCHITECTURE.md) — target/backend architecture and gap analysis
+- [BACKEND_WEB.md](docs/BACKEND_WEB.md) — the web module and the web target contract
+- [BACKEND_ANDROID.md](docs/BACKEND_ANDROID.md) — the Android target and build providers
+- [MODULE_SYSTEM.md](docs/MODULE_SYSTEM.md) — modules, packages, registry, SDK layering
 - [PROGRAMMING_MODES.md](docs/PROGRAMMING_MODES.md) — modes B / S / A: implemented vs planned behavior
 - [TYPE_SYSTEM.md](docs/TYPE_SYSTEM.md) — types and the no-hidden-conversions rule
 - [COMPILER_ARCHITECTURE.md](docs/COMPILER_ARCHITECTURE.md) — pipeline, crates, diagnostics

@@ -30,6 +30,18 @@ data class RunResult(
     val diagnostics: List<Diagnostic>,
 )
 
+/** One generated artifact (path relative to the build dir + UTF-8 content). */
+data class BuildFile(val path: String, val content: String)
+
+/** Result of nBuildWeb / nBuildAndroid — a real project export, never an APK. */
+data class BuildResult(
+    val ok: Boolean,
+    val site: String,
+    val pages: Int,
+    val files: List<BuildFile>,
+    val diagnostics: List<Diagnostic>,
+)
+
 object CompilerResults {
     fun parseCheck(json: String): CheckResult {
         return try {
@@ -59,6 +71,29 @@ object CompilerResults {
             )
         } catch (e: Exception) {
             RunResult(false, 1, "", null, listOf(Diagnostic("error", "E5003", "bad result from compiler: ${e.message}", "", 0, 0)))
+        }
+    }
+
+    fun parseBuild(json: String): BuildResult {
+        return try {
+            val obj = JSONObject(json)
+            val files = ArrayList<BuildFile>()
+            val arr = obj.optJSONArray("files")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val f = arr.optJSONObject(i) ?: continue
+                    files.add(BuildFile(f.optString("path"), f.optString("content")))
+                }
+            }
+            BuildResult(
+                ok = obj.optBoolean("ok", false),
+                site = obj.optString("site", ""),
+                pages = obj.optInt("pages", 0),
+                files = files,
+                diagnostics = parseDiags(obj.optJSONArray("diagnostics")),
+            )
+        } catch (e: Exception) {
+            BuildResult(false, "", 0, emptyList(), listOf(Diagnostic("error", "E5003", "bad result from compiler: ${e.message}", "", 0, 0)))
         }
     }
 

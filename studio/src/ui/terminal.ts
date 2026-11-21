@@ -5,20 +5,22 @@
  *
  * Since 0.2.0 `check` and `run` use the real compiler and VM through the
  * WebAssembly backend (compiler/crates/kinn-ffi compiled to kinn.wasm).
- * When the backend is not loaded, they fall back to editor-level checks
- * and say so.
+ * Since 0.3.0 `build web` and `build android` run the same target
+ * backends as the CLI through the wasm bridge; `preview` renders the
+ * generated site in the preview panel. When the backend is not loaded,
+ * they fall back to editor-level checks and say so.
  */
 
 import type { Vfs } from '../vfs';
 import { lex } from '../syntax/lexer';
 import { detectMode, quickCheck } from '../diagnostics/checks';
-import { backend } from '../wasm/kinnwasm';
+import { backend, type BuildResult, type OutputFile } from '../wasm/kinnwasm';
 import { serializeProject } from '../storage/storage';
 
 const BANNER = [
-  { text: 'KINN Studio 0.2.0 — terminal shell', cls: 'accent' },
+  { text: 'KINN Studio 0.3.0 — terminal shell', cls: 'accent' },
   { text: 'Offline-first. The project persists in this browser.', cls: 'dim' },
-  { text: "Type 'help' for commands, 'syntax' for the Kin 0.2 cheat sheet.", cls: 'dim' },
+  { text: "Type 'help' for commands, 'syntax' for the cheat sheet, 'build web' to compile a site.", cls: 'dim' },
 ];
 
 export interface TerminalDeps {
@@ -27,6 +29,10 @@ export interface TerminalDeps {
   onProblems: (problems: ReturnType<typeof quickCheck>, fileName: string) => void;
   /** Trigger the host file picker for `import`. */
   onImportRequest?: () => void;
+  /** A finished build (web or android) — the host stores it for preview/export. */
+  onBuildResult?: (result: BuildResult, target: 'web' | 'android') => void;
+  /** `preview` was requested with the given build files. */
+  onPreview?: (files: OutputFile[]) => void;
 }
 
 export class Terminal {
@@ -106,11 +112,15 @@ export class Terminal {
       case 'save': this.save(); break;
       case 'export': this.exportProject(); break;
       case 'import': this.importProject(); break;
+      case 'build': this.build(args); break;
+      case 'preview': this.preview(); break;
       default:
         this.print(`unknown command '${name}' — type 'help'`, 'err');
     }
     this.scroll();
   }
+
+  private lastBuild: { result: BuildResult; target: 'web' | 'android' } | null = null;
 
   private scroll(): void {
     this.output.parentElement?.scrollTo({ top: this.output.parentElement.scrollHeight });
@@ -132,27 +142,29 @@ export class Terminal {
   tokens [file]     print the token stream
   check [file]      full compiler check (real diagnostics via kinn.wasm)
   mode              show the active file's programming mode
-  syntax            Kin 0.2 syntax cheat sheet
+  syntax            Kin cheat sheet (incl. the website module)
   run [file]        compile and execute (real VM, output below)
   save              persist the project now (also automatic)
   export            download the project as a .kinnproj file
-  import            load a .kinnproj or .kin file from disk`);
+  import            load a .kinnproj or .kin file from disk
+  build [target]    generate artifacts: web (default) or android
+  preview           show the last web build in the preview panel`);
   }
 
   private version(): void {
     const compiler = backend.available
       ? `compiler kinn ${backend.version()} (Rust via WebAssembly, local)`
       : 'compiler backend NOT LOADED (editor checks only; run npm run build:wasm)';
-    this.print(`KINN Studio 0.2.0 (shell) — ${compiler}`);
+    this.print(`KINN Studio 0.3.0 (shell) — ${compiler}`);
   }
 
   private about(): void {
     this.printBlock(
 `KINN is an offline-first programming language and development
-environment. Kin 0.2 compiles through KIR to a stack VM; KINN Studio
-is its terminal-inspired editor. No accounts, no cloud, no servers.
-In-Studio check and run use the same Rust compiler as the CLI,
-compiled to WebAssembly. Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
+environment. Kin 0.3 compiles console programs through KIR to a stack
+VM and builds declarative websites into real HTML/CSS with the web
+backend. In-Studio check, run and build use the same Rust compiler as
+the CLI, compiled to WebAssembly. No accounts, no cloud, no servers.`,
       'out');
   }
 
@@ -301,9 +313,25 @@ compiled to WebAssembly. Compiler: compiler/ (Rust). Studio: studio/ (TypeScript
 
   private syntax(): void {
     this.printBlock(
-`Kin 0.2 cheat sheet
+`Kin 0.3 cheat sheet
 -------------------
 *mode = B;                    // B beginner, S standard, A advanced (first line)
+
+-- website module (0.3): declarative sites, built with 'build web' --
+website "My Site" {
+  page Home {
+    title "Welcome"                     // document title + page heading
+    heading "Section"                   // section heading
+    text "A paragraph"
+    button "Get Started" open About     // prominent navigation
+    link "More" open About              // inline navigation
+    image "assets/pic.png" alt "Pic"    // alt text required
+    divider
+  }
+  page About { text "About page" }
+}
+build web                     // index.html + pages + styles.css + app.js
+preview                       // open the built site in the preview panel
 
 func main() { }               // program entry (void, no params)
 func add(a: int, b: int) -> int { return a + b; }
@@ -363,6 +391,62 @@ print("text " + "concat");    // print, len, abs, min, max builtins
     } else if (result.runtimeError) {
       this.print(`error[${result.runtimeError.code}]: ${result.runtimeError.message}  [${f.name}:${result.runtimeError.line}]`, 'err');
       this.print('— runtime error —', 'err');
+    }
+  }
+
+  /** Generate artifacts through the wasm backend (same backends as the CLI). */
+  private build(args: string[]): void {
+    const target = args[0] ?? 'web';
+    if (target !== 'web' && target !== 'android') {
+      this.print(`unknown target '${target}' — supported: web, android`, 'err');
+      return;
+    }
+    if (!backend.available) {
+      this.print('building needs the compiler backend (kinn.wasm)', 'warn');
+      this.print('build it with: cd compiler && cargo build --release -p kinn-ffi --target wasm32-unknown-unknown', 'out');
+      return;
+    }
+    const f = this.resolveFile([]);
+    if (!f) return;
+    this.print(`building ${f.name} for ${target} (kinn ${backend.version()}, wasm)...`, 'dim');
+    const result = target === 'web'
+      ? backend.buildWeb(f.name, this.deps.vfs.projectFiles())
+      : backend.buildAndroid(f.name, this.deps.vfs.projectFiles());
+    this.deps.onProblems(result.diagnostics, f.name);
+
+    if (!result.ok) {
+      for (const d of result.diagnostics) {
+        if (d.severity === 'error') this.print(`${d.code}: ${d.message}  [${d.file}:${d.line}:${d.col}]`, 'err');
+      }
+      this.print('— build failed —', 'err');
+      return;
+    }
+
+    this.lastBuild = { result, target };
+    this.deps.onBuildResult?.(result, target);
+    const bytes = result.files.reduce((n, file) => n + file.content.length, 0);
+    this.print(`built ${target} site "${result.site}" (${result.pages} page(s), ${result.files.length} files, ~${bytes} B):`, 'ok');
+    for (const file of result.files) {
+      this.print(`  ${file.path}  (${file.content.length} B)`, 'out');
+    }
+    if (target === 'web') {
+      this.print("type 'preview' to open it in the preview panel", 'dim');
+    } else {
+      this.print('this is an exported Android Gradle project (not an APK). Build it in', 'dim');
+      this.print('Android Studio, with gradle assembleDebug, or via remote CI (docs/BACKEND_ANDROID.md).', 'dim');
+    }
+  }
+
+  private preview(): void {
+    if (!this.lastBuild || this.lastBuild.target !== 'web') {
+      this.print("no web build yet — run 'build web' first", 'warn');
+      return;
+    }
+    if (this.deps.onPreview) {
+      this.deps.onPreview(this.lastBuild.result.files);
+      this.print('preview opened — links and buttons navigate inside the preview', 'ok');
+    } else {
+      this.print('preview is not available in this host', 'err');
     }
   }
 

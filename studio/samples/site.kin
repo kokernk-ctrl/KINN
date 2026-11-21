@@ -1,0 +1,23 @@
+// A declarative KINN website (Kin 0.3 web module).
+//
+// Select this file, press Build Web (or type `build web` in the
+// terminal), then `preview` — links and buttons navigate in the panel.
+// Download .zip exports the real multi-page dist for hosting.
+*mode = B;
+
+website "MyWebsite" {
+    page Home {
+        title "Welcome to KINN"
+        heading "My first website"
+        text "Written in Kin, built by the KINN web backend - no HTML, CSS or JavaScript written by hand."
+        button "Get Started" open About
+        divider
+        link "Skip to About" open About
+    }
+    page About {
+        title "About"
+        heading "How this works"
+        text "The compiler parses, type-checks and lowers the website declaration into a site model, then the web backend generates semantic HTML5 and CSS."
+        link "Back to Home" open Home
+    }
+}

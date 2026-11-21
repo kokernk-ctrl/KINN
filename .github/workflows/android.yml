@@ -1,9 +1,16 @@
 name: android
 
-# Builds the KINN Studio Android app: debug APK (debug-signed), release
-# APK (signed with the ANDROID_KEYSTORE_* secrets when they exist,
-# otherwise left unsigned and clearly labeled), signature verification
-# with apksigner, and artifact upload.
+# Two pipelines:
+#
+# 1. `studio-app` — the KINN Studio Android app: debug APK (debug-
+#    signed), release APK (signed with the ANDROID_KEYSTORE_* secrets
+#    when they exist, otherwise left unsigned and clearly labeled),
+#    signature verification with apksigner, artifact upload.
+# 2. `backend-apk` — the 0.3 Android *application backend*: exports a
+#    Gradle project from a Kin website with the real CLI, builds it on
+#    the runner (SDK preinstalled), verifies the APK signature and
+#    uploads the artifact. This is the remote build provider of
+#    docs/BACKEND_ANDROID.md; it never needs user credentials.
 #
 # Secret setup (repository Settings -> Secrets and variables -> Actions):
 #   ANDROID_KEYSTORE_BASE64  base64 of the release .keystore/.jks file
@@ -21,7 +28,7 @@ on:
 
 jobs:
   build:
-    name: build + sign + verify APK (arm64)
+    name: "studio-app: build + sign + verify APK (arm64)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -100,25 +107,25 @@ jobs:
           OUT=android-artifacts
           mkdir -p "$OUT"
           DEBUG_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          cp "$DEBUG_APK" "$OUT/kinn-studio-0.2.0-debug.apk"
+          cp "$DEBUG_APK" "$OUT/kinn-studio-0.3.0-debug.apk"
           RELEASE_APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           # Name by actual signing state.
           if ls app/build/outputs/apk/release/*unsigned*.apk > /dev/null 2>&1; then
-            cp "$RELEASE_APK" "$OUT/kinn-studio-0.2.0-release-UNSIGNED.apk"
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.3.0-release-UNSIGNED.apk"
           else
-            cp "$RELEASE_APK" "$OUT/kinn-studio-0.2.0-release.apk"
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.3.0-release.apk"
           fi
 
           APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           {
-            echo "== kinn-studio-0.2.0-debug.apk (debug-signed) =="
-            "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.2.0-debug.apk" || true
+            echo "== kinn-studio-0.3.0-debug.apk (debug-signed) =="
+            "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.3.0-debug.apk" || true
             echo
-            if [ -f "$OUT/kinn-studio-0.2.0-release.apk" ]; then
-              echo "== kinn-studio-0.2.0-release.apk (release-signed) =="
-              "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.2.0-release.apk"
+            if [ -f "$OUT/kinn-studio-0.3.0-release.apk" ]; then
+              echo "== kinn-studio-0.3.0-release.apk (release-signed) =="
+              "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.3.0-release.apk"
             else
-              echo "== kinn-studio-0.2.0-release-UNSIGNED.apk =="
+              echo "== kinn-studio-0.3.0-release-UNSIGNED.apk =="
               echo "NOT SIGNED: configure the ANDROID_KEYSTORE_* secrets to produce"
               echo "a signed release build (see docs/SECURITY.md)."
             fi
@@ -134,3 +141,80 @@ jobs:
         with:
           name: kinn-studio-android
           path: android/android-artifacts/
+
+  backend-apk:
+    name: "backend: real APK from the exported Kin project"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install SDK pieces (platform, build-tools)
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort | tail -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME" | tee -a "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            compiler/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-backend-${{ hashFiles('compiler/Cargo.lock') }}
+
+      - name: Build the CLI
+        working-directory: compiler
+        run: cargo build --release -p kinn
+
+      # The remote build provider: export the Android project from a
+      # Kin website, then complete the Gradle wrapper from the checked-in
+      # Studio wrapper (the jar is redistributable; the exported project
+      # ships without it — ADR-0021).
+      - name: Export the Android project from Kin source
+        run: |
+          compiler/target/release/kinn build examples/web/site.kin --target android --out kinn-android-project
+          cp android/gradle/wrapper/gradle-wrapper.jar kinn-android-project/gradle/wrapper/
+          cp android/gradlew kinn-android-project/gradlew
+          cp android/gradlew.bat kinn-android-project/gradlew.bat
+          chmod +x kinn-android-project/gradlew
+          ls -la kinn-android-project kinn-android-project/gradle/wrapper
+
+      - name: Build a real APK with Gradle
+        working-directory: kinn-android-project
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify the APK signature and contents
+        run: |
+          set -e
+          APK=$(ls kinn-android-project/app/build/outputs/apk/debug/*.apk | head -n1)
+          echo "APK: $APK"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          "$APKSIGNER" verify --print-certs "$APK"
+          # No permissions in the generated app (aapt is in build-tools).
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging "$APK" | grep -E "uses-permission" && {
+            echo "UNEXPECTED PERMISSIONS FOUND"; exit 1;
+          } || echo "no permissions requested (verified)"
+          "$AAPT" dump badging "$APK" | head -5
+          mkdir -p backend-apk-artifacts
+          cp "$APK" backend-apk-artifacts/kinn-website-example-0.3.0-debug.apk
+          sha256sum backend-apk-artifacts/*.apk > backend-apk-artifacts/SHA256SUMS
+          cat backend-apk-artifacts/SHA256SUMS
+
+      - name: Upload the backend APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinn-android-backend-apk
+          path: backend-apk-artifacts/

@@ -4,6 +4,91 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
+## [0.3.0] — 2026-11-21
+
+Multi-target delivery: the first complete backend vertical slice (web),
+the Android application backend, Studio build integration on both
+platforms, and the package/module foundation. The compiler core still
+has **zero external dependencies**. 0.2.0 functionality is preserved
+(backwards-compatibility is tested, including contextual-keyword
+behavior).
+
+### Added — targets & backends (ADR-0018)
+
+- **Target/backend architecture**: `kinc::backend` with a stable
+  contract — target identification (`kinn targets`), pure artifact
+  generation (`OutputFile`), capability tables, and diagnostics before
+  generation. Backends consume the validated `SiteModel`, never the
+  AST.
+- **Web backend (complete vertical slice)**: `kinn build --target web`
+  generates a real distribution — semantic HTML5 (one file per page,
+  `index.html` for the first page), one shared stylesheet, focus
+  management script, copied `assets/`. Accessibility enforced at
+  compile time and generated in (skip link, landmarks, aria-current,
+  alt text, focus-visible, reduced-motion). JS-free by design
+  (ADR-0020): state/forms/events do not exist in 0.3 and are not
+  faked. Verified in a real browser (accessibility tree + navigation).
+- **Android backend (project export + remote APK)**:
+  `kinn build --target android` exports a complete Gradle project
+  (AGP 8.5.2, Kotlin 1.9.24) whose `MainActivity.kt` renders the site
+  with native Android views — no WebView, no AndroidX, no permissions.
+  Build providers: local Gradle/SDK (honest degradation), remote CI
+  (real APK built + `apksigner verify` + artifact), export (always).
+  ADR-0021.
+
+### Added — language (Kin 0.3, ADR-0019)
+
+- **Declarative `website` module**: `website "Name" { page Home { … } }`
+  with `title`, `heading`, `text`, `button "…" open Page`, `link "…"
+  open Page`, `image "src" alt "…"`, `divider`. Contextual keywords —
+  no existing identifier breaks (tested). Websites live in the entry
+  file; site-only programs need no `main` (run reports guidance).
+- **New diagnostics** (normative in LANGUAGE_SPEC §B2): E2016, E2030,
+  E3030–E3038, W3035–W3037.
+
+### Added — CLI
+
+- `kinn build [file] [--target web|android] [--out DIR]` with per-file
+  build report and honest statuses (`project exported` vs `debug APK`).
+- `kinn targets`; `kinn.toml` manifest support (name/version/entry/
+  target) with a strict minimal parser (ADR-0022).
+
+### Added — Studio (web + Android)
+
+- Web Studio: **Build Web** button, `build [target]` and `preview`
+  terminal commands, preview panel (page selector, iframe preview with
+  inlined CSS/JS and intercepted navigation), **Download .zip** of the
+  real dist, **Export Android** project zip. Store-only ZIP writer
+  (crc32 vector-tested; validated with `unzip`).
+- Android Studio: `build web` / `build android` / `preview` /
+  `export android`; **PreviewActivity** renders the generated site
+  offline via file:// with in-app page navigation; Build Web button.
+
+### Added — ecosystem foundation
+
+- `docs/MODULE_SYSTEM.md`: module/package/registry/SDK layering; what
+  exists vs what is deliberately deferred. `kinn.toml` is the first
+  working piece; no registry, no lockfile, no downloads (none faked).
+
+### Changed
+
+- Versions across compiler, CLI, FFI, Studio and the Android app to
+  0.3.0 (FFI `kinn_version` = 0x00_03_00_00).
+- CI: target smoke tests (web dist + android export) on all three
+  platforms; a new `backend-apk` job builds a real APK from the
+  exported Kin project on a GitHub runner with signature verification
+  and zero-permission check; Studio test count 51 → 66.
+
+### Tests
+
+- Rust: 190 → **250** tests (+12 web backend, +9 android backend,
+  +13 parser, +12 checker, +4 FFI build, +9 CLI build, +5 manifest,
+  +1 provider status; version test updated).
+- Studio: 51 → **66** vitest tests (preview builder, zip writer, wasm
+  build-web/build-android against the real backend).
+- Browser verification of the generated dist (rendering, a11y tree,
+  navigation) performed with headless Chromium.
+
 ## [0.2.0] — 2026-11-21
 
 Language breadth, Studio integration, the Android app and the release

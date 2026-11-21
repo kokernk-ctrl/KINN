@@ -142,3 +142,53 @@ signature report says so. The pipeline never generates its own
 "release" key, and never labels a debug-signed build as production.
 Public GitHub Releases remain an explicit owner decision, not a CI
 side effect.
+
+## ADR-0018 — Multi-target backends over a shared site model
+
+**Status: accepted (2026-11-21, 0.3.0).** Targets (`web`, `android`)
+consume a target-independent `SiteModel` (`kinc::site`) produced by the
+shared front end, never the AST and never per-target forks of the
+language. Backends are pure generators returning `Vec<OutputFile>`.
+KIR + `kinrt` remain the execution path for console programs. A backend
+that cannot express something says so with a diagnostic; it never
+emits output that silently misrepresents the source.
+
+## ADR-0019 — The web module is a language module (`website` declarations)
+
+**Status: accepted (2026-11-21, 0.3.0).** Declarative sites are parsed,
+checked and lowered by the shared front end (`website "Name" { page P {
+… } }`, B-mode-friendly syntax). `website`/`page`/element words are
+contextual keywords, so no existing identifier breaks. Sites live in
+the entry file only; `kinn run` of a site-only program fails with
+guidance toward `kinn build --target web`.
+
+## ADR-0020 — Web output is semantic static HTML/CSS, nearly JS-free
+
+**Status: accepted (2026-11-21, 0.3.0).** The web backend emits one
+semantic HTML5 file per page plus one stylesheet; `app.js` only adds
+focus management after navigation. There is no generic JS runtime that
+pretends to support state, forms or events: those arrive with the 0.4
+state module, and until then the checker/grammar simply do not accept
+them. Accessibility is enforced at compile time (alt text E3034,
+non-empty labels E3035) and generated in (landmarks, skip link,
+`aria-current`, focus-visible).
+
+## ADR-0021 — Android backend: exported Gradle project + build providers
+
+**Status: accepted (2026-11-21, 0.3.0).** An Android build is produced
+from a generated Gradle project (native `MainActivity` rendering the
+SiteModel with Android views). Three providers, reported honestly:
+local Gradle/SDK when present, remote CI build (GitHub Actions,
+artifact upload, apksigner verification), and always the exported
+project itself. The wrapper jar is not embedded in the CLI; generated
+projects use the system Gradle (CI) or Android Studio. Signing stays
+governed by ADR-0017.
+
+## ADR-0022 — Package foundation: `kinn.toml` manifest, no registry yet
+
+**Status: accepted (2026-11-21, 0.3.0).** The first package-manager
+step is a minimal manifest (`kinn.toml`: name, version, entry) read by
+`kinn build`, plus the MODULE_SYSTEM.md specification of modules,
+packages, registry, network and FFI layers. No lockfiles, no
+dependency downloads, no registry — those ship only with real
+implementation and tests in later releases.

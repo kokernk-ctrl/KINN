@@ -10,3 +10,6 @@ studio/dist/
 Thumbs.db
 *.swp
 *.log
+
+# per-project build outputs (kinn build)
+build/

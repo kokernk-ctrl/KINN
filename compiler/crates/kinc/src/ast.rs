@@ -66,8 +66,8 @@ impl Type {
     }
 }
 
-/// A parsed program: an optional mode directive, imports, and function
-/// declarations.
+/// A parsed program: an optional mode directive, imports, function
+/// declarations, and optional website declarations (0.3.0).
 #[derive(Debug, Clone)]
 pub struct Program {
     pub mode: Mode,
@@ -75,6 +75,89 @@ pub struct Program {
     pub mode_declared: bool,
     pub imports: Vec<ImportDecl>,
     pub funcs: Vec<Func>,
+    /// `website "Name" { page P { ... } }` declarations (0.3.0). Valid
+    /// programs carry at most one, in the entry file.
+    pub websites: Vec<WebsiteDecl>,
+}
+
+/// `website "Name" { page ... }` — the declarative site module. Lowered
+/// to a target-independent [`crate::site::SiteModel`] for the build
+/// backends (web, android). The words `website`, `page` and the element
+/// names are contextual keywords: outside these declarations they remain
+/// ordinary identifiers, so no 0.2 program changes meaning.
+#[derive(Debug, Clone)]
+pub struct WebsiteDecl {
+    /// Quoted site name (checked non-empty, E3033).
+    pub name: String,
+    pub pages: Vec<PageDecl>,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// `page Home { ... }` inside a website declaration.
+#[derive(Debug, Clone)]
+pub struct PageDecl {
+    /// Page identifier; also the navigation label and the URL slug.
+    pub name: String,
+    pub elements: Vec<ElementDecl>,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// One declarative element inside a page.
+#[derive(Debug, Clone)]
+pub struct ElementDecl {
+    pub kind: ElementKind,
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(Debug, Clone)]
+pub enum ElementKind {
+    /// `title "..."` — document title and page heading.
+    Title(String),
+    /// `heading "..."` — section heading.
+    Heading(String),
+    /// `text "..."` — paragraph.
+    Text(String),
+    /// `button "Label" open Page` — prominent navigation.
+    Button {
+        label: String,
+        target: String,
+        target_line: u32,
+        target_col: u32,
+    },
+    /// `link "Label" open Page` — inline navigation.
+    Link {
+        label: String,
+        target: String,
+        target_line: u32,
+        target_col: u32,
+    },
+    /// `image "src" alt "..."` — accessibility-checked image.
+    Image {
+        src: String,
+        alt: String,
+        alt_line: u32,
+        alt_col: u32,
+    },
+    /// `divider` — thematic break.
+    Divider,
+}
+
+impl ElementKind {
+    /// Stable machine name (tests, debug output, future tooling).
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            ElementKind::Title(_) => "title",
+            ElementKind::Heading(_) => "heading",
+            ElementKind::Text(_) => "text",
+            ElementKind::Button { .. } => "button",
+            ElementKind::Link { .. } => "link",
+            ElementKind::Image { .. } => "image",
+            ElementKind::Divider => "divider",
+        }
+    }
 }
 
 /// `import "path.kin" as alias;`
@@ -377,6 +460,30 @@ pub fn dump(p: &Program) -> String {
             .join(", ");
         s.push_str(&format!("func {}({}) -> {}\n", f.name, params, f.ret.as_str()));
         dump_block(&mut s, &f.body, 1);
+    }
+    for w in &p.websites {
+        s.push_str(&format!("website {:?}\n", w.name));
+        for pg in &w.pages {
+            s.push_str(&format!("  page {}\n", pg.name));
+            for e in &pg.elements {
+                let pos = format!("{}:{}", e.line, e.col);
+                match &e.kind {
+                    ElementKind::Title(v) => s.push_str(&format!("    title {:?}  ({})\n", v, pos)),
+                    ElementKind::Heading(v) => s.push_str(&format!("    heading {:?}  ({})\n", v, pos)),
+                    ElementKind::Text(v) => s.push_str(&format!("    text {:?}  ({})\n", v, pos)),
+                    ElementKind::Button { label, target, .. } => {
+                        s.push_str(&format!("    button {:?} open {}  ({})\n", label, target, pos))
+                    }
+                    ElementKind::Link { label, target, .. } => {
+                        s.push_str(&format!("    link {:?} open {}  ({})\n", label, target, pos))
+                    }
+                    ElementKind::Image { src, alt, .. } => {
+                        s.push_str(&format!("    image {:?} alt {:?}  ({})\n", src, alt, pos))
+                    }
+                    ElementKind::Divider => s.push_str(&format!("    divider  ({})\n", pos)),
+                }
+            }
+        }
     }
     s
 }

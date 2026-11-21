@@ -52,6 +52,29 @@ object KinnBridge {
         contents: Array<String>,
     ): String
 
+    /**
+     * Build the web distribution (same backend as `kinn build --target
+     * web`). JSON: `{"ok":bool,"site":str,"pages":n,"files":[...]}`.
+     */
+    external fun nBuildWeb(
+        entry: String,
+        src: String,
+        paths: Array<String>,
+        contents: Array<String>,
+    ): String
+
+    /**
+     * Export the Android Gradle project (same backend as `kinn build
+     * --target android`). The result is a project — building the APK
+     * needs Android Studio, Gradle, or the remote CI workflow.
+     */
+    external fun nBuildAndroid(
+        entry: String,
+        src: String,
+        paths: Array<String>,
+        contents: Array<String>,
+    ): String
+
     /** Version as "0.2.0", or null when the backend is unavailable. */
     fun version(): String? {
         if (!available) return null
