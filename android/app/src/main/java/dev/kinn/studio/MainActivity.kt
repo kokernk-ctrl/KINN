@@ -22,6 +22,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import dev.kinn.studio.KinSyntax.SyntaxColors
+import java.io.File
 
 /**
  * KINN Studio for Android: projects, editor, problems, terminal and the
@@ -87,6 +88,16 @@ class MainActivity : AppCompatActivity() {
                 pendingExportName = null
             }
         }
+    private var pendingAndroidZip: List<BuildFile>? = null
+    private val androidZipPicker =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val uri = result.data?.data
+                val files = pendingAndroidZip
+                if (uri != null && files != null) exportAndroidZipTo(uri, files)
+                pendingAndroidZip = null
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +120,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        termPrint("KINN Studio 0.2.0 — Android shell", "accent")
+        termPrint("KINN Studio 0.3.0 — Android shell", "accent")
         if (KinnBridge.available) {
             termPrint("compiler ${KinnBridge.version()} loaded (native, on-device, offline)", "ok")
         } else {
@@ -160,6 +171,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun wireActions() {
         findViewById<View>(R.id.btn_run).setOnClickListener { runActive() }
+        findViewById<View>(R.id.btn_build_web)?.setOnClickListener { buildActive("web") }
         findViewById<View>(R.id.btn_check).setOnClickListener { checkActive() }
         findViewById<View>(R.id.btn_docs).setOnClickListener {
             startActivity(Intent(this, DocsActivity::class.java))
@@ -372,6 +384,103 @@ class MainActivity : AppCompatActivity() {
         problemsHeader.text = "PROBLEMS ${diags.size}"
     }
 
+    // -- build targets (0.3) -----------------------------------------------------
+
+    /**
+     * `build web` / `build android`: run the same backends as the CLI
+     * through the native bridge and write the generated files into
+     * app-private storage (`files/build/<target>/`).
+     */
+    private fun buildActive(target: String) {
+        val (entry, src) = entrySource() ?: run {
+            toast("nothing to build")
+            return
+        }
+        if (!KinnBridge.available) {
+            termPrint("building needs the native compiler (libkinn_android.so, ARM64 builds ship it)", "warn")
+            return
+        }
+        if (target != "web" && target != "android") {
+            termPrint("unknown target '$target' — supported: web, android", "err")
+            return
+        }
+        termPrint("building $entry for $target (kinn ${KinnBridge.version()}, native)...", "dim")
+        val modules = moduleArrays()
+        val json = if (target == "web") {
+            KinnBridge.nBuildWeb(entry, src, modules.first, modules.second)
+        } else {
+            KinnBridge.nBuildAndroid(entry, src, modules.first, modules.second)
+        }
+        val result = CompilerResults.parseBuild(json)
+        showProblems(result.diagnostics)
+        if (!result.ok) {
+            result.diagnostics.filter { it.severity == "error" }.forEach {
+                termPrint("${it.code}: ${it.message}  [${it.file}:${it.line}:${it.col}]", "err")
+            }
+            termPrint("— build failed —", "err")
+            return
+        }
+        val root = File(filesDir, "build/$target")
+        root.deleteRecursively()
+        val written = BuildSupport.writeFiles(root, result.files)
+        termPrint("built $target site \"${result.site}\" (${result.pages} page(s), ${result.files.size} files) → build/$target", "ok")
+        written.forEach { termPrint("  ${it.relativeTo(root).path}") }
+        if (target == "web") {
+            termPrint("type 'preview' to open the site on this device", "dim")
+        } else {
+            termPrint("this is an exported Gradle project, not an APK — build it in Android Studio,", "dim")
+            termPrint("with gradle assembleDebug, or through the remote CI workflow", "dim")
+            termPrint("type 'export android' to share the project as a .zip", "dim")
+        }
+    }
+
+    private fun previewBuild() {
+        val index = File(filesDir, "build/web/index.html")
+        if (!index.exists()) {
+            termPrint("no web build yet — run 'build web' first", "warn")
+            return
+        }
+        startActivity(
+            Intent(this, PreviewActivity::class.java)
+                .putExtra(PreviewActivity.EXTRA_ROOT, index.parentFile!!.absolutePath),
+        )
+    }
+
+    /** Export the android Gradle project as a .zip through SAF. */
+    private fun exportAndroidProject() {
+        val (entry, src) = entrySource() ?: return toast("nothing to export")
+        if (!KinnBridge.available) {
+            termPrint("exporting needs the native compiler (libkinn_android.so)", "warn")
+            return
+        }
+        val modules = moduleArrays()
+        val json = KinnBridge.nBuildAndroid(entry, src, modules.first, modules.second)
+        val result = CompilerResults.parseBuild(json)
+        if (!result.ok) {
+            termPrint("android export failed (diagnostics in PROBLEMS)", "err")
+            return
+        }
+        pendingAndroidZip = result.files
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, "${result.site.lowercase().ifEmpty { "kinn-app" }}-android-project.zip")
+        }
+        androidZipPicker.launch(intent)
+    }
+
+    private fun exportAndroidZipTo(uri: Uri, files: List<BuildFile>) {
+        try {
+            contentResolver.openOutputStream(uri)?.use { out ->
+                BuildSupport.zipFiles(files, out)
+            }
+            termPrint("exported Android Gradle project (${files.size} files) as .zip", "ok")
+            termPrint("an APK comes only from building this project (Studio/Gradle/CI)", "dim")
+        } catch (e: Exception) {
+            toast("export failed: ${e.message}")
+        }
+    }
+
     // -- terminal ---------------------------------------------------------------
 
     /** Append a colored line to the terminal scrollback. */
@@ -459,8 +568,12 @@ class MainActivity : AppCompatActivity() {
             }
             "check" -> checkActive()
             "run" -> runActive()
+            "build" -> buildActive(parts.getOrNull(1) ?: "web")
+            "preview" -> previewBuild()
             "syntax" -> syntax()
-            "export" -> exportActiveProject()
+            "export" -> {
+                if (parts.getOrNull(1) == "android") exportAndroidProject() else exportActiveProject()
+            }
             "import" -> pickImport()
             "docs" -> startActivity(Intent(this, DocsActivity::class.java))
             else -> termPrint("unknown command '${parts[0]}' — type 'help'")
@@ -484,8 +597,12 @@ class MainActivity : AppCompatActivity() {
             "  mv <old> <new>  rename a file",
             "  check           full compiler check (native)",
             "  run             compile and execute (native)",
-            "  syntax          Kin 0.2 cheat sheet",
+            "  build web       build the website (native, same backend as the CLI)",
+            "  build android   export the Android Gradle project",
+            "  preview         open the last web build in the offline preview",
+            "  syntax          Kin cheat sheet",
             "  export          export the project (.kinnproj)",
+            "  export android  export the Android project (.zip)",
             "  import          import .kinnproj or .kin",
             "  docs            bundled documentation",
         ).forEach { termPrint(it) }
@@ -506,9 +623,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun syntax() {
         listOf(
-            "Kin 0.2 cheat sheet",
+            "Kin 0.3 cheat sheet",
             "-------------------",
             "*mode = B;                 // B beginner, S standard, A advanced",
+            "-- website module: build web / preview --",
+            "website \"My Site\" {",
+            "  page Home {",
+            "    title \"Welcome\"        // document title + page heading",
+            "    heading \"Section\"      // section heading",
+            "    text \"A paragraph\"",
+            "    button \"Go\" open About // prominent navigation",
+            "    link \"More\" open About // inline navigation",
+            "    image \"assets/p.png\" alt \"P\"  // alt required",
+            "    divider",
+            "  }",
+            "  page About { text \"About page\" }",
+            "}",
             "func main() { }",
             "import \"math.kin\" as math; // modules: math.add(1, 2)",
             "let x = 1; var y = 2; y += 1;",
