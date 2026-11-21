@@ -191,8 +191,8 @@ fn run(src: &str, path: &str) -> ExitCode {
         }
     };
 
-    // Website-only programs have nothing for the console VM to run:
-    // report guidance instead of a fake execution.
+    // Website-only and app-only programs have nothing for the console
+    // VM to run: report guidance instead of a fake execution.
     if let Some(site) = &compiled.site {
         if compiled.module.find("main").is_none() {
             eprintln!(
@@ -200,6 +200,19 @@ fn run(src: &str, path: &str) -> ExitCode {
                 site.name
             );
             eprintln!("  build it with: kinn build {} --target web", path);
+            return ExitCode::from(1);
+        }
+    }
+    if let Some(app) = &compiled.app {
+        if compiled.module.find("main").is_none() {
+            eprintln!(
+                "note: this program declares app \"{}\" and defines no `main` to run.",
+                app.name
+            );
+            eprintln!(
+                "  dynamic app builds arrive later in 0.4.0 (the runtime is under construction);"
+            );
+            eprintln!("  today only `website` programs build with `kinn build --target web`");
             return ExitCode::from(1);
         }
     }
@@ -353,6 +366,17 @@ fn build_command(args: &[String]) -> ExitCode {
     let site = match &compiled.site {
         Some(s) => s,
         None => {
+            if let Some(app) = &compiled.app {
+                eprintln!(
+                    "error: `{}` declares an app (\"{}\"), but building dynamic apps is not implemented yet",
+                    file, app.name
+                );
+                eprintln!(
+                    "  the 0.4.0 dynamic pipeline is under construction (grammar is in, checking/lowering/runtime arrive next);"
+                );
+                eprintln!("  the {} target currently builds `website` declarations — see docs/BACKEND_WEB.md", target);
+                return ExitCode::from(1);
+            }
             eprintln!(
                 "error: `{}` declares no `website`; the {} target builds website declarations",
                 file, target

@@ -11,6 +11,52 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S2: the `app` declaration — grammar, AST and honest guards
+
+- Language: the full dynamic-app grammar of
+  DYNAMIC_WEB_ARCHITECTURE B.2–B.9 parses: `app "Name" { ... }` with
+  `navigation mpa|spa`, `not_found`, `theme` (ADR-0027 token
+  whitelist), `state` blocks, `computed`, `animation` (keyframes with
+  `from`/`to`/`step`, named transitions, duration/delay/easing incl.
+  `cubic(...)`), `store`, `route "path/:id" -> Page`, app-level
+  `transition`, `page` views and `component` declarations
+  (`prop`/`state`/`view`). Views accept binding **expressions**
+  wherever 0.3 elements take strings, plus `when`/`otherwise`,
+  keyed `each`, `form`/`field` (6 kinds, 8 validation attributes),
+  `input bind`, `on <event>` handler blocks (10 events + `on key "..."`
+  sugar) and component instantiation with named props
+  (`TaskRow(label: x)`, qualified `ui.Card(...)`).
+- Parser: new codes **E2031–E2039** (unknown event, malformed
+  each/when/instantiation, non-expression view argument, theme/field
+  whitelists, animation malformations, misplaced handler blocks) — all
+  positioned, all frozen by tests. **`each` vs casts**: a bare `as`
+  followed by an identifier is always the loop-variable marker (cast
+  types are keywords), so `each items as item` parses and casts in
+  iterables need parentheses. Brace-aware recovery: a broken item
+  inside a section/view/flat block never truncates its parent
+  (regression-tested). Handler bodies are **official Kin statements**
+  (semicolons, `if` not `when` — B.5/B.6 normative; the B.7 example's
+  `when form_valid` was a doc slip, fixed).
+- Checker: presence rules **E3051** (app outside the entry file) and
+  **E3052** (website + app, or two apps) — pulled forward from S3 so
+  an app half is never silently ignored by a website build; app
+  programs do not need `main` (B.2). App internals are **not yet
+  checked** (S3).
+- CLI: `kinn ast` dumps the whole app tree; `kinn check` passes
+  grammar + presence; `kinn run`/`kinn build` on app programs exit 1
+  with honest guards ("building dynamic apps is not implemented yet")
+  instead of pretending. `Compiled` carries the parsed `AppDecl`
+  (lowering to an AppModel arrives with S4).
+- Example: `examples/web/tasks_app.kin` — the target-shape app
+  exercising every grammar construct (parses; documents its own
+  intermediate status).
+- Docs: LANGUAGE_SPEC §C3 (normative grammar + rules), ROADMAP S2
+  checked, DYNAMIC_WEB_ARCHITECTURE Part E approval annotated.
+- Tests: +54 (workspace 281 → 335, all green): 44 parser (incl. the
+  70-word stays-identifier regression gate), 5 checker presence, 5
+  CLI integration. 0.3.0 web dist rebuilt byte-identical; Studio
+  66/66 against a freshly built wasm.
+
 ### Added — S1: cross-module value exports (`const`)
 
 - Language: `const NAME: Type = expr;` top-level declarations with a

@@ -195,8 +195,9 @@ implementation and tests in later releases.
 
 ## ADR-0023 — KINN Web Runtime: a real, dependency-free runtime for dynamic web apps
 
-**Status: accepted (2026-11-22, 0.4.0 design; implementation gated on
-the 0.4.0 Part E approval).** 0.4.0 introduces a genuine web runtime
+**Status: accepted (2026-11-22, 0.4.0 design). The Part E gate
+resolved 2026-11-22 (owner approved D1–D6); implementation in
+progress — S1–S2 landed, the runtime itself is S5–S6.** 0.4.0 introduces a genuine web runtime
 (`kinnrt.js`) for the new dynamic `app` module: reactive updates from a
 statically compiled binding graph, event dispatch, lifecycle, SPA/MPA
 routing, stores, animation coordination. This **supersedes the "no
@@ -209,7 +210,9 @@ architecture: `docs/DYNAMIC_WEB_ARCHITECTURE.md` Part C.
 
 ## ADR-0024 — The `app` language module: components, state, events, forms
 
-**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+**Status: accepted (2026-11-22, 0.4.0 design). Grammar landed with
+S2 (parser E2031–E2039, AST, presence rules E3051/E3052); semantics
+are S3.**
 Dynamic web apps are a sibling declaration of `website` (`app "Name" { …
 }`), parsed/checked/lowered by the shared front end via the ADR-0019
 contextual-keyword recipe (no new reserved words; regression tests per
@@ -227,7 +230,8 @@ with E3070 — backends stay independent (ADR-0018).
 
 ## ADR-0025 — Routing: MPA default, SPA opt-in, honest `file://` behavior
 
-**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+**Status: accepted (2026-11-22, 0.4.0 design; implementation pending
+its S-step — see ROADMAP S7).**
 `navigation mpa` (default) keeps one independent HTML per page/route
 with shared state carried by an explicit hydration channel;
 `navigation spa` emits one shell with a runtime router (dynamic `:param`
@@ -239,7 +243,8 @@ link "just works" without the documented static-host fallback rule.
 
 ## ADR-0026 — Local persistence and JSON: local-only, honestly bounded
 
-**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+**Status: accepted (2026-11-22, 0.4.0 design; implementation pending
+its S-step — see ROADMAP S9).**
 `store` blocks persist declared state keys to the browser's
 `localStorage` (schema-hash guarded) with `store_save/load/clear`
 builtins; JSON is the serialization format of state snapshots
@@ -250,7 +255,8 @@ claims. There is no network/fetch construct in 0.4.0.
 
 ## ADR-0027 — Animation and theming: declarative whitelist mapped to generated CSS
 
-**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+**Status: accepted (2026-11-22, 0.4.0 design; implementation pending
+its S-step — see ROADMAP S8; theme tokens land with S8).**
 Animations are declarations (`animation { keyframes/transition }`,
 element attributes `enter/exit/hover/press/scroll`), never imperative
 JS: keyframe properties are whitelisted to compositor-friendly

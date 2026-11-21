@@ -16,9 +16,9 @@ use std::collections::HashMap;
 
 /// A successfully compiled program: the linked KIR module, the entry
 /// mode, the source of every file that took part (for rendering
-/// diagnostics later), and the site model when the program declares a
-/// `website` (consumed by the build backends; `None` for console
-/// programs).
+/// diagnostics later), the site model when the program declares a
+/// `website`, and the raw `app` declaration when it declares an `app`
+/// (consumed by the build backends; `None` for console programs).
 #[derive(Debug)]
 pub struct Compiled {
     pub module: Module,
@@ -27,6 +27,10 @@ pub struct Compiled {
     pub sources: HashMap<String, String>,
     /// Lowered `website` declaration, when the entry file has one.
     pub site: Option<SiteModel>,
+    /// The parsed `app` declaration, when the entry file has one
+    /// (0.4.0 S2: grammar only — checking is partial, lowering to an
+    /// `AppModel` arrives with S4, so this is the raw AST for now).
+    pub app: Option<crate::ast::AppDecl>,
 }
 
 /// Compile a project starting at `entry_path` / `entry_src`. The loader
@@ -52,7 +56,8 @@ pub fn compile_project(
         .websites
         .first()
         .map(lower::site_model);
-    (Some(Compiled { module, mode, sources: proj.sources, site }), diags)
+    let app = proj.files[0].program.apps.first().cloned();
+    (Some(Compiled { module, mode, sources: proj.sources, site, app }), diags)
 }
 
 /// Compile a single file (imports cannot be resolved and are reported as

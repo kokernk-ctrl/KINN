@@ -71,16 +71,22 @@ ADRs 0023–0027. **Phase 5 implementation started 2026-11-22 after the
 owner approved all Part E decisions (D1–D6): roadmap renumber (D1),
 records stay out (D2), MPA default (D3), serve with a security
 boundary (D4), Playwright browser tests in CI (D5), animation
-whitelist (D6). S1 is landed; S2 is next.**
+whitelist (D6). S1 and S2 are landed; S3 is next.**
 
 - [x] S1 Cross-module value exports (`const`) — prerequisite
       (landed: parser/checker/lowering/KIR `Module.consts`, qualified
       reads `m.NAME`, E3039; ADR-0028; 31 new tests, workspace 281
       green; 0.3.0 web dist byte-identical; P-014 narrowed)
-- [ ] S2 Language: `app` module grammar (components, state, computed,
+- [x] S2 Language: `app` module grammar (components, state, computed,
       views, events, forms, animations, routes) with full parse tests
-- [ ] S3 App semantics: checker rules E2031–E2039/E3040–E3070,
-      W3040–W3044
+      (landed: parser E2031–E2039 + presence rules E3051/E3052, AST +
+      `kinn ast` dump, brace-aware recovery, honest CLI guards —
+      `kinn build` on an app says the dynamic pipeline is not
+      implemented yet; 54 new tests, workspace 335 green; 0.3.0 web
+      dist byte-identical; Studio 66/66 on a freshly built wasm;
+      grammar normative in LANGUAGE_SPEC §C3)
+- [ ] S3 App semantics: checker rules E3040–E3070, W3040–W3044
+      (E3051/E3052 presence rules already landed with S2)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

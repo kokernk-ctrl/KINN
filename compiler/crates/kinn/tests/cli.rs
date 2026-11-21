@@ -295,6 +295,79 @@ fn run_of_a_website_only_program_gives_guidance() {
 }
 
 #[test]
+fn ast_command_dumps_the_dynamic_app_grammar() {
+    // 0.4.0 S2: `kinn ast` shows the full app tree (the checkable
+    // surface of the grammar; see examples/web/tasks_app.kin).
+    let out = kinn(&["ast", &format!("{}/web/tasks_app.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("app \"TaskTrack\""));
+    assert!(stdout.contains("navigation spa"));
+    assert!(stdout.contains("not_found Missing"));
+    assert!(stdout.contains("keyframes \"pop\""));
+    assert!(stdout.contains("store \"tasks\" (items, done, filter)"));
+    assert!(stdout.contains("route \"item/:id\" -> ItemDetail"));
+    assert!(stdout.contains("each items as item key item"));
+    assert!(stdout.contains("TaskRow(label: item)"));
+    assert!(stdout.contains("field draft kind text"));
+    assert!(stdout.contains("on key \"Escape\""));
+    assert!(stdout.contains("component TaskRow"));
+    assert!(stdout.contains("prop label: string"));
+}
+
+#[test]
+fn check_app_example_passes_grammar_and_presence_rules() {
+    // S2 scope: the example is grammatically valid and satisfies the
+    // presence rules (one app, entry file, no main needed).
+    let out = kinn(&["check", &format!("{}/web/tasks_app.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8(out.stdout).unwrap().contains("OK"));
+}
+
+#[test]
+fn build_on_an_app_program_reports_the_honest_guard() {
+    // No pretending: dynamic app builds are not implemented in S2, and
+    // the CLI says exactly that instead of silently ignoring the app.
+    let dir = tempdir("appguard");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/tasks_app.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("building dynamic apps is not implemented yet"));
+    assert!(stderr.contains("app (\"TaskTrack\")"));
+}
+
+#[test]
+fn run_of_an_app_only_program_gives_guidance() {
+    let out = kinn(&["run", &format!("{}/web/tasks_app.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("app \"TaskTrack\""));
+    assert!(stderr.contains("0.4.0"));
+}
+
+#[test]
+fn website_and_app_in_one_program_is_e3052_at_the_cli() {
+    let dir = tempdir("e3052");
+    let path = dir.join("both.kin");
+    std::fs::write(
+        &path,
+        "website \"W\" { page Home { text \"x\" } }\napp \"A\" { page Home { text \"y\" } }\n",
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3052"));
+}
+
+#[test]
 fn targets_command_lists_both_targets() {
     let out = kinn(&["targets"]);
     assert_eq!(out.status.code(), Some(0));

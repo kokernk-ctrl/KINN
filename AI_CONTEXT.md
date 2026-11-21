@@ -1,7 +1,7 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1.** Update this
+**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2.** Update this
 file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
@@ -58,19 +58,24 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **281 Rust tests** (177 kinc unit incl. const/website
-parser/checker/backends/consteval, 27 kinrt, 28 pipeline, 28 CLI, 16
-ffi, 5 manifest) and **66 Studio vitest tests** (15 real-wasm incl.
-build targets). Examples carry `// expect:` blocks; error examples
-declare codes; `examples/web/site.kin` is the website example;
-`examples/modules/` demonstrates multi-file projects with const
+Test totals: **335 Rust tests** (226 kinc unit incl. app grammar,
+const, website parser/checker/backends/consteval, 27 kinrt, 28
+pipeline, 33 CLI, 16 ffi, 5 manifest) and **66 Studio vitest tests**
+(15 real-wasm incl. build targets). Examples carry `// expect:`
+blocks; error examples declare codes; `examples/web/site.kin` is the
+website example; `examples/web/tasks_app.kin` is the 0.4.0 app
+grammar showcase (parses; build guards say what is not implemented
+yet); `examples/modules/` demonstrates multi-file projects with const
 exports (0.4.0 S1).
 
-Planned, not implemented (do not pretend otherwise): site state/forms
-(0.4), package manager/registry (spec in MODULE_SYSTEM.md), native
-codegen for console programs (0.4+), string interpolation
-(ADR-0013), graphics (0.5), Android `tokens` command, on-device
-backend-APK install (P-019), Studio desktop shell.
+Planned, not implemented (do not pretend otherwise): app semantics
+E3040–E3070/W3040–W3044 (0.4.0 S3, next), app lowering/AppModel (S4),
+KIR→JS + runtime (S5–S6), routing/forms/persistence (S7–S9), package
+manager/registry (spec in MODULE_SYSTEM.md), native codegen for
+console programs (0.4+), string interpolation (ADR-0013), graphics
+(0.5), Android `tokens` command, on-device backend-APK install
+(P-019), Studio desktop shell. The `app` grammar (S2) parses and
+dumps but does not yet check or build — the CLI says so.
 
 ## Repository structure
 
@@ -110,10 +115,14 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 Studio integration, package foundation, CI for real targets). Current:
 **0.4.0 — Dynamic web applications (owner directive, 2026-11-22)**.
 Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` and
-ADR-0023–0027; **the owner approved D1–D6 on 2026-11-22 and Phase 5
-started: S1 (cross-module value exports, `const`, ADR-0028) is landed
-— 281 Rust tests green, 0.3.0 web dist byte-identical. Next: S2
-(`app` module grammar, parser + AST).** Carry-overs: string
+ADR-0023–0028; **the owner approved D1–D6 on 2026-11-22 and Phase 5
+runs: S1 (cross-module `const` exports, ADR-0028) and S2 (`app`
+module grammar B.2–B.9: parser E2031–E2039, AST + `kinn ast` dump,
+presence rules E3051/E3052, honest run/build guards) are landed —
+335 Rust tests green, Studio 66/66, 0.3.0 web dist byte-identical.
+Grammar is normative in LANGUAGE_SPEC §C3; handler bodies are
+official statements (semicolons, `if` not `when`). Next: S3 (app
+checker E3040–E3070, W3040–W3044).** Carry-overs: string
 casts/interpolation decision, native codegen spike, structs/records
 ADR (D2 stays out of 0.4.0 per the owner).
 

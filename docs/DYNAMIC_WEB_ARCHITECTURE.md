@@ -1,11 +1,14 @@
 # KINN 0.4.0 — Dynamic Web Applications: Technical Audit & Architecture Proposal
 
-**Status: PROPOSAL (design only — no implementation code is changed by this
-document).** Per the agreed 0.4.0 process, this document covers **Phase 1
-(technical audit), Phase 2 (language design), Phase 3 (runtime architecture)
-and Phase 4 (roadmap with tests and acceptance criteria)**. Implementation
-(Phase 5) starts only after the owner approves the decision points listed in
-**Part E**.
+**Status: APPROVED + IN IMPLEMENTATION (Phase 5).** Per the agreed 0.4.0
+process, this document covers **Phase 1 (technical audit), Phase 2
+(language design), Phase 3 (runtime architecture) and Phase 4 (roadmap
+with tests and acceptance criteria)**. **The owner approved all Part E
+decisions (D1–D6) on 2026-11-22 and authorized Phase 5**; S1
+(cross-module `const`, B.1) and S2 (`app` grammar B.2–B.9: parser,
+AST, `kinn ast`, presence rules E3051/E3052, honest CLI guards) are
+landed on `develop` — see CHANGELOG and LANGUAGE_SPEC §C1/§C3 for the
+normative wording that the implementation follows.
 
 Companion decisions: ADR-0023 … ADR-0027 in `docs/DECISIONS.md`.
 Companion verification: this audit was re-verified on `develop` @ `c84a8f0`
@@ -331,26 +334,30 @@ Semantics:
 
 ```
 component TaskRow {
-    prop label: Str
-    prop done: Bool = false          // props may have defaults
-    state expanded: Bool = false     // local state (B.4)
-
+    prop label: string               // types are the standard Kin
+    prop done: bool = false          // keywords (int, float, bool,
+    state expanded: bool = false     // string, [T]); "Str"/"Bool" in
+                                     // early drafts was informal
     view {
         text label                   // binding to the prop (B.5)
         when done {
             text "done" exit "fade"
         }
         button "Toggle" {
-            on click { done = not done }
+            on click { done = not done; }
         }
     }
 }
 ```
 
 - A component has `prop` declarations (typed, optional default), local
-  `state`, and exactly one `view`. Event handlers may appear on elements
-  inside the view (B.6). Components are declared inside `app` (or imported
-  from a module file and referenced as `module::TaskRow`).
+  `state` (one declaration per line, exactly like `prop` — only the
+  app-level `state` is a `{ ... }` block), and exactly one `view`.
+  Event handlers may appear on elements inside the view (B.6).
+  Components are declared inside `app` (or imported from a module file
+  and instantiated as `module.TaskRow(...)` — the established dot form
+  of calls and const reads; the `module::TaskRow` spelling in early
+  drafts was informal).
 - **Instantiation** inside a view: `TaskRow(label: item, done: is_done)` —
   same shape as function calls, parsed by position-insensitive named args.
   Unknown prop E3041; missing prop without default E3041; type mismatch
@@ -457,7 +464,7 @@ field draft kind text {
     on blur   { … }
 }
 form "Add task" {
-    on submit { when form_valid { … } }         // form-level
+    on submit { if form_valid { … } }           // form-level (official statements)
 }
 ```
 
@@ -466,8 +473,11 @@ form "Add task" {
   `pointerup`. `on key "Enter"` filters keydown/keyup by key string.
   Unknown event word: E2031 (parser); unknown key filter is not checked
   (runtime data, not semantics).
-- **Handler bodies are official Kin statements**, parsed by the existing
-  statement parser and type-checked by the existing checker, with three
+- **Handler bodies are official Kin statements** (semicolons required;
+  conditionals are `if` — views use `when` so the two never blur, B.5;
+  an early draft of the B.7 example showed `when` inside a handler and
+  is corrected in this document), parsed by the existing statement
+  parser and type-checked by the existing checker, with three
   app-specific rules: assignment targets resolve per B.4; handler-only
   builtins are in scope (`event_value: Str` on input/change, `event_key:
   Str` on keydown/keyup, `event_x/event_y: Int` on pointer events,
@@ -502,10 +512,10 @@ form "Add task" {
     field email kind email { pattern "^[^@]+@[^@]+$" }
     button "Add" {
         on submit {
-            when form_valid {
-                items = items + [draft]
-                draft = ""
-                store_save("tasks")
+            if form_valid {          // official statements: `if`, not
+                items = items + [draft]  // `when` (B.5/B.6); the first
+                draft = ""               // draft of this example used
+                store_save("tasks")      // `when` — corrected
             }
         }
     }
@@ -1049,6 +1059,14 @@ Estimates are ordering and dependency statements, not dates.
 ---
 
 ## Part E — Decisions required from the owner (Phase 5 gate)
+
+> **RESOLVED 2026-11-22: the owner approved all six decisions as
+> recommended** — D1 renumber (0.4.0 dynamic web; graphics 0.5.0;
+> developer comfort 0.6.0), D2 no records/structs in 0.4.0, D3 MPA
+> default, D4 `kinn serve` with the documented security boundary, D5
+> Playwright in CI, D6 animation whitelist freeze. Phase 5 runs
+> S1→S11 in order; ADR-0023…0028 encode the decisions and the S1/S2
+> landing.
 
 Implementation starts after these are answered. Each carries a
 recommendation; silence on a point = the recommendation stands.

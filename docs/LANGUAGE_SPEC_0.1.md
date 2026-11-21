@@ -421,9 +421,115 @@ const_decl := 'const' IDENT ':' type '=' const_expr ';'
 | Code | Stage | Meaning |
 | --- | --- | --- |
 | E3039 | checker | invalid constant expression (non-constant construct, or constant arithmetic overflow/division by zero) |
+| E2031 | parser | unknown event name in `on` (supported: click, input, change, submit, focus, blur, key, keydown, keyup, pointerdown, pointerup) |
+| E2032 | parser | malformed `each`/`when`/component instantiation syntax (missing `as`, positional prop args, missing `(`) |
+| E2033 | parser | a view argument must be a string or an expression (the next token cannot start one) |
+| E2034 | parser | unknown theme token (whitelist: accent, bg, surface, text, muted, font, radius, max_width) |
+| E2035 | parser | unknown field kind (whitelist: text, number, date, email, password, textarea) |
+| E2036 | parser | unknown field attribute (whitelist: label, placeholder, required, min_length, max_length, min_value, max_value, pattern) |
+| E2037 | parser | malformed animation block (bad step/option word, unquoted animation name after enter/exit/hover/press/scroll/transition) |
+| E2038 | parser | an element that cannot take handlers is followed by an event block |
+| E2039 | parser | malformed input/field/`on` structure (`input` without `bind`, `field` without `kind`, `on key` without a filter, key filter on a non-keyboard event) |
+| E3051 | checker | `app` declaration outside the entry file |
+| E3052 | checker | both `website` and `app` declared, or more than one `app` |
 
-Codes reserved for later 0.4 steps (declared in
-docs/DYNAMIC_WEB_ARCHITECTURE.md B.11, frozen by their test suites):
-parser E2031–E2039 (`app`/view grammar, S2), checker E3040–E3079 and
-warnings W3040–W3049 (`app` semantics, S3). E3039 sits outside those
+E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
+presence rules (frozen by the S2 checker tests — the full semantic layer
+E3040–E3079 / W3040–W3049 arrives with S3). E3039 sits outside those
 reserved ranges and is fully owned by `const` (S1).
+
+## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
+
+`app` is the dynamic sibling of `website` (ADR-0024). **S2 delivers the
+grammar only**: an app program parses and `kinn ast` shows its tree, the
+presence rules (E3051/E3052, no `main` required) hold, and every other
+command says honestly that dynamic builds are not implemented yet.
+Semantic rules arrive with S3, lowering with S4.
+
+```
+app_decl      := "app" STRING "{" app_section* "}"            ; E2016 when the name is not a string
+app_section   := navigation | not_found | theme | state | computed
+               | animation | store | route | transition | page | component
+navigation    := "navigation" ("mpa" | "spa")                 ; default: mpa
+not_found     := "not_found" IDENT
+theme         := "theme" "{" theme_token* "}"
+theme_token   := TOKEN STRING          ; TOKEN ∈ {accent,bg,surface,text,muted,font,radius,max_width} — E2034
+state         := "state" "{" state_field* "}"                 ; app-level: a block
+state_field   := IDENT ":" type "=" expr ["," | ";"]          ; type mandatory, initializer mandatory
+computed      := "computed" IDENT "=" expr
+animation     := "animation" "{" (keyframes | transition_decl)* "}"
+keyframes     := "keyframes" STRING "{" kf_item* "}"
+kf_item       := "from" anim_props | "to" anim_props
+               | "step" expr anim_props
+               | "duration" expr | "delay" expr | "easing" expr
+anim_props    := "{" (IDENT expr)* "}"
+transition_decl := "transition" STRING "{" ("duration" expr | "delay" expr | "easing" expr)* "}"
+store         := "store" STRING "{" IDENT ["," IDENT]* "}"
+route         := "route" STRING "->" IDENT
+transition    := "transition" STRING              ; app-level page/route transition
+page          := "page" IDENT "{" view_element* "}"
+component     := "component" IDENT "{" comp_section* "}"
+comp_section  := prop | comp_state | view
+prop          := "prop" IDENT ":" type ["=" expr]
+comp_state    := "state" IDENT ":" type "=" expr  ; component-level: one per line, like prop
+view          := "view" "{" view_element* "}"
+```
+
+View elements (B.5–B.8):
+
+```
+view_element  := "title" vexpr anim*
+              | "heading" vexpr anim* | "text" vexpr anim* | "divider" anim*
+              | "button" vexpr ["open" IDENT] anim* handlers    ; E2038: no block after text/heading/title/divider
+              | "link" vexpr ["open" IDENT] anim* handlers
+              | "image" vexpr "alt" vexpr anim* handlers
+              | "input" "bind" IDENT anim* handlers             ; E2039 without bind
+              | "when" vexpr "{" view_element* "}" ["otherwise" "{" view_element* "}"]
+              | "each" vexpr "as" IDENT ["key" vexpr] "{" view_element* "}"   ; E2032 without as
+              | IDENT ["." IDENT] "(" [prop_arg {"," prop_arg}] ")" anim* handlers  ; component instantiation
+              | "form" vexpr "{" (view_element | on_event)* "}"
+              | "field" IDENT "kind" field_kind ["{" (field_attr | on_event)* "}"] anim*
+vexpr         := expr                    ; E2033 when the next token cannot start an expression
+anim          := ("enter" | "exit" | "hover" | "press" | "scroll") STRING   ; E2037 unquoted
+handlers      := ["{" on_event* "}"]     ; only interactive elements; E2038 otherwise
+on_event      := "on" event_word [STRING] "{" stmt* "}"   ; E2031 unknown word; E2039 bad key filter
+event_word    := click | input | change | submit | focus | blur | key | keydown | keyup | pointerdown | pointerup
+field_kind    := text | number | date | email | password | textarea      ; E2035
+field_attr    := ("label" | "placeholder" | "min_length" | "max_length" | "min_value" | "max_value" | "pattern") expr
+               | "required"                                   ; E2036 unknown attribute
+prop_arg      := IDENT ":" expr                              ; E2032 positional args
+```
+
+Normative rules:
+
+- **Contextual keywords only** (ADR-0019 recipe). Every word above —
+  `app`, `component`, `state`, `computed`, `view`, `prop`, `each`,
+  `when`, `otherwise`, `on`, `route`, `store`, `animation`,
+  `keyframes`, `from`, `to`, `step`, `duration`, `delay`, `easing`,
+  `enter`, `exit`, `hover`, `press`, `scroll`, `transition`,
+  `navigation`, `mpa`, `spa`, `not_found`, `form`, `field`, `kind`,
+  `bind`, `theme`, the field attributes, the event words, the theme
+  tokens — remains a legal identifier outside these grammar positions.
+  The test `app_words_stay_identifiers_outside_the_declaration` is the
+  regression gate (mirrors the 0.3 website gate).
+- **Handler bodies are official Kin statements** (B.6): parsed by the
+  ordinary statement parser — semicolons required, conditionals are
+  `if` (views use `when`; the two never blur, B.5).
+- **`each` and casts**: `as` is the cast operator, so a cast in an
+  `each` iterable needs parentheses (`each (vals as [string]) as v`).
+  A bare `as` followed by an identifier is always the loop-variable
+  marker, never a cast.
+- **Component state vs app state**: component `state` is one
+  declaration per line (like `prop`); app `state` is a `{ ... }` block.
+- **Qualified component instantiation** uses the established dot form
+  `alias.Name(props)` — the same convention as calls and const reads
+  (the `alias::Name` spelling in the architecture doc is informal).
+- **Types are the standard Kin types**: `int`, `float`, `bool`,
+  `string`, `[T]` (the capitalized `Str`/`Bool` in the architecture
+  doc examples is informal notation).
+- **Position rules**: one `website` or one `app` per program, entry
+  file only (E3051/E3052); app programs do not need `main` (B.2).
+- **Grammar error recovery**: sections, views, flat blocks (state,
+  theme, store, field attributes) and keyframe blocks each recover to
+  their own closing `}`, so one broken item never truncates its parent
+  (regression-tested).

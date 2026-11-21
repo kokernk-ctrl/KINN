@@ -91,6 +91,54 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         check_website(&mut c, w);
     }
 
+    // Pass 0b: app declarations (0.4.0 S2). Presence rules only — the
+    // full semantic layer (B.11) arrives with S3. E3051/E3052 are
+    // implemented now so a program never silently builds its `website`
+    // while an `app` half is ignored, and so imported modules cannot
+    // smuggle an app past the entry-file rule.
+    let mut entry_app: Option<&AppDecl> = None;
+    for (i, unit) in project.files.iter().enumerate() {
+        c.file = unit.path.clone();
+        for a in &unit.program.apps {
+            if i != 0 {
+                c.error(
+                    "E3051",
+                    "app declarations belong in the entry file (imported modules cannot declare apps)",
+                    a.line,
+                    a.col,
+                    3,
+                );
+                continue;
+            }
+            if entry_app.is_some() {
+                c.error(
+                    "E3052",
+                    "a program can declare only one app",
+                    a.line,
+                    a.col,
+                    3,
+                );
+                continue;
+            }
+            if entry_site.is_some() {
+                c.error(
+                    "E3052",
+                    "a program declares a `website` or an `app`, never both — remove one of them",
+                    a.line,
+                    a.col,
+                    3,
+                );
+                continue;
+            }
+            entry_app = Some(a);
+        }
+    }
+    // App internals are parsed (S2) but not yet checked: that is the
+    // honest 0.4.0 intermediate state, documented in CHANGELOG and
+    // LANGUAGE_SPEC. Lowering and building arrive with S4+; `kinn
+    // build` reports a precise guard instead of silently ignoring the
+    // app.
+
     // Pass 1: signatures of every file.
     for unit in &project.files {
         let mut sigs: HashMap<String, FnSig> = HashMap::new();
@@ -218,16 +266,17 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
     }
 
     // Pass 1b: `main` requirements — entry file only. A program that
-    // declares a website is a web-target program and does not need
-    // `main` (run reports guidance for it instead of a compile error).
+    // declares a website or an app is a web-target program and does not
+    // need `main` (run/build report guidance for it instead of a
+    // compile error).
     let main_info = c.sigs[0]
         .get("main")
         .map(|m| (m.params.len(), m.ret.clone(), m.line, m.col));
     match main_info {
-        None if entry_site.is_none() => {
+        None if entry_site.is_none() && entry_app.is_none() => {
             c.error("E3008", "program must define `func main()`", 1, 1, 0);
         }
-        None => {} // website-only program: see `kinn build --target web`
+        None => {} // website/app-only program: see `kinn build --target web`
         Some((nparams, ret, line, col)) => {
             if nparams != 0 {
                 c.error("E3008", "`main` must not take parameters", line, col, 4);
@@ -2008,6 +2057,43 @@ mod tests {
         // Missing main with a website present is NOT E3008 (the run
         // command reports guidance instead).
         assert!(!has("E3008", SITE));
+    }
+
+    // -- 0.4.0 S2: app presence rules (E3051/E3052; internals land in S3) ----
+
+    const APP: &str = "app \"A\" { page Home { text \"hi\" } }\n";
+
+    #[test]
+    fn app_only_program_has_no_e3008() {
+        // B.2: `main` remains optional for app programs (like websites).
+        clean(APP);
+    }
+
+    #[test]
+    fn app_with_main_still_passes() {
+        clean("func main() { }\napp \"A\" { page Home { text \"hi\" } }\n");
+    }
+
+    #[test]
+    fn app_outside_entry_file_is_e3051() {
+        let diags = check_two(
+            "import \"lib.kin\" as lib;\napp \"A\" { page Home { text \"hi\" } }\n",
+            "app \"B\" { page Home { text \"x\" } }\n",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3051"), "{:?}", diags);
+    }
+
+    #[test]
+    fn website_and_app_together_is_e3052() {
+        let src = format!("{}{}\n", SITE, APP);
+        assert!(has("E3052", &src));
+    }
+
+    #[test]
+    fn two_apps_are_e3052() {
+        let src = format!("{}{}", APP, APP);
+        assert!(has("E3052", &src));
+        assert!(!has("E3030", &src)); // E3030 stays website-specific
     }
 
     // -- 0.4.0 S1: cross-module value exports (`const`) ----------------------

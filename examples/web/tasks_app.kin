@@ -1,0 +1,162 @@
+// examples/web/tasks_app.kin — the 0.4.0 dynamic app target shape
+// (grammar showcase; docs/DYNAMIC_WEB_ARCHITECTURE.md B.2–B.9).
+//
+// STATUS (0.4.0 S2): this file parses and `kinn ast` shows its tree.
+// App checking is partial, and building dynamic apps (runtime, routing,
+// forms, persistence) arrives with the later 0.4.0 steps — run
+// `kinn build` on it today and it says so honestly instead of pretending.
+//
+// Try it:   kinn ast examples/web/tasks_app.kin
+
+*mode = B;
+
+const MAX_TASKS: int = 100;
+
+func done_count(items: [bool]) -> int {
+    var n = 0;
+    for it in items {
+        if it {
+            n = n + 1;
+        }
+    }
+    return n;
+}
+
+func clamp_max(count: int) -> int {
+    if count > MAX_TASKS {
+        return MAX_TASKS;
+    }
+    return count;
+}
+
+app "TaskTrack" {
+    navigation spa
+    not_found Missing
+    transition "fade"
+
+    theme {
+        accent "#2563eb"
+        bg "#f8fafc"
+        surface "#ffffff"
+        text "#0f172a"
+        muted "#64748b"
+        radius "8px"
+        max_width "720px"
+    }
+
+    state {
+        items: [string] = []
+        done: [bool] = []
+        filter: string = "all"
+        draft: string = ""
+        qty: int = 1
+        open_form: bool = true
+    }
+
+    computed remaining = len(items) - done_count(done)
+    computed total_label = str(clamp_max(len(items))) + " tasks"
+
+    animation {
+        keyframes "pop" {
+            from { opacity 0  scale 0.96 }
+            to   { opacity 1  scale 1 }
+            duration 200
+            easing ease_out
+        }
+        transition "fade" { duration 150  easing linear }
+    }
+
+    store "tasks" { items, done, filter }
+
+    route "item/:id" -> ItemDetail
+
+    component TaskRow {
+        prop label: string
+        prop done: bool = false
+        state expanded: bool = false
+
+        view {
+            text label
+            when done {
+                text "done" exit "fade"
+            }
+            button "Toggle" {
+                on click { expanded = not expanded; }
+            }
+        }
+    }
+
+    page Home {
+        title "Tasks"
+        heading "Tasks" enter "pop"
+        text "Open: " + str(remaining)
+        text filter
+
+        when len(items) == 0 {
+            text "Nothing here yet."
+        }
+        otherwise {
+            text total_label
+        }
+
+        each items as item key item {
+            TaskRow(label: item)
+        }
+
+        button "Add task" {
+            on click { open_form = not open_form; }
+        }
+
+        when open_form {
+            form "Add task" {
+                field draft kind text {
+                    label "Task title"
+                    placeholder "What needs doing?"
+                    required
+                    max_length 80
+                    on input { draft = event_value; }
+                }
+                field qty kind number {
+                    label "How many?"
+                    min_value 1
+                    max_value 99
+                }
+                field due kind date {
+                    label "Due"
+                }
+                button "Add" {
+                    on submit {
+                        if form_valid {
+                            items = items + [draft];
+                            done = done + [false];
+                            draft = "";
+                            store_save("tasks");
+                        }
+                    }
+                }
+            }
+        }
+
+        image "hero.png" alt "A tidy desk" scroll "pop"
+
+        when filter == "all" {
+            link "Show open only" open Home
+        }
+
+        button "Escape" {
+            on key "Escape" { open_form = false; }
+        }
+    }
+
+    page ItemDetail {
+        heading "Item"
+        text "Item id: " + param("id")
+        link "Back" open Home
+    }
+
+    page Missing {
+        heading "Not found"
+        text "This page does not exist."
+        link "Home" open Home
+    }
+}
