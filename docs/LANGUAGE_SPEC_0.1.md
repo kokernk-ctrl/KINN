@@ -307,3 +307,61 @@ never accepts broken input.
 | E5000 | ffi | compiler panic caught at the FFI boundary |
 | E5002 | ffi | JNI bridge error |
 | E5003 | host | malformed FFI result |
+
+---
+
+# Kin 0.3 additions (normative)
+
+The declarative `website` module (ADR-0019) and the diagnostic codes
+it introduces. Full element semantics and generated-output contract:
+docs/BACKEND_WEB.md (web) and docs/BACKEND_ANDROID.md (android).
+
+## B1. Website declarations
+
+```
+website_decl := "website" STRING "{" page* "}"        ; E2016 when the name is not a string
+page        := "page" IDENT "{" element* "}"
+element     := "title" STRING | "heading" STRING | "text" STRING
+             | "button" STRING "open" IDENT | "link" STRING "open" IDENT
+             | "image" STRING "alt" STRING | "divider"
+```
+
+- `website`, `page`, `title`, `heading`, `text`, `button`, `link`,
+  `image`, `divider`, `open`, `alt` are **contextual keywords**: they
+  are ordinary identifiers everywhere except in these positions. No
+  0.2 program changes meaning.
+- Top-level items after the imports are `website` declarations and
+  `func` definitions in any order. A top-level `website` identifier is
+  always parsed as a website declaration attempt.
+- Elements are newline-separated declarative items; no semicolons.
+- Valid programs carry **at most one** website (E3030) and only in the
+  entry file (E3037). A website program does not need `func main()`;
+  `kinn run` on a site-only program reports guidance (exit 1), never a
+  fake execution.
+- The mode directive is unchanged and keeps its semicolon. The website
+  module is available in all three modes; modes do not fork the
+  language.
+- Lowering: the checker-validated website lowers to a
+  target-independent `SiteModel` (ADR-0018). The first `title` element
+  becomes the page title; additional titles demote to section
+  headings (W3036). The grammar cannot express anything outside the
+  element table, so every backend covers the model totally.
+
+## B2. New diagnostic codes (complete for 0.3 additions)
+
+| Code | Stage | Meaning |
+| --- | --- | --- |
+| E2016 | parser | website name is not a string literal |
+| E2030 | parser | unknown page element |
+| E3030 | checker | more than one website declaration |
+| E3031 | checker | duplicate page name (case-insensitive) |
+| E3032 | checker | navigation target is not a declared page |
+| E3033 | checker | website name empty |
+| E3034 | checker | image alt text empty (accessibility) |
+| E3035 | checker | button/link label empty |
+| E3036 | checker | image source empty |
+| E3037 | checker | website declared in a non-entry file |
+| E3038 | checker/FFI | build target used on a program without a website |
+| W3035 | checker | page never linked from another page |
+| W3036 | checker | duplicate `title` element (first wins) |
+| W3037 | checker | empty `heading`/`text` content |
