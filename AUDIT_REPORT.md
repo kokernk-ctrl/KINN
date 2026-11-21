@@ -1,9 +1,10 @@
-# KINN 0.2.0 — Audit Report
+# KINN 0.3.0 — Audit Report
 
-Full-repository audit for release 0.2.0 (2026-11-21). Every claim below
+Full-repository audit for release 0.3.0 (2026-11-21). Every claim
 names **how** it was verified. Categories: **verified** (built/tested
 with evidence), **partial** (works with stated limits), **planned**
-(honestly not built), **broken** (defect, tracked).
+(honestly not built), **broken** (defect, tracked). The 0.2.0 baseline
+was independently re-verified before any 0.3 work started.
 
 ---
 
@@ -11,186 +12,215 @@ with evidence), **partial** (works with stated limits), **planned**
 
 | Suite | Where run | Result |
 | --- | --- | --- |
-| Rust workspace (`cargo test --workspace`) | local Linux (Rust 1.100.0) | **190 passed, 0 failed** |
-| same | CI, ubuntu-latest | **passed** |
-| same | CI, windows-latest | **passed** |
-| same | CI, macos-latest | **passed** |
-| Studio web (`npm test`), wasm backend built first | local + CI | **51 passed, 0 failed** (10 execute the real compiler in WebAssembly) |
-| Android app build (`assembleDebug` + `assembleRelease`) | local (SDK 34, NDK r27) | **BUILD SUCCESSFUL**; APKs produced |
-| same | CI (android workflow) | **passed**; artifacts + signature report |
-| Linux package | CI (linux workflow) | **passed**; DEB installed and exercised on the runner |
-| Windows package | CI (windows workflow) | **passed**; tests, zip and NSIS installer (see §8) |
+| Rust workspace (`cargo test --workspace`) | local Linux (Rust 1.100.0) | **250 passed, 0 failed** |
+| same | CI, ubuntu/windows/macos (`ci` run 44912150523 + platform matrix) | **passed** |
+| Studio web (`npm test`) with the real wasm backend | local + CI | **66 passed, 0 failed** (15 execute the real compiler / target backends in WebAssembly) |
+| Studio production build (`tsc && vite build`) | local + CI | **passed** |
+| Android app build (`assembleDebug` + `assembleRelease`) | CI (`android` run 44912150502) | **BUILD SUCCESSFUL**; artifacts + signature report |
+| **Backend APK** (exported Kin project → Gradle → APK) | CI (`android` runs 44911581668, 44912150502) | **BUILD SUCCESSFUL**; `apksigner verify` + zero-permission check passed |
+| Windows packaging (zip + NSIS) | CI (`windows` run 44912150542) | **passed** |
+| Linux packaging (DEB + AppImage + tarball) | CI (`linux` run 44912150499) | **passed** |
 
-Rust breakdown: 26 kinrt (VM/value), 111 kinc unit (lexer/parser/
-checker/project/diagnostics), 22 kinc pipeline (end-to-end incl. all
-`// expect:` examples), 19 kinn CLI (real binary), 12 kinn-ffi (C ABI
-through the JSON protocol), plus kinn-android type-checked as part of
-the workspace on all three desktop platforms.
+Rust breakdown: 153 kinc unit (lexer/parser/checker/project/
+diagnostics/site/backends), 26 kinrt (VM/value), 22 kinc pipeline
+(end-to-end incl. all `// expect:` examples), 28 kinn CLI (real
+binary), 16 kinn-ffi, 5 manifest unit — plus kinn-android (JNI glue)
+type-checked in the workspace on all three desktop platforms.
 
-## 2. Compiler — verified
+Baseline re-verification before 0.3 work: the untouched 0.2.0 tree
+passed 190 Rust + 51 Studio tests locally at `6845496`.
 
-- **Lexer**: 0.2 token set incl. ranges (`0..10`, `1.5..2.5`, `0..=9`
-  disambiguated from floats — dedicated tests), brackets, dot, new
-  keywords. E1001–E1006 preserved.
-- **Parser recovery (P-001/#5)**: three broken statements → exactly
-  three positioned diagnostics; following statements parsed without
-  cascade; 25-error cap (E2099); recovery inside multiple functions.
-  Verified: parser tests + `many_errors.kin` example + CLI test
-  asserting three `error[…]` lines.
-- **Control-flow analysis (P-002/#6)**: `func f() -> int { while true
-  { return 1; } }` compiles (previously a false E3012) and **runs**
-  (pipeline test); `while true { break; }` still requires a return;
-  nested-loop breaks do not count for the outer loop; code after a
-  diverging loop is W3001-unreachable. All checker-tested.
-- **Slot reuse (P-003/#7)**: three sequential single-variable scopes
-  produce `nlocals == 1` (asserted on the lowered module) and identical
-  output.
-- **Modules (#1)**: `import "x.kin" as m;` — transitive loading, diamond
-  sharing, cycle detection with the full chain (E3018), `..`/absolute
-  path rejection (E3017), duplicate alias (E3019), unknown
-  module/function (E3020/E3021), same-name functions in two files,
-  imported-file `main` inert. Verified in project/checker unit tests,
-  pipeline test (`examples/modules` through a loader) and the CLI test
-  (`kinn run examples/modules/main.kin`).
-- **Arrays / indexing / for / casts / natives**: checker rules
-  (E3022–E3028), VM behavior (E4005 bounds with length in message,
-  reference semantics through function calls, deep equality,
-  truncating/saturating float→int, `len("héllo") == 5`), lowering
-  (`for` continue→increment — an infinite-loop bug was specifically
-  tested against), end-to-end example programs
-  (`arrays.kin`, `for_loops.kin`, `casts.kin`, `stdlib.kin`).
-- **Diagnostics**: multi-file rendering grouped by file with per-file
-  carets (diagnostics test); stable code registry extended and
-  documented in LANGUAGE_SPEC_0.1.md §A7.
+## 2. Compiler — verified (0.2 surface unchanged)
 
-## 3. Runtime (kinrt) — verified
+All 0.2.0 findings remain valid: lexer with ranges, multi-error
+parser recovery (E2099 cap), control-flow analysis (`while true`
+divergence), slot reuse, modules (E3017–E3021), arrays/for/casts/
+natives (E3022–E3028), multi-file diagnostics rendering. Every 0.2
+test still passes untouched.
 
-Arrays (`Rc<RefCell<Vec<Value>>>`), native functions, casts, bounds
-checks — 26 unit tests, plus everything above running through the VM.
-Checked overflow (E4004), div/mod by zero (E4001), call depth (E4002)
-retained from 0.1. Zero external dependencies maintained.
+### Website module — verified (new in 0.3)
 
-## 4. CLI (`kinn` 0.2.0) — verified
+- **Parser**: contextual keywords (`website`, `page`, element words)
+  parsed in their positions only; `let website = 1;` etc. still
+  compile (dedicated test). E2016 (non-string site name), E2030
+  (unknown element), missing-`open` rejection with hint, image-alt
+  parse requirement, element-level error recovery (one error, later
+  elements still parse).
+- **Checker**: E3030 (two websites), E3031 (duplicate page names,
+  case-insensitive), E3032 (unknown nav target with pages hint),
+  E3033 (empty site name), E3034 (empty alt), E3035 (empty label),
+  E3036 (empty src), E3037 (website in an imported module), W3035
+  (unreachable page), W3036 (duplicate title), W3037 (empty text).
+  Site-only programs do **not** trigger E3008.
+- **Lowering**: `SiteModel` built from the declaration (first title
+  wins, later titles demote to headings); `driver::Compiled.site`.
 
-19 integration tests run the real binary: multi-file run/kir
-(`math::add` visible in disassembly), new-feature examples,
-import-missing error with position, multi-error output, E4005 runtime
-error with exit code 3, usage errors. Smoke-tested on all three CI
-platforms (`kinn version`, module example, `for_loops.kin` output).
+## 3. Runtime (kinrt) — verified, unchanged
 
-## 5. FFI bridges — verified
+26 tests; arrays, casts, natives, bounds/overflow/div-zero/depth
+checks all retained. Zero external dependencies maintained.
 
-- **kinn-ffi** (12 tests): JSON check/run with diagnostics, positions,
-  stdout capture, runtime error line, module registry, alloc/free
-  round-trip, unicode, full 0.2 language through the FFI. Panic safety
-  by construction (catch_unwind → E5000).
-- **WebAssembly build**: `kinn_ffi.wasm` (327 KB) built for
-  wasm32-unknown-unknown; **smoke-tested in Node** (version, check,
-  run with arrays+for, diagnostics with positions) and by 10 vitest
-  tests inside Studio CI.
-- **kinn-android**: compiles in the workspace on Linux/Windows/macOS;
-  built for `aarch64-linux-android` locally and in CI (933 KB
-  `libkinn_android.so`); **JNI exports verified with llvm-nm**
-  (`Java_dev_kinn_studio_KinnBridge_n{Version,Check,Run}`).
+## 4. CLI (`kinn` 0.3.0) — verified
 
-## 6. KINN Studio web — verified
+28 integration tests run the real binary, including the new:
 
-- Real check/run in the browser via `kinn.wasm` (wasm tests above run
-  exactly this path: multi-file projects, captured stdout, E4005 line
-  numbers, 200 sequential calls — memory management — and unicode).
-- Persistence: MemoryStorage round-trip, debounced single-save
-  behavior, project reload (`vfs.test.ts`, 9 tests). IndexedDB
-  implementation is small and standard; exercised in CI through the
-  Studio build (it ships in the bundle) — note: automated tests of the
-  **IndexedDB adapter itself** run via the same storage interface;
-  a headless-browser (Playwright) session is future hardening.
-- `.kinnproj` format: round-trip, version rejection, name/duplicate
-  validation, active-file fallback (7 tests).
-- Honest degradation: missing wasm → status badge, fallback checks,
-  exact build instructions (no fake features).
+- `kinn build --target web` generates a real dist (files exist,
+  title/aria-current asserted in the output HTML).
+- `kinn build --target android` exports the full Gradle project.
+- Default target (`web`), unknown-target rejection (lists supported),
+  building a console program explains the missing website, `run` of a
+  site-only program gives build guidance (exit 1, no fake execution).
+- `kinn targets`; manifest-driven build from `kinn.toml` (entry +
+  target + project name, output verified on disk).
+- **Local build provider**: without a toolchain (PATH stripped,
+  deterministic test) the status is exactly `project exported`; with a
+  real toolchain (GitHub ubuntu runner, Gradle + SDK preinstalled) the
+  same command assembled a **real debug APK** (first 0.3.0 `ci` run,
+  job log: `local build provider: debug APK at …`).
 
-## 7. Android app — verified (with stated limits)
+## 5. Target backends — verified
 
-- **Build**: full local build (JDK 17? no — local sandbox used JDK 21
-  with AGP's toolchain; CI uses JDK 17) and CI build, both green.
-- **Contents verified**: `lib/arm64-v8a/libkinn_android.so` present;
-  `assets/docs/*.md` bundled from `docs/` (the CI APK already contains
-  the updated 0.2 docs — verified by unzipping the CI artifact).
-- **Signature**: debug APK verified with `apksigner verify
-  --print-certs` locally and in CI (certificate fingerprints in
-  `signature-report.txt`); release APK is **unsigned and labeled
-  `UNSIGNED`** — correct, because no `ANDROID_KEYSTORE_*` secrets exist
-  yet (documented in SECURITY.md + INSTALL.md).
-- **Checksums**: CI `SHA256SUMS` re-verified locally (both APKs match).
-- **Limits (partial, honest)**: no run on a physical device yet
-  (V-001/P-017); no `tokens` terminal command; no automated UI tests
-  (planned 0.3); highlighting debounced 250 ms. The app degrades
-  honestly when `libkinn_android.so` is missing.
+### Web (complete vertical slice, ADR-0020)
 
-## 8. Release pipeline — verified
+- 12 codegen unit tests: element mapping table, HTML escaping
+  (including a `<script>` payload), slug generation, `aria-current`,
+  skip link/landmarks, alt/lazy images, deterministic byte-identical
+  output, unicode content.
+- **Real-browser verification**: the dist built from
+  `examples/web/site.kin` was opened in headless Chromium
+  (`file://…/dist/index.html`): document title correct, accessibility
+  tree shows the skip link, `navigation "Pages"` landmark, h1/h2
+  order, styled button; clicking the generated `Get Started` button
+  navigated to `about.html` (`About · MyWebsite`).
+- Assets copying verified end-to-end (project `assets/` → dist).
 
-- `ci.yml` — **green**: 3-platform Rust matrix with release smoke
-  tests, Studio tests with the real wasm backend, site artifact.
-- `android.yml` — **green**: NDK build → APKs → apksigner verification
-  → artifacts (debug APK, UNSIGNED release, SHA256SUMS,
-  signature-report.txt).
-- `windows.yml` — **green**: tests + release build on a Windows runner,
-  portable zip and NSIS installer (built after two plugin/include
-  fixes; the successful run also smoke-tested `kinn.exe` on Windows).
-- `linux.yml` — **green**: tests + release build; **DEB installed on
-  the runner** and `kinn` exercised (`version`, examples, module
-  project output-compared); tarball; AppImage built with linuxdeploy
-  and executed (`…AppImage version`) on the runner — still labeled
-  experimental pending clean-desktop verification (P-016).
+### Android (ADR-0021)
 
-## 9. Security and reproducibility — verified
+- 9 codegen unit tests: complete Gradle file set, manifest with
+  launcher activity and **no permissions**, package sanitization
+  (incl. Kotlin-keyword and digit-leading names), Kotlin string
+  escaping, navigation indices, asset mapping with honest alt
+  fallback, no AndroidX/no WebView, honest README ("project, not an
+  APK").
+- **CI end-to-end (remote provider)**: `android.yml` `backend-apk`
+  job exports the project with the real CLI, completes the Gradle
+  wrapper, runs `./gradlew assembleDebug` (BUILD SUCCESSFUL), verifies
+  the signature (`Signer #1 certificate DN: C=US, O=Android, CN=Android
+  Debug` — debug-signed, honestly named `…-debug.apk`), verifies **no
+  requested permissions** via `aapt dump badging`, uploads the APK.
+  Artifact `kinn-android-backend-apk` downloaded locally and
+  re-verified: 798,982 bytes, `classes.dex` ×3, manifest present,
+  SHA-256 `6e08a6aa…51673` matching the CI `SHA256SUMS`.
+- Export determinism is tested (byte-identical generated project);
+  APK bytes are **not** reproducible (Gradle embeds timestamps) —
+  hashes are published per run instead of being faked.
+
+## 6. FFI bridges — verified
+
+- 16 tests (12 prior + 4 new): `kinn_build_web` returns the site JSON
+  with generated files; `kinn_build_android` returns project files
+  (never an APK claim); E3038 for site-less programs; compile
+  diagnostics surface through the build calls.
+- wasm rebuild (`npm run build:wasm`) green; 15 Studio tests execute
+  the real compiler and target backends through the wasm bridge.
+- JNI glue (`nBuildWeb`/`nBuildAndroid`) type-checked in the workspace
+  on all three platforms; built for `aarch64-linux-android` in CI.
+
+## 7. KINN Studio web — verified
+
+- 66 vitest tests: all 0.2 suites plus the 0.3 additions — preview
+  builder (CSS/JS inlining, navigation interceptor, honest error on
+  unknown page), ZIP writer (CRC-32 canonical vector, header/EOCD
+  structure), and wasm-level build tests.
+- The store-only ZIP output was additionally validated with real
+  `unzip` (`testing: index.html OK … No errors detected`) and content
+  extracted byte-identical.
+- Preview panel: sandboxed iframe, page selector, postMessage
+  navigation; Download .zip exports the real dist; Export Android
+  downloads the project (labeled a project).
+- Honest degradation retained (missing wasm → badge + exact build
+  instructions).
+
+## 8. KINN Studio Android — verified (with stated limits)
+
+- Built in CI (`assembleDebug` + `assembleRelease`, run 44912150502)
+  with the 0.3 additions: Build Web button, `build web`/`build
+  android`/`preview`/`export android` terminal commands,
+  PreviewActivity (file:// WebView with in-app navigation, non-file
+  URLs blocked), BuildSupport (private-storage writer + SAF zip
+  export), 0.3 cheat sheet.
+- Signature: debug APK verified by `apksigner` in CI; release APK
+  remains **UNSIGNED-labeled** without `ANDROID_KEYSTORE_*` secrets
+  (ADR-0017) — correct, honest behavior.
+- Limits (partial, honest): no physical-device run yet (P-017/P-019),
+  no automated UI tests (P-021), `tokens` command still absent (P-015).
+
+## 9. Release pipeline — verified
+
+- `ci.yml` — **green** (both branches): 3-platform matrix with
+  target smoke (web dist + android export checks), the
+  `backend-build` job uploading the generated web dist, Studio tests
+  with the real wasm backend.
+- `android.yml` — **green**: two jobs — the Studio app APK pipeline
+  and the backend APK job (§5).
+- `windows.yml` / `linux.yml` — **green**: packaging unchanged from
+  0.2.0 (zip/NSIS; DEB/AppImage/tarball), rebuilt with the 0.3 CLI.
+- One CI defect was found **by CI** and fixed (commit `066b102`): the
+  new `build/` gitignore pattern had silently excluded
+  `studio/src/build/` from the push; detected via the failing Studio
+  production build, root-caused, fixed, re-run green.
+
+## 10. Security and reproducibility — verified
 
 - **No secrets in history**: full-history grep for token/key patterns
-  (ghp_…, AWS keys, private key blocks) across all commits: clean. The
-  GitHub token used for automation lives only in the sandbox
-  credential file, never in the repo.
-- **Android**: no permissions requested (verified via aapt badging);
-  app-private storage only; no INTERNET.
-- **Import path confinement**: `..`, absolute paths and backslashes
-  rejected (E3017) — unit-tested.
-- **Reproducibility**: every artifact is rebuilt from source by CI on
-  its target platform; checksums published per run. The compiler core
-  remains zero-dependency; `kinn-android` (jni crate) is the single
-  documented exception (ADR-0014).
-- One hygiene fix during the audit: the built `kinn.wasm` had been
-  accidentally committed; it is now untracked and gitignored (binary
-  build artifact, no history rewrite needed).
+  remains clean; automation tokens live only in the transient sandbox
+  credential helper, never in the repo or commits.
+- **Generated app permissions**: none (verified twice — unit test on
+  the generated manifest and `aapt dump badging` in CI).
+- **Escaping**: all user strings HTML-escaped in web output (tested
+  against script injection); Kotlin string literals escaped (tested).
+- **Remote builds need no user credentials**: the CI provider runs
+  with repository-scoped GitHub permissions; SECURITY.md documents
+  the policy (no tokens in chat/source/config).
+- **Determinism**: generated dists/projects are byte-identical across
+  runs (tested); APKs embed build timestamps — hashes published per
+  run, never claimed reproducible.
 
-## 10. Specification alignment — verified
+## 11. Specification alignment — verified
 
-- LANGUAGE_SPEC_0.1.md amended with a normative **"Kin 0.2 additions"**
-  section (modules, arrays, for/ranges, casts, natives, recovery, new
-  code table A7). Each documented rule maps to tests listed in §2.
-- PROGRAMMING_MODES: behavior unchanged in 0.2 (directive + verbosity
-  + B-mode lint) — spec statement still accurate.
-- PROBLEM_REGISTRY updated: P-001/2/3/5/6/7/8/10 resolved (F-005…
-  F-012); new honest entries P-013…P-017.
+- LANGUAGE_SPEC §B1/§B2 added (normative website grammar + E2016,
+  E2030, E3030–E3038, W3035–W3037); every rule maps to the tests in
+  §2/§5.
+- BACKEND_WEB.md / BACKEND_ANDROID.md publish the element table,
+  distribution layout, build-provider statuses, and verification
+  evidence.
+- MODULE_SYSTEM.md states exactly what exists (modules + kinn.toml)
+  and what does not (manager, lockfile, registry).
+- PROBLEM_REGISTRY updated (P-018 verified-and-reworded, P-019…P-023
+  added); ROADMAP 0.3.0 items checked off with the two honest
+  carry-overs (string casts/interpolation → 0.4, native codegen → 0.4+).
 
-## 11. Summary table
+## 12. Summary table
 
 | Area | Status |
 | --- | --- |
-| Compiler (lexer/parser/recovery/CFA/checker/lowering) | **verified** |
-| Runtime VM (arrays, casts, natives, safety limits) | **verified** |
-| CLI incl. multi-file projects | **verified** |
-| kinn-ffi (C ABI, wasm + native) | **verified** |
-| Studio web: check/run via wasm, persistence, import/export | **verified** |
-| Studio web: IndexedDB adapter | **partial** (interface-tested; headless-browser test is future work) |
-| Android app: build, contents, signature, artifacts | **verified** |
-| Android app: on-device run | **partial** (built + symbol-verified; no physical-device test yet) |
-| CI matrix + Linux DEB + Android pipeline | **verified** |
-| Windows: tests + zip + NSIS installer | **verified** (CI, Windows runner) |
-| Linux AppImage | **partial / experimental** (CI-built and executed on the runner; clean-machine verification pending) |
-| String interpolation, string→number casts | **planned** (ADR-0013, P-013) |
-| Native codegen, graphics | **planned** (0.3 / 0.5) |
-| Broken functionality | **none found** in audited areas |
+| Compiler 0.2 surface (lexer/parser/checker/KIR/VM) | **verified** (unchanged, all prior tests green) |
+| Website module (parse/check/lower) | **verified** |
+| Web backend + `kinn build --target web` | **verified** (incl. real browser) |
+| Android backend export (Gradle project, native UI) | **verified** |
+| Android APK via CI (remote provider) | **verified** (debug-signed, apksigner + aapt evidence) |
+| Android APK via local provider | **verified on the CI toolchain**; other toolchain shapes untested (P-018) |
+| APK installation on a physical device | **planned** (P-019) — never claimed |
+| CLI build/targets/manifest | **verified** |
+| FFI build exports (wasm + JNI) | **verified** |
+| Studio web build/preview/export | **verified** (ZIP validated with unzip) |
+| Studio Android build/preview/export | **verified in CI build**; on-device flows untested (P-021) |
+| Package manager / registry / lockfiles | **planned** (spec only, no fake scaffolding) |
+| Site state, forms, events | **planned 0.4** (grammar rejects them today) |
+| Broken functionality | **one CI regression found by CI and fixed** (gitignore); none remaining |
 
-*Audit performed against the tip of `develop` (0a04e49+), 2026-11-21.
-All four workflows green on the audited commit; the Windows-installer
-and AppImage packaging corrections landed after the audit body was
-written and are reflected above.*
+*Audit performed against `main` @ the 0.3.0 merge and `develop`
+@ `066b102`+audit, 2026-11-21. Evidence: local runs (Rust 1.100.0,
+Node 24, headless Chromium) and GitHub Actions runs 44912150523 (ci),
+44912150502 (android), 44912150499 (linux), 44912150542 (windows),
+44911581668 (first backend-APK run with local-provider evidence).*
