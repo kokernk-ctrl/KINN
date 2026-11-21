@@ -4,14 +4,22 @@ version = 4
 
 [[package]]
 name = "kinc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kinrt",
 ]
 
 [[package]]
 name = "kinn"
-version = "0.1.0"
+version = "0.2.0"
+dependencies = [
+ "kinc",
+ "kinrt",
+]
+
+[[package]]
+name = "kinn-ffi"
+version = "0.2.0"
 dependencies = [
  "kinc",
  "kinrt",
@@ -19,4 +27,4 @@ dependencies = [
 
 [[package]]
 name = "kinrt"
-version = "0.1.0"
+version = "0.2.0"
