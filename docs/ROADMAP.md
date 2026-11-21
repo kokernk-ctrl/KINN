@@ -34,16 +34,32 @@ Dates are not promised — scope and honesty are.
 - [x] Windows (zip + NSIS installer) and Linux (DEB + AppImage
       experimental) packages, built and tested on their platforms
 
-## 0.3.0 — Native code generation investigation
+## 0.3.0 — Multi-target: web vertical slice, Android backend architecture
 
-- [ ] Backend spike: Cranelift vs LLVM vs C transpilation (ADR-0002
-      decision)
-- [ ] Constant folding and trivial optimizations over KIR
-- [ ] String interpolation (carried over from 0.2, ADR-0013) and
-      string→number casts
-- [ ] Timing/size reports in `kinn` for Advanced mode
-- [ ] Studio desktop shell (webview wrapper) candidate
-- [ ] Android: on-device verification of the 0.3 runtime path
+Re-scoped 2026-11-21 (product direction: KINN Studio becomes the
+development environment for real multi-target apps; details in
+docs/MULTI_TARGET_ARCHITECTURE.md):
+
+- [ ] Target/backend architecture: SiteModel, backend contract,
+      capability declaration (ADR-0018)
+- [ ] Language: declarative `website` module (ADR-0019) with full
+      parse/check/lower tests
+- [ ] Web backend: `kinn build --target web` producing a real dist
+      (HTML/CSS, accessibility, navigation; ADR-0020), verified in a
+      browser
+- [ ] Studio integration (web + Android): target select, build,
+      diagnostics, preview, export
+- [ ] Android backend: exported Gradle project + build providers
+      (local / remote CI / export; ADR-0021), APK built in CI with
+      apksigner verification
+- [ ] Ecosystem foundation: `kinn.toml` manifest + MODULE_SYSTEM spec
+      (ADR-0022)
+- [ ] CI tests the actual supported targets (web smoke, backend APK)
+- [ ] String interpolation and string→number casts (ADR-0013) —
+      carried to 0.4 to keep this release focused; decision unchanged
+- [ ] Native code generation investigation — moved to 0.4+ (re-scoped
+      out of 0.3 by the multi-target direction; ADR-0002 spike still
+      pending)
 
 ## 0.4.0 — Breadth and developer comfort
 
