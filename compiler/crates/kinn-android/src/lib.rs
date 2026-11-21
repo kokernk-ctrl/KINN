@@ -8,6 +8,8 @@
 //!     external fun nVersion(): Int
 //!     external fun nCheck(entry: String, src: String, paths: Array<String>, contents: Array<String>): String
 //!     external fun nRun(entry: String, src: String, paths: Array<String>, contents: Array<String>): String
+//!     external fun nBuildWeb(entry: String, src: String, paths: Array<String>, contents: Array<String>): String
+//!     external fun nBuildAndroid(entry: String, src: String, paths: Array<String>, contents: Array<String>): String
 //! }
 //! ```
 //!
@@ -102,7 +104,7 @@ fn with_modules(
 
 fn call_ffi<'local>(
     env: &mut JNIEnv<'local>,
-    run: bool,
+    run: Option<bool>,
     entry: JString<'local>,
     src: JString<'local>,
     paths: JObjectArray<'local>,
@@ -114,11 +116,33 @@ fn call_ffi<'local>(
         let paths_v = rust_string_array(env, &paths)?;
         let contents_v = rust_string_array(env, &contents)?;
         with_modules(&paths_v, &contents_v, || unsafe {
-            if run {
-                kinn_ffi::kinn_run(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len())
-            } else {
-                kinn_ffi::kinn_check(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len())
+            match run {
+                Some(true) => kinn_ffi::kinn_run(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len()),
+                Some(false) => kinn_ffi::kinn_check(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len()),
+                None => kinn_ffi::kinn_build_web(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len()),
             }
+        })
+    })();
+    match result {
+        Ok(json) => java_string(env, &json),
+        Err(msg) => java_string(env, &error_json(&msg)),
+    }
+}
+
+fn call_ffi_android<'local>(
+    env: &mut JNIEnv<'local>,
+    entry: JString<'local>,
+    src: JString<'local>,
+    paths: JObjectArray<'local>,
+    contents: JObjectArray<'local>,
+) -> jstring {
+    let result: Result<String, String> = (|| {
+        let entry_s = rust_string(env, &entry)?;
+        let src_s = rust_string(env, &src)?;
+        let paths_v = rust_string_array(env, &paths)?;
+        let contents_v = rust_string_array(env, &contents)?;
+        with_modules(&paths_v, &contents_v, || unsafe {
+            kinn_ffi::kinn_build_android(src_s.as_ptr(), src_s.len(), entry_s.as_ptr(), entry_s.len())
         })
     })();
     match result {
@@ -144,7 +168,7 @@ pub extern "system" fn Java_dev_kinn_studio_KinnBridge_nCheck<'local>(
     paths: JObjectArray<'local>,
     contents: JObjectArray<'local>,
 ) -> jstring {
-    call_ffi(&mut env, false, entry, src, paths, contents)
+    call_ffi(&mut env, Some(false), entry, src, paths, contents)
 }
 
 #[no_mangle]
@@ -156,5 +180,29 @@ pub extern "system" fn Java_dev_kinn_studio_KinnBridge_nRun<'local>(
     paths: JObjectArray<'local>,
     contents: JObjectArray<'local>,
 ) -> jstring {
-    call_ffi(&mut env, true, entry, src, paths, contents)
+    call_ffi(&mut env, Some(true), entry, src, paths, contents)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_kinn_studio_KinnBridge_nBuildWeb<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    entry: JString<'local>,
+    src: JString<'local>,
+    paths: JObjectArray<'local>,
+    contents: JObjectArray<'local>,
+) -> jstring {
+    call_ffi(&mut env, None, entry, src, paths, contents)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_kinn_studio_KinnBridge_nBuildAndroid<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    entry: JString<'local>,
+    src: JString<'local>,
+    paths: JObjectArray<'local>,
+    contents: JObjectArray<'local>,
+) -> jstring {
+    call_ffi_android(&mut env, entry, src, paths, contents)
 }

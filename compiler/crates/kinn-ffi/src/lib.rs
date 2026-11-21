@@ -31,6 +31,7 @@
 //! as an `E5xxx` diagnostic inside the JSON result.
 
 use kinc::ast::Mode;
+use kinc::backend::OutputFile;
 use kinc::diagnostics::{render_project, Diagnostic};
 use kinc::driver;
 use std::collections::HashMap;
@@ -331,6 +332,139 @@ pub extern "C" fn kinn_version() -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// Build targets (0.3.0) — same backends as `kinn build`
+// ---------------------------------------------------------------------------
+
+/// Files list as JSON (`[{"path":...,"content":...},...]`). Generated
+/// artifacts are text-only through this bridge; binary assets are a CLI
+/// concern (`kinn build` copies the project `assets/` directory).
+fn files_json(files: &[OutputFile]) -> String {
+    let mut out = String::from("[");
+    for (i, f) in files.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"path\":{},\"content\":{}}}",
+            json_str(&f.path),
+            json_str(&f.as_text())
+        ));
+    }
+    out.push(']');
+    out
+}
+
+/// Synthetic diagnostic when a program has nothing to build for a
+/// target (documented code, same semantics as the CLI error).
+fn no_site_diagnostic() -> Diagnostic {
+    Diagnostic::error(
+        "E3038",
+        "this program declares no `website`; build targets generate website declarations",
+        1,
+        1,
+        0,
+    )
+}
+
+fn build_result_json(
+    ok: bool,
+    site: Option<&kinc::site::SiteModel>,
+    files: &[OutputFile],
+    diags: &[Diagnostic],
+    sources: &HashMap<String, String>,
+    mode: Mode,
+) -> String {
+    let (site_name, pages) = match site {
+        Some(s) => (json_str(&s.name), s.pages.len().to_string()),
+        None => (json_str(""), "0".to_string()),
+    };
+    format!(
+        "{{\"ok\":{},\"site\":{},\"pages\":{},\"files\":{},\"diagnostics\":{},\"text\":{}}}",
+        ok,
+        site_name,
+        pages,
+        files_json(files),
+        diags_json(diags),
+        json_str(&diags_text(diags, sources, mode))
+    )
+}
+
+/// Compile a project and generate the **web** distribution (same
+/// backend as `kinn build --target web`).
+///
+/// JSON: `{"ok":bool,"site":str,"pages":n,"files":[{path,content}],
+/// "diagnostics":[...],"text":"..."}`. `ok:false` carries compile
+/// diagnostics or E3038 (no website declaration).
+///
+/// # Safety
+/// See [`kinn_check`].
+#[no_mangle]
+pub unsafe extern "C" fn kinn_build_web(src_ptr: *const u8, src_len: usize, entry_ptr: *const u8, entry_len: usize) -> *mut u8 {
+    ffi_entry(|| {
+        let src = take_string(src_ptr, src_len);
+        let entry = if entry_len == 0 { "main.kin".to_string() } else { take_string(entry_ptr, entry_len) };
+        let registry = modules().lock().unwrap().clone();
+        let mut loader = |path: &str| -> Result<String, String> {
+            registry.get(path).cloned().ok_or_else(|| "module not registered with kinn_set_module".to_string())
+        };
+        let (compiled, diags) = driver::compile_project(&entry, &src, &mut loader);
+        let mode = compiled.as_ref().map(|c| c.mode).unwrap_or(Mode::S);
+        let sources = compiled.as_ref().map(|c| c.sources.clone()).unwrap_or_default();
+        match compiled {
+            None => build_result_json(false, None, &[], &diags, &sources, mode),
+            Some(c) => match c.site {
+                Some(site) => {
+                    let files = kinc::backend::web::generate(&site);
+                    build_result_json(true, Some(&site), &files, &diags, &sources, mode)
+                }
+                None => {
+                    let mut ds = diags.clone();
+                    ds.push(no_site_diagnostic());
+                    build_result_json(false, None, &[], &ds, &sources, mode)
+                }
+            },
+        }
+    })
+}
+
+/// Compile a project and generate the **android** Gradle project
+/// (same backend as `kinn build --target android`). The result is the
+/// exported project — hosts must never report it as an APK.
+///
+/// JSON: same shape as [`kinn_build_web`].
+///
+/// # Safety
+/// See [`kinn_check`].
+#[no_mangle]
+pub unsafe extern "C" fn kinn_build_android(src_ptr: *const u8, src_len: usize, entry_ptr: *const u8, entry_len: usize) -> *mut u8 {
+    ffi_entry(|| {
+        let src = take_string(src_ptr, src_len);
+        let entry = if entry_len == 0 { "main.kin".to_string() } else { take_string(entry_ptr, entry_len) };
+        let registry = modules().lock().unwrap().clone();
+        let mut loader = |path: &str| -> Result<String, String> {
+            registry.get(path).cloned().ok_or_else(|| "module not registered with kinn_set_module".to_string())
+        };
+        let (compiled, diags) = driver::compile_project(&entry, &src, &mut loader);
+        let mode = compiled.as_ref().map(|c| c.mode).unwrap_or(Mode::S);
+        let sources = compiled.as_ref().map(|c| c.sources.clone()).unwrap_or_default();
+        match compiled {
+            None => build_result_json(false, None, &[], &diags, &sources, mode),
+            Some(c) => match c.site {
+                Some(site) => {
+                    let files = kinc::backend::android::generate(&site, &[]);
+                    build_result_json(true, Some(&site), &files, &diags, &sources, mode)
+                }
+                None => {
+                    let mut ds = diags.clone();
+                    ds.push(no_site_diagnostic());
+                    build_result_json(false, None, &[], &ds, &sources, mode)
+                }
+            },
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Safe wrappers used by tests (and available to native hosts via rlib)
 // ---------------------------------------------------------------------------
 
@@ -349,6 +483,28 @@ pub fn check_json(entry: &str, src: &str) -> String {
 pub fn run_json(entry: &str, src: &str) -> String {
     unsafe {
         let ptr = kinn_run(src.as_ptr(), src.len(), entry.as_ptr(), entry.len());
+        let len = u32::from_le_bytes([*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)]) as usize;
+        let json = String::from_utf8_lossy(std::slice::from_raw_parts(ptr.add(LEN_PREFIX), len)).into_owned();
+        kinn_free(ptr, LEN_PREFIX + len);
+        json
+    }
+}
+
+/// Safe wrapper around [`kinn_build_web`]: returns the JSON payload.
+pub fn build_web_json(entry: &str, src: &str) -> String {
+    unsafe {
+        let ptr = kinn_build_web(src.as_ptr(), src.len(), entry.as_ptr(), entry.len());
+        let len = u32::from_le_bytes([*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)]) as usize;
+        let json = String::from_utf8_lossy(std::slice::from_raw_parts(ptr.add(LEN_PREFIX), len)).into_owned();
+        kinn_free(ptr, LEN_PREFIX + len);
+        json
+    }
+}
+
+/// Safe wrapper around [`kinn_build_android`]: returns the JSON payload.
+pub fn build_android_json(entry: &str, src: &str) -> String {
+    unsafe {
+        let ptr = kinn_build_android(src.as_ptr(), src.len(), entry.as_ptr(), entry.len());
         let len = u32::from_le_bytes([*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)]) as usize;
         let json = String::from_utf8_lossy(std::slice::from_raw_parts(ptr.add(LEN_PREFIX), len)).into_owned();
         kinn_free(ptr, LEN_PREFIX + len);
@@ -479,5 +635,50 @@ mod tests {
         let json = run_json("main.kin", src);
         assert!(json.contains("\"ok\":true"), "{}", json);
         assert!(json.contains("\"stdout\":\"2\\n4\\n6\\n7\\n2.5\\n\""), "{}", json);
+    }
+
+    // -- build targets (0.3.0) -----------------------------------------------
+
+    const SITE_SRC: &str = r#"*mode = B;
+website "MyWebsite" {
+    page Home {
+        title "Welcome"
+        button "Go" open About
+    }
+    page About { text "about" }
+}"#;
+
+    #[test]
+    fn build_web_generates_site_files() {
+        let json = build_web_json("site.kin", SITE_SRC);
+        assert!(json.contains("\"ok\":true"), "{}", json);
+        assert!(json.contains("\"site\":\"MyWebsite\""), "{}", json);
+        assert!(json.contains("\"pages\":2"), "{}", json);
+        assert!(json.contains("index.html"));
+        assert!(json.contains("styles.css"));
+        assert!(json.contains("<title>Welcome · MyWebsite</title>"));
+    }
+
+    #[test]
+    fn build_android_returns_project_files_not_an_apk() {
+        let json = build_android_json("site.kin", SITE_SRC);
+        assert!(json.contains("\"ok\":true"), "{}", json);
+        assert!(json.contains("AndroidManifest.xml"));
+        assert!(json.contains("MainActivity.kt"));
+    }
+
+    #[test]
+    fn build_without_a_website_reports_e3038() {
+        let json = build_web_json("main.kin", "func main() { print(1); }");
+        assert!(json.contains("\"ok\":false"), "{}", json);
+        assert!(json.contains("E3038"), "{}", json);
+        assert!(json.contains("\"pages\":0"), "{}", json);
+    }
+
+    #[test]
+    fn build_reports_compile_diagnostics() {
+        let json = build_web_json("site.kin", "website \"S\" { page Home { button \"x\" open Missing } }");
+        assert!(json.contains("\"ok\":false"), "{}", json);
+        assert!(json.contains("E3032"), "{}", json);
     }
 }
