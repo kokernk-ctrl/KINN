@@ -1,0 +1,26 @@
+// examples/web/site.kin — the declarative web module (Kin 0.3).
+//
+// Build:  kinn build --target web
+// Output: build/web/ (index.html, about.html, styles.css, app.js)
+//
+// The first page is the home page. `button`/`link` navigate between
+// pages; every image needs alt text; all strings are checked and
+// HTML-escaped by the compiler.
+*mode = B;
+
+website "MyWebsite" {
+    page Home {
+        title "Welcome to KINN"
+        heading "My first website"
+        text "Written in Kin, built by the KINN web backend."
+        button "Get Started" open About
+        divider
+        link "Learn about Kin" open About
+    }
+    page About {
+        title "About"
+        heading "About this site"
+        text "This page and the navigation are generated from the website declaration above."
+        link "Back to Home" open Home
+    }
+}

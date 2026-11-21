@@ -17,6 +17,7 @@
 
 use crate::ast::*;
 use crate::project::{dirname, qualified_name, Project};
+use crate::site::{Element, PageModel, SiteModel};
 use kinrt::kir::{CastTarget, NativeId};
 use kinrt::{FuncDef, Instr, Module, Value};
 use std::collections::HashMap;
@@ -32,6 +33,42 @@ pub fn lower(p: &Program) -> Module {
         sources: std::collections::HashMap::new(),
     };
     lower_project(&project)
+}
+
+/// Lower a checked `website` declaration into a site model. Title
+/// elements become the page title; a second `title` element on the same
+/// page (checker warning W3036) is demoted to a section heading.
+pub fn site_model(w: &WebsiteDecl) -> SiteModel {
+    let mut pages = Vec::with_capacity(w.pages.len());
+    for p in &w.pages {
+        let mut title = String::new();
+        let mut elements = Vec::new();
+        for e in &p.elements {
+            match &e.kind {
+                ElementKind::Title(v) => {
+                    if title.is_empty() {
+                        title = v.clone();
+                    } else {
+                        elements.push(Element::Heading(v.clone()));
+                    }
+                }
+                ElementKind::Heading(v) => elements.push(Element::Heading(v.clone())),
+                ElementKind::Text(v) => elements.push(Element::Text(v.clone())),
+                ElementKind::Button { label, target, .. } => {
+                    elements.push(Element::Button { label: label.clone(), target: target.clone() })
+                }
+                ElementKind::Link { label, target, .. } => {
+                    elements.push(Element::Link { label: label.clone(), target: target.clone() })
+                }
+                ElementKind::Image { src, alt, .. } => {
+                    elements.push(Element::Image { src: src.clone(), alt: alt.clone() })
+                }
+                ElementKind::Divider => elements.push(Element::Divider),
+            }
+        }
+        pages.push(PageModel { name: p.name.clone(), title, elements });
+    }
+    SiteModel { name: w.name.clone(), pages }
 }
 
 /// Lower a checked project (entry first, then every imported file) into

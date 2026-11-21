@@ -195,9 +195,10 @@ impl Parser {
         let mut mode_declared = false;
         let mut imports = Vec::new();
         let mut funcs = Vec::new();
+        let mut websites = Vec::new();
 
         if self.gave_up {
-            return Program { mode, mode_declared, imports, funcs };
+            return Program { mode, mode_declared, imports, funcs, websites };
         }
 
         // Optional mode directive — must be the very first thing.
@@ -221,7 +222,11 @@ impl Parser {
             }
         }
 
-        // Functions.
+        // Top-level items: website declarations (0.3.0, contextual
+        // keyword — ADR-0019) and functions, in any order after the
+        // imports. A top-level `website` identifier is always a website
+        // declaration attempt (the only other valid top-level item is
+        // `func`), so a non-string name gets a precise E2016.
         while !self.gave_up && !self.at(TokKind::Eof) {
             if self.at(TokKind::Star) {
                 self.error_here(
@@ -241,13 +246,257 @@ impl Parser {
                 self.recover_top();
                 continue;
             }
+            if matches!(self.peek(), TokKind::Ident(w) if w == "website") {
+                match self.website_decl() {
+                    Ok(w) => websites.push(w),
+                    Err(()) => self.recover_top(),
+                }
+                continue;
+            }
             match self.func() {
                 Ok(f) => funcs.push(f),
                 Err(()) => self.recover_top(),
             }
         }
 
-        Program { mode, mode_declared, imports, funcs }
+        Program { mode, mode_declared, imports, funcs, websites }
+    }
+
+    /// `website "Name" { page P { ... } ... }` — entered when a
+    /// top-level `website` identifier is seen (ADR-0019).
+    fn website_decl(&mut self) -> PResult<WebsiteDecl> {
+        let kw = self.bump(); // Ident("website")
+        let name_tok = self.peek_token().clone();
+        let name = match name_tok.kind.clone() {
+            TokKind::Str(s) => {
+                self.bump();
+                s
+            }
+            other => {
+                self.fail(
+                    "E2016",
+                    format!(
+                        "expected a string name after `website` (like `website \"My Site\" {{ ... }}`) but found {}",
+                        describe(&other)
+                    ),
+                    name_tok.line,
+                    name_tok.col,
+                    name_tok.len().max(1),
+                );
+                return Err(());
+            }
+        };
+        self.expect(TokKind::LBrace, "'{'")?;
+        let mut pages = Vec::new();
+        loop {
+            if self.gave_up {
+                self.skip_to_eof();
+                return Err(());
+            }
+            if self.at(TokKind::RBrace) {
+                self.bump();
+                break;
+            }
+            if self.at(TokKind::Eof) {
+                self.error_here("expected '}' but found end of file".to_string());
+                return Err(());
+            }
+            match self.page_decl() {
+                Ok(p) => pages.push(p),
+                Err(()) => return Err(()),
+            }
+        }
+        Ok(WebsiteDecl { name, pages, line: kw.line, col: kw.col })
+    }
+
+    /// `page Home { ... }` inside a website declaration.
+    fn page_decl(&mut self) -> PResult<PageDecl> {
+        let kw = self.bump(); // Ident("page")
+        let name = self.expect_ident()?;
+        let name = match name.kind {
+            TokKind::Ident(n) => n,
+            _ => unreachable!("expect_ident guarantees an identifier"),
+        };
+        self.expect(TokKind::LBrace, "'{'")?;
+        let mut elements = Vec::new();
+        loop {
+            if self.gave_up {
+                self.skip_to_eof();
+                return Err(());
+            }
+            if self.at(TokKind::RBrace) {
+                self.bump();
+                break;
+            }
+            if self.at(TokKind::Eof) {
+                self.error_here("expected '}' but found end of file".to_string());
+                return Err(());
+            }
+            match self.element() {
+                Ok(e) => elements.push(e),
+                Err(()) => self.recover_page_element(),
+            }
+        }
+        Ok(PageDecl { name, elements, line: kw.line, col: kw.col })
+    }
+
+    /// One declarative page element (one line, no semicolon).
+    fn element(&mut self) -> PResult<ElementDecl> {
+        let t = self.peek_token().clone();
+        let word = match t.kind.clone() {
+            TokKind::Ident(w) => w,
+            other => {
+                self.fail(
+                    "E2001",
+                    format!(
+                        "expected a page element (`title`, `heading`, `text`, `button`, `link`, `image`, `divider`) but found {}",
+                        describe(&other)
+                    ),
+                    t.line,
+                    t.col,
+                    t.len().max(1),
+                );
+                return Err(());
+            }
+        };
+        self.bump();
+        let kind = match word.as_str() {
+            "title" => ElementKind::Title(self.string_after("title")?),
+            "heading" => ElementKind::Heading(self.string_after("heading")?),
+            "text" => ElementKind::Text(self.string_after("text")?),
+            "divider" => ElementKind::Divider,
+            "button" | "link" => {
+                let label = self.string_after(&word)?;
+                let mut target = None;
+                let mut target_line = 0;
+                let mut target_col = 0;
+                if matches!(self.peek(), TokKind::Ident(w) if w == "open") {
+                    self.bump();
+                    let tgt = self.expect_ident()?;
+                    if let TokKind::Ident(n) = tgt.kind {
+                        target = Some(n);
+                        target_line = tgt.line;
+                        target_col = tgt.col;
+                    }
+                }
+                match target {
+                    Some(target) if word == "button" => ElementKind::Button {
+                        label,
+                        target,
+                        target_line,
+                        target_col,
+                    },
+                    Some(target) => ElementKind::Link { label, target, target_line, target_col },
+                    None => {
+                        let nt = self.peek_token().clone();
+                        self.fail(
+                            "E2002",
+                            format!(
+                                "a `{}` must navigate: expected `open <PageName>` but found {}",
+                                word,
+                                describe(&nt.kind)
+                            ),
+                            nt.line,
+                            nt.col,
+                            nt.len().max(1),
+                        );
+                        self.diags.last_mut().unwrap().hint = Some(
+                            "example: button \"Get Started\" open Home — interactive buttons (state, forms) arrive in a later release".into(),
+                        );
+                        return Err(());
+                    }
+                }
+            }
+            "image" => {
+                let src = self.string_after("image")?;
+                let alt_tok = self.peek_token().clone();
+                match alt_tok.kind.clone() {
+                    TokKind::Ident(w) if w == "alt" => {
+                        self.bump();
+                        let alt = self.string_after("alt")?;
+                        ElementKind::Image { src, alt, alt_line: alt_tok.line, alt_col: alt_tok.col }
+                    }
+                    other => {
+                        self.fail(
+                            "E2002",
+                            format!(
+                                "images need alt text for accessibility: expected `alt \"description\"` but found {}",
+                                describe(&other)
+                            ),
+                            alt_tok.line,
+                            alt_tok.col,
+                            alt_tok.len().max(1),
+                        );
+                        return Err(());
+                    }
+                }
+            }
+            _ => {
+                self.fail(
+                    "E2030",
+                    format!(
+                        "unknown page element `{}` (supported: title, heading, text, button, link, image, divider)",
+                        word
+                    ),
+                    t.line,
+                    t.col,
+                    t.len(),
+                );
+                return Err(());
+            }
+        };
+        Ok(ElementDecl { kind, line: t.line, col: t.col })
+    }
+
+    /// Expect a string literal after a one-word element keyword.
+    fn string_after(&mut self, word: &str) -> PResult<String> {
+        let t = self.peek_token().clone();
+        match t.kind.clone() {
+            TokKind::Str(s) => {
+                self.bump();
+                Ok(s)
+            }
+            other => {
+                self.fail(
+                    "E2002",
+                    format!(
+                        "expected a string after `{}` but found {}",
+                        word,
+                        describe(&other)
+                    ),
+                    t.line,
+                    t.col,
+                    t.len().max(1),
+                );
+                Err(())
+            }
+        }
+    }
+
+    /// Skip to the next page element, `}` or end of file after a broken
+    /// element (keeps the remaining elements of the page parseable).
+    fn recover_page_element(&mut self) {
+        loop {
+            if self.gave_up {
+                self.skip_to_eof();
+                return;
+            }
+            match self.peek() {
+                TokKind::Eof | TokKind::RBrace => return,
+                TokKind::Ident(w) => {
+                    if matches!(
+                        w.as_str(),
+                        "title" | "heading" | "text" | "button" | "link" | "image" | "divider"
+                    ) {
+                        return;
+                    }
+                    self.bump();
+                }
+                _ => {
+                    self.bump();
+                }
+            }
+        }
     }
 
     fn mode_directive(&mut self) -> PResult<Mode> {
@@ -1296,5 +1545,84 @@ mod tests {
         // Two errors on different statements; second is still reported.
         let diags = parse_err("func main() { let 1 = 2; let 3 = 4; }");
         assert!(diags.iter().filter(|d| d.is_error()).count() >= 2);
+    }
+
+    // -- website declarations (0.3.0) ---------------------------------------
+
+    fn parse_website(src: &str) -> Program {
+        let (toks, diags) = crate::lexer::tokenize(src);
+        assert!(diags.iter().all(|d| !d.is_error()), "lex diags: {:?}", diags);
+        match parse(toks) {
+            Ok(p) => p,
+            Err(e) => panic!("unexpected parse errors: {:?}", e.iter().map(|d| (d.code, &*d.message)).collect::<Vec<_>>()),
+        }
+    }
+
+    #[test]
+    fn website_parses_all_elements() {
+        let p = parse_website(
+            "*mode = B;\nwebsite \"My Site\" {\n    page Home {\n        title \"Welcome\"\n        heading \"Intro\"\n        text \"Hello world\"\n        button \"Go\" open About\n        link \"More\" open About\n        image \"a.png\" alt \"A\"\n        divider\n    }\n    page About { text \"about\" }\n}\nfunc main() { }\n",
+        );
+        assert_eq!(p.websites.len(), 1);
+        let w = &p.websites[0];
+        assert_eq!(w.name, "My Site");
+        assert_eq!(w.pages.len(), 2);
+        assert_eq!(w.pages[0].name, "Home");
+        assert_eq!(w.pages[0].elements.len(), 7);
+        assert!(matches!(&w.pages[0].elements[3].kind, ElementKind::Button { target, .. } if target == "About"));
+        assert!(matches!(&w.pages[0].elements[5].kind, ElementKind::Image { alt, .. } if alt == "A"));
+    }
+
+    #[test]
+    fn website_and_functions_coexist() {
+        let p = parse_website("func helper() -> int { return 1; }\nfunc main() { print(helper()); }\nwebsite \"S\" { page Home { text \"t\" } }\n");
+        assert_eq!(p.funcs.len(), 2);
+        assert_eq!(p.websites.len(), 1);
+    }
+
+    #[test]
+    fn website_words_stay_identifiers_outside_the_declaration() {
+        // Backwards compatibility: `website`/`page`/`button` as ordinary
+        // names keep compiling (ADR-0019).
+        let p = parse_website(
+            "func main() {\n    let website = 1;\n    let page = website + 1;\n    print(page);\n}\n",
+        );
+        assert!(p.websites.is_empty());
+        assert_eq!(p.funcs.len(), 1);
+    }
+
+    #[test]
+    fn website_name_must_be_a_string() {
+        let diags = parse_err("website Home { }");
+        assert!(diags.iter().any(|d| d.code == "E2016"), "{:?}", diags);
+    }
+
+    #[test]
+    fn unknown_element_is_E2030() {
+        let diags = parse_err("website \"S\" { page Home { carousel \"x\" } }");
+        assert!(diags.iter().any(|d| d.code == "E2030"), "{:?}", diags);
+    }
+
+    #[test]
+    fn button_without_open_is_rejected_with_hint() {
+        let diags = parse_err("website \"S\" { page Home { button \"Go\" } }");
+        let d = diags.iter().find(|d| d.message.contains("`button`")).expect("button diagnostic");
+        assert!(d.hint.is_some());
+    }
+
+    #[test]
+    fn image_without_alt_is_rejected_at_parse_time() {
+        let diags = parse_err("website \"S\" { page Home { image \"x.png\" } }");
+        assert!(diags.iter().any(|d| d.message.contains("alt")), "{:?}", diags);
+    }
+
+    #[test]
+    fn broken_element_recovers_and_later_elements_parse() {
+        let diags = parse_err(
+            "website \"S\" {\n    page Home {\n        text\n        text \"after\"\n    }\n}",
+        );
+        // one error for the missing string, then parsing continues
+        assert_eq!(diags.iter().filter(|d| d.is_error()).count(), 1, "{:?}", diags);
+        assert!(diags[0].message.contains("string after `text`"), "{}", diags[0].message);
     }
 }

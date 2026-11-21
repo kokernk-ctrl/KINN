@@ -46,6 +46,50 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         var_decls: Vec::new(),
     };
 
+    // Pass 0: website declarations (0.3.0). Only the entry file may
+    // declare one; every rule below is target-independent (ADR-0018) —
+    // the web and android backends consume an already-valid site.
+    let mut entry_site: Option<&WebsiteDecl> = None;
+    for (i, unit) in project.files.iter().enumerate() {
+        c.file = unit.path.clone();
+        for w in &unit.program.websites {
+            if i != 0 {
+                c.error(
+                    "E3037",
+                    "website declarations belong in the entry file (imported modules cannot declare websites)",
+                    w.line,
+                    w.col,
+                    7,
+                );
+                continue;
+            }
+            if entry_site.is_some() {
+                c.error(
+                    "E3030",
+                    "a program can declare only one website",
+                    w.line,
+                    w.col,
+                    7,
+                );
+                continue;
+            }
+            if w.name.trim().is_empty() {
+                c.error(
+                    "E3033",
+                    "the website name must not be empty",
+                    w.line,
+                    w.col,
+                    (w.name.chars().count() as u32) + 2,
+                );
+                continue;
+            }
+            entry_site = Some(w);
+        }
+    }
+    if let Some(w) = entry_site {
+        check_website(&mut c, w);
+    }
+
     // Pass 1: signatures of every file.
     for unit in &project.files {
         let mut sigs: HashMap<String, FnSig> = HashMap::new();
@@ -84,14 +128,17 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         c.sigs.push(sigs);
     }
 
-    // Pass 1b: `main` requirements — entry file only.
+    // Pass 1b: `main` requirements — entry file only. A program that
+    // declares a website is a web-target program and does not need
+    // `main` (run reports guidance for it instead of a compile error).
     let main_info = c.sigs[0]
         .get("main")
         .map(|m| (m.params.len(), m.ret.clone(), m.line, m.col));
     match main_info {
-        None => {
+        None if entry_site.is_none() => {
             c.error("E3008", "program must define `func main()`", 1, 1, 0);
         }
+        None => {} // website-only program: see `kinn build --target web`
         Some((nparams, ret, line, col)) => {
             if nparams != 0 {
                 c.error("E3008", "`main` must not take parameters", line, col, 4);
@@ -194,6 +241,147 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
     }
 
     c.diags
+}
+
+/// Semantic rules for a checked-as-present website declaration
+/// (codes E3030–E3037, W3035–W3037; documented in LANGUAGE_SPEC).
+fn check_website(c: &mut Checker, w: &WebsiteDecl) {
+    // Page names must be unique. Slugs are lowercased by the backends,
+    // so the comparison is case-insensitive (`Home` and `home` would
+    // otherwise produce two `home.html` files).
+    let mut seen: HashMap<String, u32> = HashMap::new();
+    for p in &w.pages {
+        let key = p.name.to_lowercase();
+        if let Some(first_line) = seen.get(&key) {
+            c.error(
+                "E3031",
+                format!("duplicate page name `{}` (first defined at line {})", p.name, first_line),
+                p.line,
+                p.col,
+                p.name.chars().count() as u32,
+            );
+            continue;
+        }
+        seen.insert(key, p.line);
+
+        let mut title_count = 0u32;
+        for e in &p.elements {
+            match &e.kind {
+                ElementKind::Title(_) => {
+                    title_count += 1;
+                    if title_count == 2 {
+                        c.warn(
+                            "W3036",
+                            "page has more than one `title`; the first one is used and later ones render as section headings",
+                            e.line,
+                            e.col,
+                            5,
+                        );
+                    }
+                }
+                ElementKind::Heading(v) | ElementKind::Text(v) => {
+                    if v.trim().is_empty() {
+                        c.warn(
+                            "W3037",
+                            format!("`{}` content is empty and renders nothing", e.kind.kind_name()),
+                            e.line,
+                            e.col,
+                            e.kind.kind_name().len() as u32,
+                        );
+                    }
+                }
+                ElementKind::Button { label, .. } | ElementKind::Link { label, .. } => {
+                    if label.trim().is_empty() {
+                        c.error(
+                            "E3035",
+                            format!("`{}` label must not be empty", e.kind.kind_name()),
+                            e.line,
+                            e.col,
+                            e.kind.kind_name().len() as u32,
+                        );
+                    }
+                }
+                ElementKind::Image { src, alt, alt_line, alt_col } => {
+                    if alt.trim().is_empty() {
+                        c.error(
+                            "E3034",
+                            "image alt text must not be empty (accessibility: screen readers need a description)",
+                            *alt_line,
+                            *alt_col,
+                            3,
+                        );
+                    }
+                    if src.trim().is_empty() {
+                        c.error(
+                            "E3036",
+                            "image source must not be empty",
+                            e.line,
+                            e.col,
+                            5,
+                        );
+                    }
+                }
+                ElementKind::Divider => {}
+            }
+        }
+    }
+
+    // Every navigation target must reference a declared page.
+    for p in &w.pages {
+        for e in &p.elements {
+            let (label, target, tl, tc) = match &e.kind {
+                ElementKind::Button { label, target, target_line, target_col }
+                | ElementKind::Link { label, target, target_line, target_col } => {
+                    (label, target, *target_line, *target_col)
+                }
+                _ => continue,
+            };
+            if !w.pages.iter().any(|p2| p2.name == *target) {
+                let mut d = Diagnostic::error(
+                    "E3032",
+                    format!(
+                        "`{}` opens page `{}` which is not declared in this website",
+                        label, target
+                    ),
+                    tl,
+                    tc,
+                    target.chars().count() as u32,
+                );
+                d.hint = Some(format!(
+                    "declared pages: {}",
+                    w.pages.iter().map(|p2| p2.name.as_str()).collect::<Vec<_>>().join(", ")
+                ));
+                d.file = c.file.clone();
+                c.diags.push(d);
+            }
+        }
+    }
+
+    // Pages beyond the first that nothing links to are unreachable in
+    // the generated navigation.
+    for p in w.pages.iter().skip(1) {
+        let linked = w.pages.iter().any(|other| {
+            other.elements.iter().any(|e| {
+                matches!(
+                    &e.kind,
+                    ElementKind::Button { target, .. } | ElementKind::Link { target, .. }
+                    if *target == p.name
+                )
+            })
+        });
+        if !linked {
+            c.warn(
+                "W3035",
+                format!(
+                    "page `{}` is never linked from another page (visitors can only reach it by URL)",
+                    p.name
+                ),
+                p.line,
+                p.col,
+                p.name.chars().count() as u32,
+            );
+        }
+    }
 }
 
 struct FnSig {
@@ -1548,5 +1736,87 @@ mod tests {
         );
         let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
         assert!(errs.is_empty(), "{:#?}", errs);
+    }
+
+    // -- website rules (0.3.0, E3030-E3037 / W3035-W3037) -------------------
+
+    const SITE: &str = "*mode = B;\nwebsite \"S\" {\n    page Home {\n        title \"Home\"\n        button \"Go\" open About\n    }\n    page About {\n        heading \"About\"\n        link \"Back\" open Home\n    }\n}\n";
+
+    #[test]
+    fn valid_site_passes_without_main() {
+        clean(SITE); // website programs do not need `main`
+    }
+
+    #[test]
+    fn website_with_main_still_passes() {
+        clean(&format!("{} func main() {{ print(1); }}", SITE));
+    }
+
+    #[test]
+    fn two_websites_are_rejected() {
+        let src = format!("{} website \"T\" {{ page P1 {{ text \"x\" }} }}", SITE);
+        assert!(has("E3030", &src));
+    }
+
+    #[test]
+    fn empty_site_name_is_rejected() {
+        assert!(has("E3033", "website \"  \" { page Home { text \"x\" } }"));
+    }
+
+    #[test]
+    fn duplicate_page_names_are_rejected_case_insensitively() {
+        assert!(has("E3031", "website \"S\" { page Home { text \"a\" } page home { text \"b\" } }"));
+    }
+
+    #[test]
+    fn unknown_navigation_target_is_rejected_with_hint() {
+        let diags = check_src("website \"S\" { page Home { button \"Go\" open Missing } }");
+        let d = diags.iter().find(|d| d.code == "E3032").expect("E3032");
+        assert!(d.hint.as_deref().unwrap().contains("Home"));
+    }
+
+    #[test]
+    fn empty_image_alt_is_rejected() {
+        assert!(has("E3034", "website \"S\" { page Home { image \"x.png\" alt \" \" } }"));
+    }
+
+    #[test]
+    fn empty_button_label_is_rejected() {
+        assert!(has("E3035", "website \"S\" { page Home { button \" \" open Home } }"));
+    }
+
+    #[test]
+    fn empty_image_src_is_rejected() {
+        assert!(has("E3036", "website \"S\" { page Home { image \" \" alt \"ok\" } }"));
+    }
+
+    #[test]
+    fn website_in_imported_module_is_rejected() {
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { print(l.f()); }",
+            "website \"S\" { page Home { text \"x\" } }\nfunc f() -> int { return 1; }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3037"), "{:?}", diags);
+    }
+
+    #[test]
+    fn duplicate_title_warns_and_unreachable_page_warns() {
+        let diags = check_src(
+            "website \"S\" {\n    page Home {\n        title \"A\"\n        title \"B\"\n    }\n    page Orphan { text \"never linked\" }\n}",
+        );
+        assert!(diags.iter().any(|d| d.code == "W3036"));
+        assert!(diags.iter().any(|d| d.code == "W3035"));
+    }
+
+    #[test]
+    fn empty_text_warns() {
+        assert!(has("W3037", "website \"S\" { page Home { text \"  \" } }"));
+    }
+
+    #[test]
+    fn website_only_program_has_no_e3008() {
+        // Missing main with a website present is NOT E3008 (the run
+        // command reports guidance instead).
+        assert!(!has("E3008", SITE));
     }
 }

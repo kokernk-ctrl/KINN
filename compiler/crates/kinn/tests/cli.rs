@@ -78,7 +78,7 @@ fn command_without_file_exits_two() {
 fn version_prints_version() {
     let out = kinn(&["version"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.2.0");
+    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.3.0");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn kir_prints_the_disassembly() {
     assert!(stdout.contains("JumpIfFalse"));
 }
 
-// -- 0.2.0 -------------------------------------------------------------------
+// -- 0.3.0 -------------------------------------------------------------------
 
 #[test]
 fn run_arrays_example() {
