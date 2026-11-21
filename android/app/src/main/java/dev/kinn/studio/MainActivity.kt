@@ -5,7 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -371,12 +374,25 @@ class MainActivity : AppCompatActivity() {
 
     // -- terminal ---------------------------------------------------------------
 
-    /**
-     * Append a line to the scrollback. The terminal is plain text in
-     * this version (single color) — a UI nicety that is not faked.
-     */
-    private fun termPrint(text: String) {
-        terminalOut.append(text).append('\n')
+    /** Append a colored line to the terminal scrollback. */
+    private fun termPrint(text: String, cls: String = "out") {
+        val color = when (cls) {
+            "accent" -> 0xFFFF7A1A.toInt()
+            "ok" -> 0xFF3FB950.toInt()
+            "warn" -> 0xFFD29922.toInt()
+            "err" -> 0xFFF85149.toInt()
+            "dim" -> 0xFF8B949E.toInt()
+            "cmd" -> 0xFFE6EDF3.toInt()
+            else -> 0xFFE6EDF3.toInt()
+        }
+        val span = SpannableString(text + "\n")
+        span.setSpan(
+            ForegroundColorSpan(color),
+            0,
+            span.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        terminalOut.append(span)
         terminalScroll.post { terminalScroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
