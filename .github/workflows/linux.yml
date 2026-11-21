@@ -6,7 +6,7 @@ name: linux
 # until verified end to end on a clean machine).
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 jobs:

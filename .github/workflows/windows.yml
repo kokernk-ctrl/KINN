@@ -5,7 +5,7 @@ name: windows
 # packaged as a zip and an NSIS installer.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 jobs:
