@@ -192,3 +192,71 @@ step is a minimal manifest (`kinn.toml`: name, version, entry) read by
 packages, registry, network and FFI layers. No lockfiles, no
 dependency downloads, no registry — those ship only with real
 implementation and tests in later releases.
+
+## ADR-0023 — KINN Web Runtime: a real, dependency-free runtime for dynamic web apps
+
+**Status: accepted (2026-11-22, 0.4.0 design; implementation gated on
+the 0.4.0 Part E approval).** 0.4.0 introduces a genuine web runtime
+(`kinnrt.js`) for the new dynamic `app` module: reactive updates from a
+statically compiled binding graph, event dispatch, lifecycle, SPA/MPA
+routing, stores, animation coordination. This **supersedes the "no
+runtime" clause of ADR-0020 for `app` programs only**; static
+`website` output stays byte-identical (no runtime, focus-management
+`app.js` only). The runtime is hand-written ES2020 JavaScript with zero
+third-party code, no eval, no innerHTML, no frameworks — React (or any
+framework) is never a dependency. Size budget ≤ 16 KB, CI-tested. Full
+architecture: `docs/DYNAMIC_WEB_ARCHITECTURE.md` Part C.
+
+## ADR-0024 — The `app` language module: components, state, events, forms
+
+**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+Dynamic web apps are a sibling declaration of `website` (`app "Name" { …
+}`), parsed/checked/lowered by the shared front end via the ADR-0019
+contextual-keyword recipe (no new reserved words; regression tests per
+word). Components declare `prop`/`state`/`view`; views use binding
+expressions, `when`/`otherwise` conditional rendering and keyed `each`
+lists; events are `on <event> { … }` handler blocks whose bodies are
+official Kin statements (restricted: assignment targets resolve to
+handler locals → component state → shared state); handlers and computed
+values lower to KIR and are translated to JavaScript (one semantics, two
+carriers — KIR remains the swap contract per ADR-0002). State is
+scalars/arrays of scalars; records/maps stay out of 0.4.0. New
+diagnostics live in reserved ranges (parser E2031–E2039, checker
+E3040–E3079, W3040–W3049). The android target rejects `app` programs
+with E3070 — backends stay independent (ADR-0018).
+
+## ADR-0025 — Routing: MPA default, SPA opt-in, honest `file://` behavior
+
+**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+`navigation mpa` (default) keeps one independent HTML per page/route
+with shared state carried by an explicit hydration channel;
+`navigation spa` emits one shell with a runtime router (dynamic `:param`
+routes, `not_found`, per-route transitions, history, `aria-current`,
+title/focus updates). SPAs opened from `file://` automatically fall back
+to hash routing and say so in the build report; hosting requirements are
+documented in the generated README. No claim is made that a SPA deep
+link "just works" without the documented static-host fallback rule.
+
+## ADR-0026 — Local persistence and JSON: local-only, honestly bounded
+
+**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+`store` blocks persist declared state keys to the browser's
+`localStorage` (schema-hash guarded) with `store_save/load/clear`
+builtins; JSON is the serialization format of state snapshots
+(`json_of`/`save_json`), not a general document API. Normative honesty
+clause: local persistence is one device, one browser profile — **it is
+never presented as a backend database**; no sync/multi-device/multi-user
+claims. There is no network/fetch construct in 0.4.0.
+
+## ADR-0027 — Animation and theming: declarative whitelist mapped to generated CSS
+
+**Status: accepted (2026-11-22, 0.4.0 design; implementation gated).**
+Animations are declarations (`animation { keyframes/transition }`,
+element attributes `enter/exit/hover/press/scroll`), never imperative
+JS: keyframe properties are whitelisted to compositor-friendly
+opacity/transform/filter; hover/press compile to pure CSS; exit
+animations delay DOM removal; scroll reveals share one
+IntersectionObserver; everything honors `prefers-reduced-motion`. The
+same mechanism ships the per-site `theme` tokens (closes P-020):
+a whitelisted token set (`accent`, `bg`, `surface`, `text`, `muted`,
+`font`, `radius`, `max_width`) generated as CSS custom properties.

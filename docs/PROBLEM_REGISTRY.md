@@ -17,6 +17,16 @@ release that fixed them. This registry is the source for GitHub issues.
 | P-015 | studio-android | Android app has no `tokens` command and no UI tests | parity gap with web Studio | use web Studio or CLI |
 | P-016 | packaging | AppImage built via linuxdeploy is experimental until verified on a clean machine | may need distro-specific fixes | prefer the DEB or tarball |
 | P-017 | android | On-device compiler verified by build + JNI symbol checks, **not yet on a physical device** | first device run may surface issues | CI artifacts exist for device testing |
+| P-018 | backend-android | The CLI's **local** Gradle build provider is verified on the CI runner (ubuntu-latest ships Gradle+SDK: export → assembleDebug → APK, first 0.3.0 CI run) and the toolless path is tested deterministically; developer-configured SDK layouts (custom ANDROID_HOME/gradle wrappers) are untested | only the CI toolchain shape is proven | use Android Studio or CI for other setups |
+| P-019 | backend-android | The CI-built backend APK is not yet installed/launched on a physical device (extends P-017) | runtime behavior on devices unconfirmed | install `kinn-android-backend-apk` artifact on a device |
+| P-020 | backend-web | Site theming tokens (per-site CSS customization) are not in the grammar yet; the generated stylesheet is a single clean default | every generated site looks the same | edit the generated styles.css (it is plain CSS); tokens designed in ADR-0027, ship in 0.4.0 |
+| P-021 | studio-android | No automated UI tests for the 0.3 build/preview flows (same gap as 0.2 UI) | regressions possible in app flows | CI builds the app; manual verification on device pending |
+| P-022 | studio-web | The in-Studio preview is sandboxed and self-contained (inlined CSS/JS, postMessage navigation); `file://` hosting of the real dist differs slightly | preview ≈ but not == the exported dist | use Download .zip + a local server for exact rendering |
+| P-023 | ffi | Binary artifacts cannot pass through the wasm/JNI build bridge (text files only); asset copying is CLI-only | Studio exports contain no binary assets | use `kinn build` locally for asset-bearing projects |
+| P-024 | packaging | linux.yml/windows.yml still name artifacts and DEB control fields `0.2.0` while the release is 0.3.0 | stale artifact names mislead users | artifacts are content-correct; version fix scheduled for 0.4.0 S11 |
+| P-025 | docs | Doc drift: SYNTAX.md documents only 0.1, COMPILER_ARCHITECTURE.md says "three crates" (workspace has five) and "native codegen (planned, 0.3)", CLI_DESIGN.md "Planned" list is stale | new contributors get an outdated picture | AUDIT_REPORT and README carry the accurate status; refresh scheduled for 0.4.0 S11 |
+| P-026 | studio-web | Studio VFS and `.kinnproj` v1 are flat (name regex forbids `/`); the compiler/CLI accept subdirectory imports | 0.4 multi-folder projects (pages/, components/) cannot be edited in Studio yet | use flat imports (`components_nav.kin`) or the CLI; Vfs v2 scheduled 0.4.0 S10 |
+| P-027 | studio-web | Preview has no runtime error/console forwarding and the CLI prints the no-website guard as a plain message while FFI emits code E3038 | runtime bugs invisible in Studio preview; diagnostic asymmetry across hosts | runtime error envelope + console forwarding designed in 0.4.0 (C.7/C.8 of DYNAMIC_WEB_ARCHITECTURE.md); E3038 alignment in S11 |
 
 ## Verification debts
 
@@ -42,10 +52,3 @@ release that fixed them. This registry is the source for GitHub issues.
 | F-010 | 0.2.0 | P-008: no CI → four workflows (test matrix, Android sign+verify, Windows, Linux), all green on develop |
 | F-011 | 0.2.0 | P-010 (0.1 boundary): for loops, arrays, casts, modules, stdlib natives all shipped in 0.2.0 |
 | F-012 | 0.2.0 | Android MainActivity termPrint lost its color parameters during a rewrite — caught by the local gradle build, fixed before merge |
-
-| P-018 | backend-android | The CLI's **local** Gradle build provider is verified on the CI runner (ubuntu-latest ships Gradle+SDK: export → assembleDebug → APK, first 0.3.0 CI run) and the toolless path is tested deterministically; developer-configured SDK layouts (custom ANDROID_HOME/gradle wrappers) are untested | only the CI toolchain shape is proven | use Android Studio or CI for other setups |
-| P-019 | backend-android | The CI-built backend APK is not yet installed/launched on a physical device (extends P-017) | runtime behavior on devices unconfirmed | install `kinn-android-backend-apk` artifact on a device |
-| P-020 | backend-web | Site theming tokens (per-site CSS customization) are not in the grammar yet; the generated stylesheet is a single clean default | every generated site looks the same | edit the generated styles.css (it is plain CSS); state module planned 0.4 |
-| P-021 | studio-android | No automated UI tests for the 0.3 build/preview flows (same gap as 0.2 UI) | regressions possible in app flows | CI builds the app; manual verification on device pending |
-| P-022 | studio-web | The in-Studio preview is sandboxed and self-contained (inlined CSS/JS, postMessage navigation); `file://` hosting of the real dist differs slightly | preview ≈ but not == the exported dist | use Download .zip + a local server for exact rendering |
-| P-023 | ffi | Binary artifacts cannot pass through the wasm/JNI build bridge (text files only); asset copying is CLI-only | Studio exports contain no binary assets | use `kinn build` locally for asset-bearing projects |

@@ -4,6 +4,35 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
+## [Unreleased] — 0.4.0 (design phase)
+
+Dynamic web applications (owner directive). **Design only — no code
+changes in this phase; implementation starts after the owner approves
+the Part E decision points in docs/DYNAMIC_WEB_ARCHITECTURE.md.**
+
+### Added — documentation & decisions
+
+- `docs/DYNAMIC_WEB_ARCHITECTURE.md`: Phase 1 technical audit
+  (re-verified on `c84a8f0`: 250 Rust tests green, real dist inspected),
+  Phase 2 official `app` language module design (components, reactive
+  state, binding expressions, events in official grammar, forms,
+  animations, MPA/SPA routing, local persistence with normative honesty
+  clause), Phase 3 KINN Web Runtime architecture (dependency-free
+  ES2020, statically compiled binding graph, KIR→JS with differential
+  testing, ≤ 16 KB budget), Phase 4 roadmap S1–S11 with tests and
+  acceptance criteria, Phase 5 approval gate (decision points D1–D6).
+- ADR-0023 (KINN Web Runtime; supersedes ADR-0020's no-runtime clause
+  for `app` programs only), ADR-0024 (`app` module: components, state,
+  events, forms), ADR-0025 (MPA default / SPA opt-in, honest `file://`
+  behavior), ADR-0026 (local persistence + JSON, local-only), ADR-0027
+  (declarative animation whitelist + theme tokens).
+- ROADMAP re-scoped: 0.4.0 = Dynamic web applications (S1–S11);
+  "breadth and developer comfort" items moved to 0.6.0 (D1).
+- PROBLEM_REGISTRY: P-018–P-023 table formatting fixed; P-024
+  (packaging CI still emits 0.2.0 names), P-025 (doc drift),
+  P-026 (flat Studio VFS blocks 0.4 folders), P-027 (no runtime error/
+  console forwarding in preview; E3038 CLI/FFI asymmetry) added.
+
 ## [0.3.0] — 2026-11-21
 
 Multi-target delivery: the first complete backend vertical slice (web),

@@ -93,16 +93,25 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 
 - P-018 local Android build provider untested on a real desktop SDK.
 - P-019 backend APK not yet installed on a physical device.
-- P-020 no per-site theming tokens yet (0.4 state module).
+- P-020 no per-site theming tokens yet (designed in ADR-0027, ships in 0.4.0).
 - P-004 string interpolation deferred (ADR-0013). P-012 license.
+- P-024 packaging CI still names 0.2.0 artifacts (linux/windows).
+- P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
+- P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
+- P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
 
 ## Current task and next milestone
 
 0.3.0 is complete and committed (web vertical slice, Android backend,
-Studio integration, package foundation, CI for real targets). Next:
-**0.4.0** — site state/events module (interactive elements), package
-manager over local paths, then the registry; carry-over items from the
-roadmap (string casts/interpolation decision, native codegen spike).
+Studio integration, package foundation, CI for real targets). Current:
+**0.4.0 — Dynamic web applications (owner directive, 2026-11-22)**.
+Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` (technical
+audit, `app` language module design, KINN Web Runtime architecture,
+S1–S11 roadmap with acceptance criteria) and ADR-0023–0027. **Phase 5
+(implementation) is gated on the owner's approval of the Part E
+decision points; no dynamic-web code exists yet.** Carry-overs:
+string casts/interpolation decision, native codegen spike,
+structs/records ADR (D2).
 
 ## Conventions
 

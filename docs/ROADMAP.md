@@ -61,14 +61,38 @@ docs/MULTI_TARGET_ARCHITECTURE.md):
       out of 0.3 by the multi-target direction; ADR-0002 spike still
       pending)
 
-## 0.4.0 — Breadth and developer comfort
+## 0.4.0 — Dynamic web applications (owner directive, 2026-11-22)
 
-- [ ] Cross-module value exports (consts, not only functions)
-- [ ] Structs/records decision (ADR) or a deliberate "arrays only"
-      extension statement
-- [ ] Debugging support in the VM (step, breakpoints) exposed in Studio
-- [ ] Android app hardening: UI tests on an emulator in CI
-- [ ] AppImage verification on clean machines (promote from experimental)
+Re-scoped per owner direction: the 0.4 theme is the dynamic web stack —
+multi-file app projects, MPA/SPA, reactive state, events, components,
+animations, forms/persistence, and the KINN Web Runtime. Design,
+audit and roadmap: `docs/DYNAMIC_WEB_ARCHITECTURE.md` (Phases 1–4),
+ADRs 0023–0027. **Implementation (Phase 5) is gated on the owner's
+approval of the Part E decision points** — no dynamic-web code exists
+yet, and none is claimed.
+
+- [ ] S1 Cross-module value exports (`const`) — prerequisite
+- [ ] S2 Language: `app` module grammar (components, state, computed,
+      views, events, forms, animations, routes) with full parse tests
+- [ ] S3 App semantics: checker rules E2031–E2039/E3040–E3070,
+      W3040–W3044
+- [ ] S4 AppModel lowering + honest static-target rejection (E3070)
+- [ ] S5 KIR → JS codegen with differential testing against kinrt
+- [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
+      lifecycle) — dependency-free, ≤ 16 KB, no frameworks
+- [ ] S7 SPA router + MPA hydration/stores; dynamic route params,
+      not-found, honest `file://` fallback
+- [ ] S8 Animations (declarative whitelist → generated CSS)
+- [ ] S9 Forms, validation, local persistence + JSON snapshots
+      (local-only, never presented as a backend database)
+- [ ] S10 Studio: folder project browser (Vfs v2), SPA preview, runtime
+      error + console forwarding; Android app preview v2
+- [ ] S11 CLI/docs/verification: E3038 alignment, `kinn serve` (D4),
+      spec updates, browser verification log, packaging version fix
+      (P-024), doc drift fix (P-025)
+- [ ] Carry-overs unchanged: string interpolation / string→number casts
+      decision (ADR-0013/P-013), native codegen spike (ADR-0002),
+      structs/records ADR (Part E D2)
 
 ## 0.5.0 — Graphics foundations (OpenGL ES 3.0)
 
@@ -80,6 +104,12 @@ docs/MULTI_TARGET_ARCHITECTURE.md):
 - [ ] GPU resource management with leak reporting
 - [ ] Android ARM64 device verification of the run path
 - [ ] C/C++ integration layer with security review
+
+## 0.6.0 — Breadth and developer comfort (moved from 0.4 by D1)
+
+- [ ] Debugging support in the VM (step, breakpoints) exposed in Studio
+- [ ] Android app hardening: UI tests on an emulator in CI
+- [ ] AppImage verification on clean machines (promote from experimental)
 
 ## 1.0.0 — Preview
 
