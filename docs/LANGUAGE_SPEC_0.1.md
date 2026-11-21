@@ -365,3 +365,65 @@ element     := "title" STRING | "heading" STRING | "text" STRING
 | W3035 | checker | page never linked from another page |
 | W3036 | checker | duplicate `title` element (first wins) |
 | W3037 | checker | empty `heading`/`text` content |
+
+---
+
+# Kin 0.4 additions (normative, in progress)
+
+The first 0.4.0 language addition is cross-module value exports
+(`const`; docs/DYNAMIC_WEB_ARCHITECTURE.md B.1, step S1, ADR-0028).
+Later 0.4 sections will cover the `app` module grammar (S2) and its
+semantics (S3) as they land.
+
+## C1. Cross-module value exports (`const`)
+
+```
+const_decl := 'const' IDENT ':' type '=' const_expr ';'
+```
+
+- `const NAME: Type = expr;` declares a **compile-time constant** at
+  top level. The type annotation is part of the grammar and is always
+  present.
+- `const` is a **contextual keyword** (ADR-0019 recipe): at top level a
+  `const` identifier always starts a const-declaration attempt (the
+  only other top-level items are `import`, `func` and `website`);
+  everywhere else it remains an ordinary identifier, so `let const = 1;`
+  and `func f(const: int)` keep compiling.
+- Constant expressions allow exactly: literals (int, float, bool,
+  string), array literals of constant expressions, unary/binary
+  operators, and references to consts declared **earlier in the same
+  file**. Function calls, casts (`as`), indexing, and qualified reads
+  are rejected (E3039). Empty array literals take the declared type
+  (`const A: [int] = [];`).
+- Arithmetic inside a constant expression follows VM rules (ADR-0008):
+  integer overflow and division/modulo by zero are compile-time errors
+  (E3039), and float division by zero is an error too — a constant can
+  never encode a value the VM would reject at runtime.
+- Exports: like functions, consts are exported implicitly. The
+  declaring file reads its own consts by bare name; importers read them
+  qualified as `module.NAME` (the KIR-level name is `module::NAME`,
+  mirroring functions). Unknown modules E3020; unknown members E3021
+  (with hints when the name is a function or a const).
+- Name rules: a const must not collide with a builtin (E3016), a
+  function of the same file, or another const of the same file (E3002).
+  A const cannot have type void (E3015). Locals may shadow a const
+  (locals win); assigning to a const is E3004 (immutable binding —
+  ADR-0014's binding/contents distinction applies: element writes into
+  a const **array** mutate the one shared array object, matching the
+  language's array reference semantics).
+- Lowering: constants **fold at lowering** — every read compiles to a
+  plain `Const(value)` instruction; `Module` records the folded values
+  under qualified names (no new KIR instructions), and `kinn kir`
+  prints them.
+
+## C2. New diagnostic codes (complete for 0.4 additions so far)
+
+| Code | Stage | Meaning |
+| --- | --- | --- |
+| E3039 | checker | invalid constant expression (non-constant construct, or constant arithmetic overflow/division by zero) |
+
+Codes reserved for later 0.4 steps (declared in
+docs/DYNAMIC_WEB_ARCHITECTURE.md B.11, frozen by their test suites):
+parser E2031–E2039 (`app`/view grammar, S2), checker E3040–E3079 and
+warnings W3040–W3049 (`app` semantics, S3). E3039 sits outside those
+reserved ranges and is fully owned by `const` (S1).

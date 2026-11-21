@@ -460,7 +460,7 @@ mod tests {
         let mut full = code;
         full.extend(end());
         let lines = vec![1u32; full.len()];
-        Module { funcs: vec![func("main", 0, nlocals, full, lines)] }
+        Module { consts: Vec::new(), funcs: vec![func("main", 0, nlocals, full, lines)] }
     }
 
     fn module(code: Vec<Instr>) -> Module {
@@ -539,7 +539,7 @@ mod tests {
         ];
         main_code.extend(end());
         let main = func("main", 0, 0, main_code.clone(), vec![1; main_code.len()]);
-        let m = Module { funcs: vec![main, double] };
+        let m = Module { consts: Vec::new(), funcs: vec![main, double] };
         assert_eq!(run_module(&m).unwrap(), "42\n");
     }
 
@@ -555,7 +555,7 @@ mod tests {
         let mut main_code = vec![Instr::Call(1), Instr::Pop, Instr::Const(Value::Int(1)), Instr::Print];
         main_code.extend(end());
         let main = func("main", 0, 0, main_code.clone(), vec![1; main_code.len()]);
-        let m = Module { funcs: vec![main, shout] };
+        let m = Module { consts: Vec::new(), funcs: vec![main, shout] };
         assert_eq!(run_module(&m).unwrap(), "hey\n1\n");
     }
 
@@ -607,7 +607,7 @@ mod tests {
         ];
         main_code.extend(end());
         let main = func("main", 0, 0, main_code.clone(), vec![1; main_code.len()]);
-        let m = Module { funcs: vec![f, main] };
+        let m = Module { consts: Vec::new(), funcs: vec![f, main] };
         let err = run_module(&m).unwrap_err();
         assert_eq!(err.code, "E4002");
     }
@@ -642,7 +642,7 @@ mod tests {
             Instr::Div,
         ];
         let lines = vec![3u32, 3, 7];
-        let m = Module { funcs: vec![func("main", 0, 0, code, lines)] };
+        let m = Module { consts: Vec::new(), funcs: vec![func("main", 0, 0, code, lines)] };
         let err = run_module(&m).unwrap_err();
         assert_eq!(err.line, 7);
     }

@@ -13,7 +13,7 @@ release that fixed them. This registry is the source for GitHub issues.
 | P-011 | lexer | Tabs count as one column; caret alignment can look off in tab-indented files | cosmetic in diagnostics | use spaces (editors insert spaces) |
 | P-012 | infra | License undecided (ADR-0012) | external contributions blocked | owner decision pending |
 | P-013 | language | No string-to-number casts (`"5" as int` rejected, E3025) | parse errors instead of conversion errors | 0.3 scope decision |
-| P-014 | language | Cross-module globals/selective exports unsupported (ADR-0015 boundary) | modules export functions only | pass values through functions |
+| P-014 | language | Selective/renamed exports unsupported; modules export **all** top-level functions and consts implicitly (value exports landed in 0.4.0 S1 / ADR-0028; the naming and hiding half stays open) | importers see every export; no `export` lists or rename syntax | pass values through functions; name consts so the implicit export is safe |
 | P-015 | studio-android | Android app has no `tokens` command and no UI tests | parity gap with web Studio | use web Studio or CLI |
 | P-016 | packaging | AppImage built via linuxdeploy is experimental until verified on a clean machine | may need distro-specific fixes | prefer the DEB or tarball |
 | P-017 | android | On-device compiler verified by build + JNI symbol checks, **not yet on a physical device** | first device run may surface issues | CI artifacts exist for device testing |
@@ -52,3 +52,4 @@ release that fixed them. This registry is the source for GitHub issues.
 | F-010 | 0.2.0 | P-008: no CI → four workflows (test matrix, Android sign+verify, Windows, Linux), all green on develop |
 | F-011 | 0.2.0 | P-010 (0.1 boundary): for loops, arrays, casts, modules, stdlib natives all shipped in 0.2.0 |
 | F-012 | 0.2.0 | Android MainActivity termPrint lost its color parameters during a rewrite — caught by the local gradle build, fixed before merge |
+| F-013 | 0.4.0 | P-014 (value half): cross-module value exports did not exist — top-level `const` with qualified reads `m.NAME` shipped in S1 (ADR-0028); selective/renamed exports remain open under the narrowed P-014 |

@@ -1,8 +1,8 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-21, release 0.3.0.** Update this file after
-significant milestones. Keep it between 500 and 900 words.
+**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1.** Update this
+file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
 
@@ -58,11 +58,13 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **250 Rust tests** (153 kinc unit incl. website
-parser/checker/backends, 26 kinrt, 22 pipeline, 28 CLI, 16 ffi, 5
-manifest) and **66 Studio vitest tests** (15 real-wasm incl.
+Test totals: **281 Rust tests** (177 kinc unit incl. const/website
+parser/checker/backends/consteval, 27 kinrt, 28 pipeline, 28 CLI, 16
+ffi, 5 manifest) and **66 Studio vitest tests** (15 real-wasm incl.
 build targets). Examples carry `// expect:` blocks; error examples
-declare codes; `examples/web/site.kin` is the website example.
+declare codes; `examples/web/site.kin` is the website example;
+`examples/modules/` demonstrates multi-file projects with const
+exports (0.4.0 S1).
 
 Planned, not implemented (do not pretend otherwise): site state/forms
 (0.4), package manager/registry (spec in MODULE_SYSTEM.md), native
@@ -95,6 +97,8 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-019 backend APK not yet installed on a physical device.
 - P-020 no per-site theming tokens yet (designed in ADR-0027, ships in 0.4.0).
 - P-004 string interpolation deferred (ADR-0013). P-012 license.
+  P-014 narrowed to selective/renamed exports (value exports landed
+  as `const`, 0.4.0 S1 / ADR-0028).
 - P-024 packaging CI still names 0.2.0 artifacts (linux/windows).
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
@@ -105,13 +109,13 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 0.3.0 is complete and committed (web vertical slice, Android backend,
 Studio integration, package foundation, CI for real targets). Current:
 **0.4.0 — Dynamic web applications (owner directive, 2026-11-22)**.
-Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` (technical
-audit, `app` language module design, KINN Web Runtime architecture,
-S1–S11 roadmap with acceptance criteria) and ADR-0023–0027. **Phase 5
-(implementation) is gated on the owner's approval of the Part E
-decision points; no dynamic-web code exists yet.** Carry-overs:
-string casts/interpolation decision, native codegen spike,
-structs/records ADR (D2).
+Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` and
+ADR-0023–0027; **the owner approved D1–D6 on 2026-11-22 and Phase 5
+started: S1 (cross-module value exports, `const`, ADR-0028) is landed
+— 281 Rust tests green, 0.3.0 web dist byte-identical. Next: S2
+(`app` module grammar, parser + AST).** Carry-overs: string
+casts/interpolation decision, native codegen spike, structs/records
+ADR (D2 stays out of 0.4.0 per the owner).
 
 ## Conventions
 

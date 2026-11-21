@@ -1,6 +1,9 @@
 // modules/math.kin — imported by modules/main.kin.
-// Modules export their top-level functions; `main` in an imported file
-// is ignored (the entry file's `main` runs).
+// Modules export their top-level functions AND their top-level consts
+// (0.4.0 S1); `main` in an imported file is ignored (the entry file's
+// `main` runs).
+
+const MAX: int = 100;
 
 func add(a: int, b: int) -> int {
     return a + b;

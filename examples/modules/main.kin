@@ -8,8 +8,12 @@
 // 25
 // 5
 // 15
+// 95
 
 import "math.kin" as math;
+
+// A const of the entry file is read by its plain name...
+const BASE: int = 5;
 
 func triple(x: int) -> int {
     return math.add(x, math.add(x, x));
@@ -17,7 +21,9 @@ func triple(x: int) -> int {
 
 func main() {
     print(math.add(3, 4));
-    print(math.square(5));
-    print(math.clamp(99, 1, 5));
-    print(triple(5));
+    print(math.square(BASE));
+    print(math.clamp(99, 1, BASE));
+    print(triple(BASE));
+    // ...and a const of an imported module is read qualified.
+    print(math.MAX - BASE);
 }

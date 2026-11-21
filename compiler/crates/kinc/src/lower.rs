@@ -76,6 +76,44 @@ pub fn site_model(w: &WebsiteDecl) -> SiteModel {
 pub fn lower_project(project: &Project) -> Module {
     let entry_dir = dirname(&project.files[0].path).to_string();
 
+    // Per-file const tables (0.4.0 S1): unqualified name -> folded value.
+    // The checker has already validated every initializer (constant
+    // expression, declared type, earlier-consts-only references), so
+    // re-evaluation here cannot fail; the values are needed once for the
+    // module's `consts` record and once per read site (all reads of a
+    // const share the same value — for arrays that is one shared object,
+    // matching ADR-0014's reference semantics).
+    let const_tables: Vec<HashMap<String, Value>> = project
+        .files
+        .iter()
+        .map(|unit| {
+            let mut t: HashMap<String, Value> = HashMap::new();
+            for cd in &unit.program.consts {
+                match crate::consteval::eval_const_expr(&cd.init, &const_typed(&t, &unit.program.consts), Some(&cd.ty)) {
+                    Ok((v, _)) => {
+                        t.insert(cd.name.clone(), v);
+                    }
+                    Err(e) => unreachable!(
+                        "lowering bug: const `{}` failed evaluation after a clean check: {:?}",
+                        cd.name, e
+                    ),
+                }
+            }
+            t
+        })
+        .collect();
+
+    // The module-level const record: qualified names (`math::MAX`), files
+    // in load order, consts in source order — deterministic.
+    let mut consts: Vec<(String, Value)> = Vec::new();
+    for (i, unit) in project.files.iter().enumerate() {
+        for cd in &unit.program.consts {
+            let qname = qualified_name(&unit.path, &entry_dir, i == 0, &cd.name);
+            let v = const_tables[i].get(&cd.name).expect("const folded above").clone();
+            consts.push((qname, v));
+        }
+    }
+
     // Global function index: qualified name -> (module function index,
     // return type). The entry's `main` keeps the plain name the VM looks
     // for; everything else uses qualified names.
@@ -100,17 +138,43 @@ pub fn lower_project(project: &Project) -> Module {
         let unit = &project.files[*file_idx];
         // Import alias -> qualified-name prefix, for ModCall resolution.
         let mut import_prefixes: HashMap<String, String> = HashMap::new();
+        // Import alias -> target file's const table, for ModConst folding.
+        let mut import_consts: HashMap<String, HashMap<String, Value>> = HashMap::new();
         for r in &unit.imports {
             let target = &project.files[r.file];
             let prefix = qualified_name(&target.path, &entry_dir, false, "")
                 .trim_end_matches("::")
                 .to_string();
             import_prefixes.insert(r.alias.clone(), prefix);
+            import_consts.insert(r.alias.clone(), const_tables[r.file].clone());
         }
         let qname = qualified_name(&unit.path, &entry_dir, *file_idx == 0, &f.name);
-        funcs.push(lower_func(&qname, f, &index, &import_prefixes));
+        funcs.push(lower_func(
+            &qname,
+            f,
+            &index,
+            &import_prefixes,
+            &const_tables[*file_idx],
+            &import_consts,
+        ));
     }
-    Module { funcs }
+    Module { funcs, consts }
+}
+
+/// Pair each folded const value with its declared type so the evaluator
+/// can fold reads of earlier consts (it only needs the types to type the
+/// result, and the values to compute it).
+fn const_typed(
+    values: &HashMap<String, Value>,
+    decls: &[ConstDecl],
+) -> HashMap<String, (Value, Type)> {
+    let mut out = HashMap::new();
+    for (name, v) in values {
+        if let Some(cd) = decls.iter().find(|c| &c.name == name) {
+            out.insert(name.clone(), (v.clone(), cd.ty.clone()));
+        }
+    }
+    out
 }
 
 struct LoopCtx {
@@ -141,6 +205,10 @@ struct FnLower {
     index: HashMap<String, (usize, Type)>,
     /// Import alias -> qualified-name prefix (current file).
     import_prefixes: HashMap<String, String>,
+    /// This file's consts by bare name (0.4.0 S1).
+    consts: HashMap<String, Value>,
+    /// Import alias -> target file's consts by bare name (0.4.0 S1).
+    mod_consts: HashMap<String, HashMap<String, Value>>,
     /// Counter for hidden `for` slots (names impossible in source).
     hidden: u32,
 }
@@ -150,6 +218,8 @@ fn lower_func(
     f: &Func,
     index: &HashMap<String, (usize, Type)>,
     import_prefixes: &HashMap<String, String>,
+    consts: &HashMap<String, Value>,
+    mod_consts: &HashMap<String, HashMap<String, Value>>,
 ) -> FuncDef {
     let mut fl = FnLower {
         code: Vec::new(),
@@ -162,6 +232,8 @@ fn lower_func(
         cur_line: f.line,
         index: index.clone(),
         import_prefixes: import_prefixes.clone(),
+        consts: consts.clone(),
+        mod_consts: mod_consts.clone(),
         hidden: 0,
     };
     let mut scope = HashMap::new();
@@ -222,6 +294,16 @@ impl FnLower {
             }
         }
         panic!("lowering bug: unresolved variable `{}` (checker should have caught this)", name)
+    }
+
+    /// Like [`slot`] but `None` when the name is not a local/parameter.
+    fn try_slot(&self, name: &str) -> Option<u16> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(s) = scope.get(name) {
+                return Some(*s);
+            }
+        }
+        None
     }
 
     /// Allocate a slot, reusing a freed one when possible (P-003).
@@ -532,8 +614,21 @@ impl FnLower {
                 true
             }
             ExprKind::Ident(name) => {
-                let slot = self.slot(name);
-                self.emit(Instr::Load(slot));
+                // Locals win over consts; the checker guarantees exactly
+                // one of the two resolves (a bare const read folds to a
+                // constant — 0.4.0 S1).
+                match self.try_slot(name) {
+                    Some(slot) => {
+                        self.emit(Instr::Load(slot));
+                    }
+                    None => {
+                        let v = self
+                            .consts
+                            .get(name)
+                            .expect("lowering bug: unresolved name (checker should have caught this)");
+                        self.emit(Instr::Const(v.clone()));
+                    }
+                }
                 true
             }
             ExprKind::ArrayLit(items) => {
@@ -681,6 +776,21 @@ impl FnLower {
                 self.at(e.line);
                 self.emit(Instr::Call(idx as u16));
                 ret != Type::Void
+            }
+            ExprKind::ModConst { module, name } => {
+                // Qualified const read (0.4.0 S1): folds to the target
+                // module's constant value.
+                let v = self
+                    .mod_consts
+                    .get(module)
+                    .and_then(|t| t.get(name))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        panic!("lowering bug: unresolved module const `{}.{}`", module, name)
+                    });
+                self.at(e.line);
+                self.emit(Instr::Const(v));
+                true
             }
         }
     }

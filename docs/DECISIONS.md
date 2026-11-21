@@ -260,3 +260,21 @@ IntersectionObserver; everything honors `prefers-reduced-motion`. The
 same mechanism ships the per-site `theme` tokens (closes P-020):
 a whitelisted token set (`accent`, `bg`, `surface`, `text`, `muted`,
 `font`, `radius`, `max_width`) generated as CSS custom properties.
+
+## ADR-0028 — Cross-module value exports: top-level `const`, folded at lowering
+
+**Status: accepted (2026-11-22, 0.4.0 S1 — the first implemented step
+of the owner-approved 0.4.0 Phase 5 scope; docs/DYNAMIC_WEB_ARCHITECTURE.md
+B.1).** Modules export top-level constants in addition to functions:
+`const NAME: Type = expr;` with a mandatory type annotation. This
+**partially supersedes the "functions-only exports" clause of
+ADR-0015**; everything else in ADR-0015 (path-based imports, mandatory
+aliases, qualified KIR names, inert imported `main`) is unchanged.
+Initializers are compile-time constant expressions over literals,
+operators and earlier same-file consts (E3039 elsewhere); constants
+fold to plain `Const(value)` instructions at lowering — no new KIR
+instructions — and the folded values are recorded in `Module.consts`
+for `kinn kir` to show. Importers read consts qualified (`m.NAME`).
+Selective/renamed exports remain out of scope (P-014 narrowed).
+`const` is a contextual keyword per the ADR-0019 recipe, with the
+word-stays-identifier regression gate.

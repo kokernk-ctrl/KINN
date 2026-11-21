@@ -162,8 +162,9 @@ impl Parser {
         }
     }
 
-    /// Skip to the next top-level item (`func`, `import`) after a broken
-    /// declaration header.
+    /// Skip to the next top-level item (`func`, `import`, `const`) after
+    /// a broken declaration header. A following `const` declaration is a
+    /// fresh top-level item, so recovery stops before consuming it.
     fn recover_top(&mut self) {
         loop {
             if self.gave_up {
@@ -172,6 +173,7 @@ impl Parser {
             }
             match self.peek() {
                 TokKind::Eof | TokKind::Func | TokKind::Import => return,
+                TokKind::Ident(w) if w == "const" => return,
                 TokKind::RBrace | TokKind::Semi => {
                     self.bump();
                 }
@@ -194,11 +196,12 @@ impl Parser {
         let mut mode = Mode::default();
         let mut mode_declared = false;
         let mut imports = Vec::new();
+        let mut consts = Vec::new();
         let mut funcs = Vec::new();
         let mut websites = Vec::new();
 
         if self.gave_up {
-            return Program { mode, mode_declared, imports, funcs, websites };
+            return Program { mode, mode_declared, imports, consts, funcs, websites };
         }
 
         // Optional mode directive — must be the very first thing.
@@ -238,7 +241,7 @@ impl Parser {
             if self.at(TokKind::Import) {
                 self.fail(
                     "E2012",
-                    "`import` declarations must appear before all functions",
+                    "`import` declarations must appear before all functions and consts",
                     self.peek_token().line,
                     self.peek_token().col,
                     6,
@@ -253,13 +256,67 @@ impl Parser {
                 }
                 continue;
             }
+            // `const` declarations (0.4.0 S1) use the ADR-0019 contextual
+            // recipe: at top level a `const` identifier is always a const
+            // declaration attempt (the only other valid items are `func`,
+            // `import` and `website`), so a malformed header gets a
+            // precise diagnostic instead of a generic function error.
+            if matches!(self.peek(), TokKind::Ident(w) if w == "const") {
+                match self.const_decl() {
+                    Ok(d) => consts.push(d),
+                    Err(()) => self.recover_top(),
+                }
+                continue;
+            }
             match self.func() {
                 Ok(f) => funcs.push(f),
                 Err(()) => self.recover_top(),
             }
         }
 
-        Program { mode, mode_declared, imports, funcs, websites }
+        Program { mode, mode_declared, imports, consts, funcs, websites }
+    }
+
+    /// `const NAME: Type = expr;` — entered when a top-level `const`
+    /// identifier is seen (ADR-0019 contextual recipe, 0.4.0 S1). The
+    /// type annotation is part of the grammar: a const always declares
+    /// its type explicitly.
+    fn const_decl(&mut self) -> PResult<ConstDecl> {
+        let kw = self.bump(); // Ident("const")
+        let name_tok = self.expect_ident()?;
+        let name = match name_tok.kind {
+            TokKind::Ident(n) => n,
+            _ => unreachable!("expect_ident guarantees an identifier"),
+        };
+        self.expect_colon_for_const(&name)?;
+        let ty = self.parse_type()?;
+        self.expect(TokKind::Assign, "`=`")?;
+        let init = self.expr()?;
+        self.expect(TokKind::Semi, "';'")?;
+        Ok(ConstDecl { name, ty, init, line: kw.line, col: kw.col })
+    }
+
+    /// `const` declarations require a type annotation. Without this the
+    /// generic `expected ':'` message would not mention the rule, so the
+    /// parser says exactly what is missing.
+    fn expect_colon_for_const(&mut self, name: &str) -> PResult<()> {
+        if self.at(TokKind::Colon) {
+            self.bump();
+            return Ok(());
+        }
+        let t = self.peek_token().clone();
+        self.fail(
+            "E2003",
+            format!(
+                "a `const` must declare its type (like `const {}: int = 10;`) but found {}",
+                name,
+                describe(&t.kind)
+            ),
+            t.line,
+            t.col,
+            t.len().max(1),
+        );
+        Err(())
     }
 
     /// `website "Name" { page P { ... } ... }` — entered when a
@@ -1116,14 +1173,22 @@ impl Parser {
                     self.expect(TokKind::RParen, "')'")?;
                     Expr { kind: ExprKind::Call { name, args }, line: t.line, col: t.col }
                 } else if self.at(TokKind::Dot) {
-                    // Qualified call: `module.function(...)`.
+                    // Qualified access: `module.function(...)` for calls,
+                    // `module.NAME` for a const read (0.4.0 S1).
                     self.bump();
                     let f = self.expect_ident()?;
                     let fname = match f.kind {
                         TokKind::Ident(n) => n,
                         _ => unreachable!("expect_ident guarantees an identifier"),
                     };
-                    self.expect(TokKind::LParen, "`(` after `module.function`")?;
+                    if !self.at(TokKind::LParen) {
+                        return Ok(Expr {
+                            kind: ExprKind::ModConst { module: name, name: fname },
+                            line: t.line,
+                            col: t.col,
+                        });
+                    }
+                    self.bump();
                     let mut args = Vec::new();
                     if !self.at(TokKind::RParen) {
                         loop {
@@ -1484,9 +1549,16 @@ mod tests {
     }
 
     #[test]
-    fn qualified_call_requires_parens() {
-        let diags = parse_err("func main() { math.add; }");
-        // `math.add;` → after `.` we require an identifier and `(`.
+    fn qualified_const_read_parses_without_parens() {
+        // 0.4.0 S1: `module.NAME` is a qualified const read; the parser
+        // accepts it and the checker decides whether NAME is a const
+        // (E3039-free) or a function that must be called (E3021 there).
+        let p = parse_ok("func main() { math.add; }");
+        // The dump path proves it parsed as one expression statement.
+        let dump = crate::ast::dump(&p);
+        assert!(dump.contains("math.add"), "{}", dump);
+        // A qualified access whose member is missing still errors.
+        let diags = parse_err("func main() { math.; }");
         assert!(diags.iter().any(|d| d.is_error()));
     }
 
@@ -1595,6 +1667,81 @@ mod tests {
     fn website_name_must_be_a_string() {
         let diags = parse_err("website Home { }");
         assert!(diags.iter().any(|d| d.code == "E2016"), "{:?}", diags);
+    }
+
+    // -- 0.4.0 S1: `const` declarations (contextual keyword, ADR-0019) -------
+
+    #[test]
+    fn const_word_stays_identifier_outside_the_declaration() {
+        // Backwards compatibility gate: `const` as an ordinary name keeps
+        // compiling everywhere except the top-level item position.
+        let p = parse_ok(
+            "func main() {\n    let const = 1;\n    let x = const + 1;\n    print(x);\n}\n",
+        );
+        assert!(p.consts.is_empty());
+        assert_eq!(p.funcs.len(), 1);
+        // Even as a parameter name and in assignment position.
+        parse_ok("func f(const: int) -> int { return const; }\nfunc main() { print(f(2)); }\n");
+        parse_ok("func main() { let c = 0; const = c + 1; print(const); }\n");
+    }
+
+    #[test]
+    fn const_declarations_parse() {
+        let p = parse_ok(
+            "import \"m.kin\" as m;\nconst MAX: int = 10;\nconst NAME: string = \"kinn\";\nconst LIMITS: [int] = [1, 2, MAX];\nfunc main() { }\n",
+        );
+        assert_eq!(p.consts.len(), 3);
+        assert_eq!(p.consts[0].name, "MAX");
+        assert_eq!(p.consts[0].ty, Type::Int);
+        assert_eq!(p.consts[2].name, "LIMITS");
+        assert_eq!(p.consts[2].ty, Type::Array(Box::new(Type::Int)));
+        // Position points at `const`.
+        assert_eq!(p.consts[0].line, 2);
+        assert_eq!(p.consts[0].col, 1);
+        // The `kinn ast` dump shows the declaration.
+        let dump = crate::ast::dump(&p);
+        assert!(dump.contains("const MAX: int = 10"), "{}", dump);
+        assert!(dump.contains("const LIMITS: [int]"), "{}", dump);
+    }
+
+    #[test]
+    fn const_requires_a_type_annotation() {
+        let diags = parse_err("const MAX = 10;\nfunc main() { }\n");
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E2003")
+            .expect("the missing-annotation error is E2003");
+        assert!(d.message.contains("must declare its type"), "{}", d.message);
+    }
+
+    #[test]
+    fn const_parse_errors_recover_to_the_next_declaration() {
+        // A broken const header produces exactly one precise diagnostic
+        // (E2003 from the missing `:`) and recovery stops before the next
+        // `const` item instead of consuming it, so nothing else cascades.
+        let diags = parse_err(
+            "const A int = 1;\nconst B: int = 2;\nfunc main() { print(1); }\n",
+        );
+        let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert_eq!(errs.len(), 1, "one precise error, got: {:#?}", errs);
+        assert_eq!(errs[0].line, 1, "points at the broken header");
+        assert!(errs[0].message.contains("must declare its type"));
+    }
+
+    #[test]
+    fn module_const_read_parses_as_mod_const() {
+        let p = parse_ok(
+            "import \"m.kin\" as m;\nfunc main() { print(m.LIMIT); }\n",
+        );
+        // The call-free qualified read is one expression.
+        let dump = crate::ast::dump(&p);
+        assert!(dump.contains("m.LIMIT"), "{}", dump);
+        // Calls keep their parentheses-required shape.
+        let p = parse_ok(
+            "import \"m.kin\" as m;\nfunc main() { print(m.f(1)); }\n",
+        );
+        let dump = crate::ast::dump(&p);
+        assert!(dump.contains("m.f(1)"), "{}", dump);
     }
 
     #[test]

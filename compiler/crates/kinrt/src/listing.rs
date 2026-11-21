@@ -7,7 +7,16 @@ use crate::kir::{Instr, Module};
 /// Render the full module listing.
 pub fn listing(m: &Module) -> String {
     let mut out = String::new();
-    out.push_str(&format!("KIR module ({} functions)\n", m.funcs.len()));
+    out.push_str(&format!(
+        "KIR module ({} functions, {} consts)\n",
+        m.funcs.len(),
+        m.consts.len()
+    ));
+    // Folded constants (0.4.0 S1): qualified name and value, in the same
+    // deterministic order the lowering produced.
+    for (name, value) in &m.consts {
+        out.push_str(&format!("\nconst {} = {}\n", name, const_value_str(value)));
+    }
     for f in &m.funcs {
         out.push_str(&format!(
             "\nfunc {} ({} params, {} locals)\n",
@@ -23,6 +32,13 @@ pub fn listing(m: &Module) -> String {
         }
     }
     out
+}
+
+fn const_value_str(v: &crate::value::Value) -> String {
+    match v {
+        crate::value::Value::Str(s) => format!("{:?}", s),
+        other => other.format(),
+    }
 }
 
 fn brief(i: &Instr) -> String {
@@ -78,12 +94,30 @@ mod tests {
                 code,
                 lines: vec![1, 2, 3],
             }],
+            consts: Vec::new(),
         };
         let text = listing(&m);
-        assert!(text.contains("KIR module (1 functions)"));
+        assert!(text.contains("KIR module (1 functions, 0 consts)"));
         assert!(text.contains("func main (0 params, 0 locals)"));
         assert!(text.contains("Const(1)"));
         assert!(text.contains("Print"));
         assert!(text.contains("line 3"));
+    }
+
+    #[test]
+    fn listing_shows_folded_consts() {
+        let m = Module {
+            funcs: Vec::new(),
+            consts: vec![
+                ("MAX".to_string(), Value::Int(10)),
+                ("math::PI".to_string(), Value::Float(3.5)),
+                ("GREETING".to_string(), Value::Str("hi".to_string())),
+            ],
+        };
+        let text = listing(&m);
+        assert!(text.contains("KIR module (0 functions, 3 consts)"));
+        assert!(text.contains("const MAX = 10"));
+        assert!(text.contains("const math::PI = 3.5"));
+        assert!(text.contains("const GREETING = \"hi\""));
     }
 }

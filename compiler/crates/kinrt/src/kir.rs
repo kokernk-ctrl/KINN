@@ -131,14 +131,27 @@ pub struct FuncDef {
 }
 
 /// A complete KIR program.
+///
+/// `consts` (0.4.0 S1) holds the compile-time constants folded at
+/// lowering: `(qualified name, value)` in deterministic file order (entry
+/// file first, then imports in load order; source order within a file).
+/// Every read of a `const` compiles to a plain `Instr::Const(value)` —
+/// there are no new instructions — so this table is the auditable record
+/// of what was folded, and `kinn kir` can show it.
 #[derive(Debug, Clone)]
 pub struct Module {
     pub funcs: Vec<FuncDef>,
+    pub consts: Vec<(String, Value)>,
 }
 
 impl Module {
     /// Index of the function called `name`, if present.
     pub fn find(&self, name: &str) -> Option<usize> {
         self.funcs.iter().position(|f| f.name == name)
+    }
+
+    /// Value of the folded constant called `name`, if present.
+    pub fn find_const(&self, name: &str) -> Option<&Value> {
+        self.consts.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
 }

@@ -4,11 +4,51 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
-## [Unreleased] — 0.4.0 (design phase)
+## [Unreleased] — 0.4.0 (Phase 5 implementation started)
 
-Dynamic web applications (owner directive). **Design only — no code
-changes in this phase; implementation starts after the owner approves
-the Part E decision points in docs/DYNAMIC_WEB_ARCHITECTURE.md.**
+Dynamic web applications (owner directive). Design phases 1–4 landed
+as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
+approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
+implementation began with S1.**
+
+### Added — S1: cross-module value exports (`const`)
+
+- Language: `const NAME: Type = expr;` top-level declarations with a
+  mandatory type annotation (ADR-0028; normative rules in
+  LANGUAGE_SPEC §C1). `const` is a contextual keyword (ADR-0019
+  recipe) with the word-stays-identifier regression gate; imports must
+  still precede all functions and consts (E2012 wording updated).
+- Semantics: initializers are compile-time constant expressions
+  (literals, array literals, operators, earlier same-file consts);
+  calls, casts, indexing and qualified reads are rejected (new code
+  **E3039**). Constant arithmetic follows VM rules — overflow and
+  division/modulo by zero are compile-time errors. Assigning to a
+  const is E3004; locals may shadow consts; void consts are E3015;
+  builtin-name collisions are E3016; duplicate definitions are E3002.
+- Modules export consts implicitly: declaring files read them bare,
+  importers read them qualified (`m.NAME`; KIR name `m::NAME`).
+  Unknown members E3020/E3021 now distinguish functions and consts
+  with hints both ways; undefined variables hint at module consts.
+- Compiler: new `kinc::consteval` evaluator (checker validation +
+  lowering folding share one pure function); `Module` gained
+  `consts: Vec<(String, Value)>` (qualified names, deterministic
+  order) — **no new KIR instructions**; every const read compiles to
+  `Const(value)`; `kinn kir` prints the folded constants
+  (`const math::MAX = 100`).
+- Examples: `examples/modules/` now demonstrates shared configuration
+  values across files (`math.MAX`, entry-local `BASE`).
+- Tests: +31 (workspace 250 → 281, all green): parser (contextual
+  word gate, annotation error, recovery, ModConst), checker (15 tests:
+  duplicates, collisions, non-constant initializers, type mismatches,
+  void, arithmetic errors, assignment, shadowing, qualified reads and
+  hints), pipeline (folding, qualified reads through calls,
+  shared-singleton const arrays per ADR-0014, determinism, website
+  compatibility), CLI (multi-file run + `kir` shows folded consts),
+  kinrt listing, consteval unit tests.
+- Compatibility: 0.3.0 website programs are unaffected —
+  `examples/web/site.kin` dist rebuilt byte-identical (determinism
+  re-verified); all 250 pre-existing tests pass unchanged (one parser
+  test updated for the new `module.NAME` grammar, see S1 notes).
 
 ### Added — documentation & decisions
 

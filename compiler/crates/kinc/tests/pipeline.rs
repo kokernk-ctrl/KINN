@@ -261,12 +261,15 @@ fn modules_link_and_run() {
     let mut buf = Vec::new();
     vm::run(&compiled.module, &mut buf).expect("module example must run");
     let out = String::from_utf8(buf).unwrap();
-    assert_eq!(out, "7\n25\n5\n15\n");
+    assert_eq!(out, "7\n25\n5\n15\n95\n");
 
-    // Imported functions appear under qualified names in the module.
+    // Imported functions appear under qualified names in the module, and
+    // the example's consts are folded under qualified names (0.4.0 S1).
     assert!(compiled.module.find("math::add").is_some());
     assert!(compiled.module.find("triple").is_some());
     assert!(compiled.module.find("main").is_some());
+    assert!(compiled.module.find_const("math::MAX") == Some(&kinrt::Value::Int(100)));
+    assert!(compiled.module.find_const("BASE") == Some(&kinrt::Value::Int(5)));
 }
 
 #[test]
@@ -275,4 +278,103 @@ fn multiple_syntax_errors_are_reported_through_the_driver() {
     let diags = driver::compile(src).expect_err("must fail");
     let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
     assert_eq!(errs.len(), 2, "{:#?}", diags);
+}
+
+// -- 0.4.0 S1: cross-module value exports (`const`) --------------------------
+
+const LIMIT_LIB: &str = "const LIMIT: int = 100;\nconst SCALE: int = LIMIT / 4;\nfunc f() { }\n";
+
+fn run_two(entry: &str, lib_src: &str) -> kinrt::Module {
+    let files = [("lib.kin", lib_src)];
+    let map: std::collections::HashMap<String, String> =
+        files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
+    let mut loader = move |path: &str| map.get(path).cloned().ok_or("not found".to_string());
+    let (compiled, diags) = driver::compile_project("main.kin", entry, &mut loader);
+    let compiled = compiled.expect("must compile");
+    let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+    assert!(errs.is_empty(), "{:#?}", errs);
+    compiled.module
+}
+
+#[test]
+fn consts_fold_into_the_kir_module() {
+    let m = run_two(
+        "import \"lib.kin\" as lib;\nconst LOCAL: int = 7;\nfunc main() { print(LOCAL + lib.LIMIT); }\n",
+        LIMIT_LIB,
+    );
+    // The module records the folded constants under qualified names,
+    // entry first, in source order — the auditable folding record.
+    assert_eq!(m.consts.len(), 3, "{:?}", m.consts);
+    assert_eq!(m.consts[0].0, "LOCAL");
+    assert_eq!(m.consts[1].0, "lib::LIMIT");
+    assert_eq!(m.consts[2].0, "lib::SCALE");
+    assert!(matches!(m.consts[1].1, kinrt::Value::Int(100)));
+    // Derived constants fold too (`LIMIT / 4` → 25).
+    assert!(matches!(m.consts[2].1, kinrt::Value::Int(25)));
+    assert_eq!(m.find_const("lib::LIMIT"), Some(&kinrt::Value::Int(100)));
+
+    let mut buf = Vec::new();
+    vm::run(&m, &mut buf).unwrap();
+    assert_eq!(String::from_utf8(buf).unwrap(), "107\n");
+}
+
+#[test]
+fn const_reads_compile_to_const_instructions() {
+    let m = run_two(
+        "const LOCAL: int = 7;\nfunc main() { print(LOCAL); }\n",
+        LIMIT_LIB,
+    );
+    // The read of `LOCAL` lowers to `Const(7)`, not a slot load.
+    let text = kinrt::listing::listing(&m);
+    let main_fn = text.split("func main").nth(1).expect("main in listing");
+    assert!(main_fn.contains("Const(7)"), "{}", text);
+    assert!(!main_fn.contains("Load("), "const read must not allocate a slot: {}", text);
+}
+
+#[test]
+fn imported_const_usable_inside_expressions_and_calls() {
+    let m = run_two(
+        "import \"lib.kin\" as lib;\nfunc scaled(x: int) -> int { return x * lib.SCALE; }\nfunc main() { print(scaled(2)); print(lib.LIMIT - lib.SCALE); }\n",
+        LIMIT_LIB,
+    );
+    let mut buf = Vec::new();
+    vm::run(&m, &mut buf).unwrap();
+    assert_eq!(String::from_utf8(buf).unwrap(), "50\n75\n");
+}
+
+#[test]
+fn const_array_is_one_shared_object_adr0014() {
+    // Documented semantics: arrays use reference semantics (ADR-0014), so
+    // a const of array type is ONE shared object; element writes through
+    // any binding are visible through every binding — including the const
+    // itself. Scalars stay immutable (E3004), contents are mutable.
+    let m = run_two(
+        "const A: [int] = [1, 2];\nfunc main() { let x = A; x[0] = 9; print(A[0]); print(A); }\n",
+        LIMIT_LIB,
+    );
+    let mut buf = Vec::new();
+    vm::run(&m, &mut buf).unwrap();
+    assert_eq!(String::from_utf8(buf).unwrap(), "9\n[9, 2]\n");
+}
+
+#[test]
+fn const_lowering_is_deterministic() {
+    let entry = "import \"lib.kin\" as lib;\nconst LOCAL: int = 7;\nfunc main() { print(LOCAL + lib.LIMIT); }\n";
+    let m1 = run_two(entry, LIMIT_LIB);
+    let m2 = run_two(entry, LIMIT_LIB);
+    assert_eq!(kinrt::listing::listing(&m1), kinrt::listing::listing(&m2));
+}
+
+#[test]
+fn website_program_with_consts_keeps_site_model_untouched() {
+    // Consts are ordinary top-level items; a website program may declare
+    // them and the site model is unaffected (0.3.0 compatibility).
+    let src = "const TITLE: string = \"KINN\";\nwebsite \"S\" { page Home { heading \"Hi\" text \"x\" } }\n";
+    let c = driver::compile(src).expect("website + const compiles");
+    // Note: website element arguments are string literals; consts do not
+    // reach the site model.
+    let site = c.site.expect("site model present");
+    assert_eq!(site.pages.len(), 1);
+    assert_eq!(c.module.consts.len(), 1);
+    assert_eq!(c.module.consts[0].0, "TITLE");
 }

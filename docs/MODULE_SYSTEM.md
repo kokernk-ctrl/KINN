@@ -39,8 +39,18 @@ the Kin syntax (ADR-0022).
 - Transitive loading with diamond sharing; cycles are E3018 with the
   full chain. Duplicate alias E3019, unknown module/function
   E3020/E3021.
-- Modules export **functions only** (ADR-0015); imported `main` is
-  inert. Qualified calls `m.f(...)`.
+- Modules export **functions and top-level consts** (functions
+  ADR-0015; consts added in 0.4.0 S1, ADR-0028 — the "functions-only"
+  clause of ADR-0015 is superseded for consts). Imported `main` is
+  inert. Qualified calls `m.f(...)`; qualified const reads `m.NAME`
+  (lowered to the KIR name `m::NAME`).
+- `const NAME: Type = expr;` is a compile-time constant (normative
+  rules: docs/LANGUAGE_SPEC_0.1.md §C1). Initializers may reference
+  consts declared earlier **in the same file only** — cross-file const
+  initializers are rejected (E3039), so files stay independently
+  checkable and lowering stays deterministic. Consts are folded at
+  lowering (no runtime cost; no new KIR instructions) and recorded in
+  the module for `kinn kir` to show.
 - Loader-callback based (`kinc::project`), so CLI (filesystem),
   Studio web (virtual FS) and Android (app storage) share identical
   semantics — verified by tests on all three paths.

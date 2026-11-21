@@ -146,14 +146,18 @@ fn run_casts_and_stdlib_examples() {
 fn run_multi_file_module_project() {
     let out = kinn(&["run", &format!("{}/modules/main.kin", EXAMPLES)]);
     assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(String::from_utf8(out.stdout).unwrap(), "7\n25\n5\n15\n");
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "7\n25\n5\n15\n95\n");
 
-    // `kir` shows the qualified imported function names.
+    // `kir` shows the qualified imported function names and the folded
+    // constants (0.4.0 S1): the entry const keeps its plain name, the
+    // imported one is qualified with its module stem.
     let out = kinn(&["kir", &format!("{}/modules/main.kin", EXAMPLES)]);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("func math::add"));
     assert!(stdout.contains("func main"));
+    assert!(stdout.contains("const math::MAX = 100"), "{}", stdout);
+    assert!(stdout.contains("const BASE = 5"), "{}", stdout);
 }
 
 #[test]

@@ -67,11 +67,16 @@ Re-scoped per owner direction: the 0.4 theme is the dynamic web stack —
 multi-file app projects, MPA/SPA, reactive state, events, components,
 animations, forms/persistence, and the KINN Web Runtime. Design,
 audit and roadmap: `docs/DYNAMIC_WEB_ARCHITECTURE.md` (Phases 1–4),
-ADRs 0023–0027. **Implementation (Phase 5) is gated on the owner's
-approval of the Part E decision points** — no dynamic-web code exists
-yet, and none is claimed.
+ADRs 0023–0027. **Phase 5 implementation started 2026-11-22 after the
+owner approved all Part E decisions (D1–D6): roadmap renumber (D1),
+records stay out (D2), MPA default (D3), serve with a security
+boundary (D4), Playwright browser tests in CI (D5), animation
+whitelist (D6). S1 is landed; S2 is next.**
 
-- [ ] S1 Cross-module value exports (`const`) — prerequisite
+- [x] S1 Cross-module value exports (`const`) — prerequisite
+      (landed: parser/checker/lowering/KIR `Module.consts`, qualified
+      reads `m.NAME`, E3039; ADR-0028; 31 new tests, workspace 281
+      green; 0.3.0 web dist byte-identical; P-014 narrowed)
 - [ ] S2 Language: `app` module grammar (components, state, computed,
       views, events, forms, animations, routes) with full parse tests
 - [ ] S3 App semantics: checker rules E2031–E2039/E3040–E3070,

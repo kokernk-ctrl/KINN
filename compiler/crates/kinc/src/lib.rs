@@ -9,6 +9,7 @@
 pub mod ast;
 pub mod backend;
 pub mod checker;
+pub mod consteval;
 pub mod diagnostics;
 pub mod driver;
 pub mod lexer;

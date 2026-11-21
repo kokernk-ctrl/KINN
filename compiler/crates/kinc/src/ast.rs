@@ -66,18 +66,39 @@ impl Type {
     }
 }
 
-/// A parsed program: an optional mode directive, imports, function
-/// declarations, and optional website declarations (0.3.0).
+/// A parsed program: an optional mode directive, imports, top-level
+/// `const` declarations (0.4.0 S1), function declarations, and optional
+/// website declarations (0.3.0).
 #[derive(Debug, Clone)]
 pub struct Program {
     pub mode: Mode,
     /// `true` when the file contained an explicit `*mode = ...;` line.
     pub mode_declared: bool,
     pub imports: Vec<ImportDecl>,
+    /// `const NAME: Type = expr;` top-level declarations (0.4.0 S1), in
+    /// source order. Exported implicitly like functions; read qualified
+    /// as `module.NAME` (the KIR-level name is `module::NAME`).
+    pub consts: Vec<ConstDecl>,
     pub funcs: Vec<Func>,
     /// `website "Name" { page P { ... } }` declarations (0.3.0). Valid
     /// programs carry at most one, in the entry file.
     pub websites: Vec<WebsiteDecl>,
+}
+
+/// `const NAME: Type = expr;` — a compile-time constant (0.4.0 S1).
+///
+/// The initializer must be a compile-time constant expression: literals,
+/// array literals, unary/binary operators, and references to consts
+/// declared **earlier in the same file**. Calls, casts, indexing and
+/// qualified reads are rejected by the checker (E3039).
+#[derive(Debug, Clone)]
+pub struct ConstDecl {
+    pub name: String,
+    /// The declared type is part of the grammar (always present).
+    pub ty: Type,
+    pub init: Expr,
+    pub line: u32,
+    pub col: u32,
 }
 
 /// `website "Name" { page ... }` — the declarative site module. Lowered
@@ -381,6 +402,12 @@ pub enum ExprKind {
         name: String,
         args: Vec<Expr>,
     },
+    /// `module.NAME` — a qualified const read through an import alias
+    /// (0.4.0 S1). Folds to a constant at lowering.
+    ModConst {
+        module: String,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,6 +477,16 @@ pub fn dump(p: &Program) -> String {
     ));
     for im in &p.imports {
         s.push_str(&format!("import \"{}\" as {}\n", im.path, im.alias));
+    }
+    for c in &p.consts {
+        s.push_str(&format!(
+            "const {}: {} = {}  ({}:{})\n",
+            c.name,
+            c.ty.as_str(),
+            expr_str(&c.init),
+            c.line,
+            c.col
+        ));
     }
     for f in &p.funcs {
         let params = f
@@ -570,5 +607,6 @@ fn expr_str(e: &Expr) -> String {
             let args = args.iter().map(expr_str).collect::<Vec<_>>().join(", ");
             format!("{}.{}({})", module, name, args)
         }
+        ExprKind::ModConst { module, name } => format!("{}.{}", module, name),
     }
 }

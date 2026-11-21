@@ -36,6 +36,7 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         diags: Vec::new(),
         mode: project.files[0].program.mode,
         sigs: Vec::new(),
+        consts: Vec::new(),
         imports: HashMap::new(),
         cur_file: 0,
         file: "<main>".to_string(),
@@ -125,7 +126,95 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
                 },
             );
         }
+
+        // Top-level consts (0.4.0 S1): validated in source order, so a
+        // const initializer sees exactly the consts declared earlier in
+        // this file — no forward references, no cycles. `const_vals`
+        // keeps the real folded values (the evaluator needs them when a
+        // later const references an earlier one); `const_table` keeps the
+        // type/position info the rest of the checker resolves against.
+        let mut const_table: HashMap<String, ConstInfo> = HashMap::new();
+        let mut const_vals: HashMap<String, (kinrt::Value, Type)> = HashMap::new();
+        for cd in &unit.program.consts {
+            if BUILTINS.contains(&cd.name.as_str()) {
+                c.error(
+                    "E3016",
+                    format!(
+                        "`{}` is a builtin function; a `const` cannot use that name",
+                        cd.name
+                    ),
+                    cd.line,
+                    cd.col,
+                    cd.name.len() as u32,
+                );
+                continue;
+            }
+            if let Some(sig) = sigs.get(&cd.name) {
+                c.error(
+                    "E3002",
+                    format!(
+                        "duplicate definition `{}` (also declared as a function at line {})",
+                        cd.name, sig.line
+                    ),
+                    cd.line,
+                    cd.col,
+                    cd.name.len() as u32,
+                );
+                continue;
+            }
+            if let Some(first) = const_table.get(&cd.name) {
+                c.error(
+                    "E3002",
+                    format!(
+                        "duplicate const `{}` (first defined at line {})",
+                        cd.name, first.line
+                    ),
+                    cd.line,
+                    cd.col,
+                    cd.name.len() as u32,
+                );
+                continue;
+            }
+            if cd.ty == Type::Void {
+                c.error(
+                    "E3015",
+                    format!("a `const` cannot have type void (`{}`)", cd.name),
+                    cd.line,
+                    cd.col,
+                    cd.name.len() as u32,
+                );
+                continue;
+            }
+            match crate::consteval::eval_const_expr(&cd.init, &const_vals, Some(&cd.ty)) {
+                Ok((value, ty)) => {
+                    if ty != Type::Error && ty != cd.ty {
+                        c.mismatch(&cd.ty, &ty, cd.line, cd.col, cd.name.len() as u32);
+                    }
+                    const_vals.insert(cd.name.clone(), (value, cd.ty.clone()));
+                    const_table.insert(
+                        cd.name.clone(),
+                        ConstInfo { ty: cd.ty.clone(), line: cd.line },
+                    );
+                }
+                Err(crate::consteval::ConstError::NotConstant(msg)) => {
+                    c.error(
+                        "E3039",
+                        format!(
+                            "invalid constant expression for `{}`: {} (allowed: literals, array literals, operators and earlier consts of this file)",
+                            cd.name, msg
+                        ),
+                        cd.init.line,
+                        cd.init.col,
+                        1,
+                    );
+                }
+                Err(crate::consteval::ConstError::Arithmetic(msg)) => {
+                    c.error("E3039", msg, cd.init.line, cd.init.col, 1);
+                }
+            }
+        }
         c.sigs.push(sigs);
+        c.consts.push(const_table);
     }
 
     // Pass 1b: `main` requirements — entry file only. A program that
@@ -399,11 +488,23 @@ struct VarInfo {
     col: u32,
 }
 
+/// A checked top-level `const` declaration (0.4.0 S1): declared type and
+/// definition line, per file, keyed by the const's (unqualified) name.
+/// Consts are file-scoped: a file's own consts are read bare, other
+/// files' consts are read qualified (`module.NAME`).
+#[derive(Clone)]
+struct ConstInfo {
+    ty: Type,
+    line: u32,
+}
+
 struct Checker {
     diags: Vec<Diagnostic>,
     mode: Mode,
     /// Signatures per project file, indexed like `project.files`.
     sigs: Vec<HashMap<String, FnSig>>,
+    /// Const tables per project file, indexed like `project.files`.
+    consts: Vec<HashMap<String, ConstInfo>>,
     /// Import alias -> file index, for the file being checked.
     imports: HashMap<String, usize>,
     cur_file: usize,
@@ -521,13 +622,26 @@ impl Checker {
                 let (vty, vmutable, vline, vcol) = match self.lookup(name) {
                     Some(v) => (v.ty, v.mutable, v.line, v.col),
                     None => {
-                        self.error(
-                            "E3001",
-                            format!("undefined variable `{}`", name),
-                            *line,
-                            *col,
-                            name.len() as u32,
-                        );
+                        if self.consts[self.cur_file].contains_key(name) {
+                            self.error(
+                                "E3004",
+                                format!(
+                                    "cannot assign to `{}` (consts are immutable, declared with `const`)",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                        } else {
+                            self.error(
+                                "E3001",
+                                format!("undefined variable `{}`", name),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                        }
                         self.check_expr(value);
                         return;
                     }
@@ -745,16 +859,33 @@ impl Checker {
             ExprKind::StrLit(_) => Type::Str,
             ExprKind::Ident(name) => match self.lookup(name) {
                 Some(v) => v.ty,
-                None => {
-                    self.error(
-                        "E3001",
-                        format!("undefined variable `{}`", name),
-                        e.line,
-                        e.col,
-                        name.len() as u32,
-                    );
-                    Type::Error
-                }
+                // Fall back to the file's own consts (0.4.0 S1). Locals
+                // win: a local binding shadows a const of the same name.
+                None => match self.consts[self.cur_file].get(name) {
+                    Some(ci) => ci.ty.clone(),
+                    None => {
+                        // Honest hint when the name is a const of an
+                        // imported module: it must be read qualified.
+                        let mut hint = String::new();
+                        for (alias, file) in &self.imports {
+                            if self.consts[*file].contains_key(name) {
+                                hint = format!(
+                                    " (const `{}.{}` exists in module `{}`; read it qualified)",
+                                    alias, name, alias
+                                );
+                                break;
+                            }
+                        }
+                        self.error(
+                            "E3001",
+                            format!("undefined variable `{}`{}", name, hint),
+                            e.line,
+                            e.col,
+                            name.len() as u32,
+                        );
+                        Type::Error
+                    }
+                },
             },
             ExprKind::ArrayLit(items) => {
                 if items.is_empty() {
@@ -963,7 +1094,51 @@ impl Checker {
             ExprKind::ModCall { module, name, args } => {
                 self.check_mod_call(module, name, args, e.line, e.col)
             }
+            ExprKind::ModConst { module, name } => {
+                self.check_mod_const(module, name, e.line, e.col)
+            }
         }
+    }
+
+    /// `module.NAME` — a qualified const read (0.4.0 S1).
+    fn check_mod_const(&mut self, module: &str, name: &str, line: u32, col: u32) -> Type {
+        let file = match self.imports.get(module) {
+            Some(f) => *f,
+            None => {
+                self.error(
+                    "E3020",
+                    format!("unknown module `{}` (imports introduce module names — did you forget `import ... as {};`?)", module, module),
+                    line,
+                    col,
+                    module.len() as u32,
+                );
+                return Type::Error;
+            }
+        };
+        if let Some(ci) = self.consts[file].get(name) {
+            return ci.ty.clone();
+        }
+        if self.sigs[file].contains_key(name) {
+            self.error(
+                "E3021",
+                format!(
+                    "module `{}` member `{}` is a function; call it as `{}.{}(...)`",
+                    module, name, module, name
+                ),
+                line,
+                col,
+                (module.len() + name.len() + 1) as u32,
+            );
+        } else {
+            self.error(
+                "E3021",
+                format!("module `{}` has no function or const `{}`", module, name),
+                line,
+                col,
+                (module.len() + name.len() + 1) as u32,
+            );
+        }
+        Type::Error
     }
 
     fn check_call(&mut self, name: &str, args: &[Expr], line: u32, col: u32) -> Type {
@@ -1140,13 +1315,28 @@ impl Checker {
         let sig = match self.sigs[file].get(name) {
             Some(s) => (s.params.clone(), s.ret.clone()),
             None => {
-                self.error(
-                    "E3021",
-                    format!("module `{}` has no function `{}`", module, name),
-                    line,
-                    col,
-                    (module.len() + name.len() + 1) as u32,
-                );
+                // Distinguish a const of that name from a truly unknown
+                // member so the message tells the user what to do.
+                if self.consts[file].contains_key(name) {
+                    self.error(
+                        "E3021",
+                        format!(
+                            "`{}.{}` is a const, not a function; read it without parentheses: `{}.{}`",
+                            module, name, module, name
+                        ),
+                        line,
+                        col,
+                        (module.len() + name.len() + 1) as u32,
+                    );
+                } else {
+                    self.error(
+                        "E3021",
+                        format!("module `{}` has no function `{}`", module, name),
+                        line,
+                        col,
+                        (module.len() + name.len() + 1) as u32,
+                    );
+                }
                 for a in args {
                     self.check_expr(a);
                 }
@@ -1818,5 +2008,205 @@ mod tests {
         // Missing main with a website present is NOT E3008 (the run
         // command reports guidance instead).
         assert!(!has("E3008", SITE));
+    }
+
+    // -- 0.4.0 S1: cross-module value exports (`const`) ----------------------
+
+    const CONST_PROG: &str = "const MAX: int = 10;\nfunc main() { print(MAX); }\n";
+
+    #[test]
+    fn const_declaration_passes() {
+        clean(CONST_PROG);
+        clean(
+            "const A: [int] = [1, 2, 3];\nconst B: [string] = [];\nconst C: bool = true;\nconst D: float = 1.5 + 2.5;\nfunc main() { }\n",
+        );
+    }
+
+    #[test]
+    fn const_read_types_like_its_declared_type() {
+        clean("const GREETING: string = \"hi\";\nfunc main() { let s: string = GREETING; print(s); }");
+        // Type flows: passing a string const where int is expected fails
+        // (E3003, the general type-mismatch code; E3011 is int/float only).
+        assert!(has(
+            "E3003",
+            "const GREETING: string = \"hi\";\nfunc main() { let x: int = GREETING; }"
+        ));
+    }
+
+    #[test]
+    fn duplicate_const_is_rejected() {
+        assert!(has(
+            "E3002",
+            "const MAX: int = 10;\nconst MAX: int = 20;\nfunc main() { }"
+        ));
+    }
+
+    #[test]
+    fn const_and_function_name_collision_is_rejected() {
+        // const declared after the function of the same name...
+        assert!(has(
+            "E3002",
+            "func MAX() { }\nconst MAX: int = 10;\nfunc main() { }"
+        ));
+        // ...and before it.
+        assert!(has(
+            "E3002",
+            "const MAX: int = 10;\nfunc MAX() { }\nfunc main() { }"
+        ));
+    }
+
+    #[test]
+    fn const_cannot_shadow_a_builtin() {
+        assert!(has(
+            "E3016",
+            "const print: int = 1;\nfunc main() { }"
+        ));
+    }
+
+    #[test]
+    fn const_initializer_must_be_constant() {
+        // A function call in the initializer.
+        assert!(has(
+            "E3039",
+            "func f() -> int { return 1; }\nconst X: int = f();\nfunc main() { }"
+        ));
+        // A local variable can never be a constant.
+        assert!(has(
+            "E3039",
+            "func main() { let y = 1; }\nconst X: int = y;\n"
+        ));
+        // A forward reference (const declared later in the file).
+        assert!(has(
+            "E3039",
+            "const A: int = B + 1;\nconst B: int = 2;\nfunc main() { }"
+        ));
+        // A qualified read is not allowed in an initializer.
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nconst A: int = l.C;\nfunc main() { print(A); }",
+            "const C: int = 1;\nfunc f() { }\n",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3039"), "{:?}", diags);
+    }
+
+    #[test]
+    fn const_type_mismatch_is_rejected() {
+        // int/float mismatch (no implicit conversion, ADR-0004) → E3011.
+        assert!(has("E3011", "const X: int = 1.5;\nfunc main() { }"));
+        assert!(has("E3011", "const X: float = 1;\nfunc main() { }"));
+        // string vs int → E3003 (general type mismatch).
+        assert!(has("E3003", "const X: int = \"hi\";\nfunc main() { }"));
+        // declared array type vs scalar → E3003.
+        assert!(has("E3003", "const X: [int] = 5;\nfunc main() { }"));
+    }
+
+    #[test]
+    fn const_cannot_be_void() {
+        assert!(has("E3015", "const X: void = 1;\nfunc main() { }"));
+    }
+
+    #[test]
+    fn const_arithmetic_errors_are_compile_time() {
+        // Integer overflow in a constant expression.
+        assert!(has(
+            "E3039",
+            "const X: int = 9223372036854775807 + 1;\nfunc main() { }"
+        ));
+        // Integer division by zero.
+        assert!(has("E3039", "const X: int = 1 / 0;\nfunc main() { }"));
+        // Float division by zero (ADR-0008).
+        assert!(has("E3039", "const X: float = 1.0 / 0.0;\nfunc main() { }"));
+        // Integer multiplication overflow.
+        assert!(has(
+            "E3039",
+            "const X: int = 9223372036854775807 * 2;\nfunc main() { }"
+        ));
+    }
+
+    #[test]
+    fn assigning_to_a_const_is_rejected() {
+        assert!(has(
+            "E3004",
+            "const MAX: int = 10;\nfunc main() { MAX = 5; }"
+        ));
+        assert!(has(
+            "E3004",
+            "const MAX: int = 10;\nfunc main() { MAX += 1; }"
+        ));
+    }
+
+    #[test]
+    fn local_shadows_const_without_diagnostic() {
+        // A local binding wins over a const of the same name (documented
+        // rule); the program is valid and no diagnostic fires.
+        let diags = check_src(
+            "const X: int = 1;\nfunc main() { let X: int = 2; print(X); }\n",
+        );
+        assert!(
+            !diags.iter().any(|d| d.is_error()),
+            "{:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn qualified_const_read_checks_types() {
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.LIMIT; print(x); }",
+            "const LIMIT: int = 100;\nfunc f() { }\n",
+        );
+        assert!(
+            !diags.iter().any(|d| d.is_error()),
+            "{:?}",
+            diags
+        );
+        // Wrong type through the qualified read.
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.NAME; }",
+            "const NAME: string = \"kinn\";\nfunc f() { }\n",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3003"), "{:?}", diags);
+    }
+
+    #[test]
+    fn qualified_read_of_unknown_member_is_rejected() {
+        // Unknown const name.
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.NOPE; }",
+            "const LIMIT: int = 1;\nfunc f() { }\n",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3021"), "{:?}", diags);
+        // Reading a function as a const tells the user to call it.
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.f; }",
+            "const LIMIT: int = 1;\nfunc f() -> int { return 1; }\n",
+        );
+        let d = diags.iter().find(|d| d.code == "E3021").expect("E3021");
+        assert!(d.message.contains("is a function"), "{}", d.message);
+        // Calling a const like a function tells the user to read it.
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { print(l.LIMIT()); }",
+            "const LIMIT: int = 1;\nfunc f() { }\n",
+        );
+        let d = diags.iter().find(|d| d.code == "E3021").expect("E3021");
+        assert!(d.message.contains("not a function"), "{}", d.message);
+    }
+
+    #[test]
+    fn qualified_read_of_unknown_module_is_rejected() {
+        let diags = check_two(
+            "func main() { let x: int = nope.NOPE; }",
+            "const LIMIT: int = 1;\nfunc f() { }\n",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3020"), "{:?}", diags);
+    }
+
+    #[test]
+    fn undefined_variable_hints_at_module_const() {
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc main() { print(LIMIT); }",
+            "const LIMIT: int = 1;\nfunc f() { }\n",
+        );
+        let d = diags.iter().find(|d| d.code == "E3001").expect("E3001");
+        assert!(d.message.contains("l.LIMIT"), "{}", d.message);
     }
 }
