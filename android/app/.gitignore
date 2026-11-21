@@ -1,0 +1,3 @@
+build/
+# Native compiler library: built by CI (cargo-ndk) into jniLibs.
+src/main/jniLibs/

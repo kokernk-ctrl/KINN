@@ -1,0 +1,17 @@
+[package]
+name = "kinn-android"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "JNI glue between the KINN Studio Android app (dev.kinn.studio) and the kinn-ffi compiler bridge"
+license = "TBD"
+
+# The compiler core (kinrt/kinc/kinn-ffi) stays zero-dependency. This thin
+# Android-only glue crate is the single place that may depend on the `jni`
+# crate; it adds no language or runtime logic of its own.
+[dependencies]
+jni = { version = "0.21", default-features = false }
+kinn-ffi = { path = "../kinn-ffi" }
+
+[lib]
+crate-type = ["cdylib"]

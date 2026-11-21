@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kinrt", "crates/kinc", "crates/kinn", "crates/kinn-ffi"]
+members = ["crates/kinrt", "crates/kinc", "crates/kinn", "crates/kinn-ffi", "crates/kinn-android"]
 
 [workspace.package]
 version = "0.2.0"
