@@ -2,22 +2,31 @@
  * The integrated terminal: a scrollback plus a real command loop.
  * Every command listed in `help` is implemented; anything that is not
  * ready yet says so honestly instead of pretending.
+ *
+ * Since 0.2.0 `check` and `run` use the real compiler and VM through the
+ * WebAssembly backend (compiler/crates/kinn-ffi compiled to kinn.wasm).
+ * When the backend is not loaded, they fall back to editor-level checks
+ * and say so.
  */
 
 import type { Vfs } from '../vfs';
 import { lex } from '../syntax/lexer';
 import { detectMode, quickCheck } from '../diagnostics/checks';
+import { backend } from '../wasm/kinnwasm';
+import { serializeProject } from '../storage/storage';
 
 const BANNER = [
-  { text: 'KINN Studio 0.1.0 — terminal shell', cls: 'accent' },
-  { text: 'Offline-first. Files live in the in-memory "samples" project.', cls: 'dim' },
-  { text: "Type 'help' for commands, 'syntax' for the Kin 0.1 cheat sheet.", cls: 'dim' },
+  { text: 'KINN Studio 0.2.0 — terminal shell', cls: 'accent' },
+  { text: 'Offline-first. The project persists in this browser.', cls: 'dim' },
+  { text: "Type 'help' for commands, 'syntax' for the Kin 0.2 cheat sheet.", cls: 'dim' },
 ];
 
 export interface TerminalDeps {
   vfs: Vfs;
   onOpenFile: (name: string) => void;
   onProblems: (problems: ReturnType<typeof quickCheck>, fileName: string) => void;
+  /** Trigger the host file picker for `import`. */
+  onImportRequest?: () => void;
 }
 
 export class Terminal {
@@ -80,18 +89,23 @@ export class Terminal {
     const [name, ...args] = cmd.split(/\s+/);
     switch (name) {
       case 'help': this.help(); break;
-      case 'version': this.print('KINN Studio 0.1.0 (shell) — compiler kinn 0.1.0 (Rust, local)'); break;
+      case 'version': this.version(); break;
       case 'about': this.about(); break;
       case 'clear': this.output.replaceChildren(); break;
       case 'ls': this.ls(); break;
       case 'cat': this.cat(args); break;
       case 'open': this.open(args); break;
       case 'new': this.newFile(args); break;
+      case 'rm': this.rm(args); break;
+      case 'mv': this.mv(args); break;
       case 'tokens': this.tokens(args); break;
       case 'check': this.check(args); break;
       case 'mode': this.mode(); break;
       case 'syntax': this.syntax(); break;
-      case 'run': this.run(); break;
+      case 'run': this.run(args); break;
+      case 'save': this.save(); break;
+      case 'export': this.exportProject(); break;
+      case 'import': this.importProject(); break;
       default:
         this.print(`unknown command '${name}' — type 'help'`, 'err');
     }
@@ -113,19 +127,32 @@ export class Terminal {
   cat <file>        print a file
   open <file>       open a file in the editor
   new <file>        create a new .kin file
+  rm <file>         delete a file
+  mv <old> <new>    rename a file
   tokens [file]     print the token stream
-  check [file]      run editor checks (lexical, balance, duplicates)
+  check [file]      full compiler check (real diagnostics via kinn.wasm)
   mode              show the active file's programming mode
-  syntax            Kin 0.1 syntax cheat sheet
-  run               explain how to run programs today`);
+  syntax            Kin 0.2 syntax cheat sheet
+  run [file]        compile and execute (real VM, output below)
+  save              persist the project now (also automatic)
+  export            download the project as a .kinnproj file
+  import            load a .kinnproj or .kin file from disk`);
+  }
+
+  private version(): void {
+    const compiler = backend.available
+      ? `compiler kinn ${backend.version()} (Rust via WebAssembly, local)`
+      : 'compiler backend NOT LOADED (editor checks only; run npm run build:wasm)';
+    this.print(`KINN Studio 0.2.0 (shell) — ${compiler}`);
   }
 
   private about(): void {
     this.printBlock(
 `KINN is an offline-first programming language and development
-environment. Kin 0.1 compiles through KIR to a stack VM; KINN Studio
+environment. Kin 0.2 compiles through KIR to a stack VM; KINN Studio
 is its terminal-inspired editor. No accounts, no cloud, no servers.
-Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
+In-Studio check and run use the same Rust compiler as the CLI,
+compiled to WebAssembly. Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
       'out');
   }
 
@@ -178,6 +205,32 @@ Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
     }
   }
 
+  private rm(args: string[]): void {
+    if (!args[0]) {
+      this.print('usage: rm <file>', 'err');
+      return;
+    }
+    if (this.deps.vfs.remove(args[0])) {
+      this.print(`deleted ${args[0]}`, 'ok');
+      this.deps.onOpenFile(this.deps.vfs.activeName);
+    } else {
+      this.print(`no such file: '${args[0]}'`, 'err');
+    }
+  }
+
+  private mv(args: string[]): void {
+    if (args.length < 2) {
+      this.print('usage: mv <old-name.kin> <new-name.kin>', 'err');
+      return;
+    }
+    if (this.deps.vfs.rename(args[0], args[1])) {
+      this.print(`renamed ${args[0]} -> ${args[1]}`, 'ok');
+      this.deps.onOpenFile(this.deps.vfs.activeName);
+    } else {
+      this.print(`cannot rename '${args[0]}' to '${args[1]}' (missing, invalid or exists)`, 'err');
+    }
+  }
+
   private tokens(args: string[]): void {
     const f = this.resolveFile(args);
     if (!f) return;
@@ -191,20 +244,46 @@ Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
     }
   }
 
-  private check(args: string[]): void {
+  /** Full compiler check through the wasm backend (fallback: editor checks). */
+  check(args: string[]): void {
     const f = this.resolveFile(args);
     if (!f) return;
-    const problems = quickCheck(f.content);
-    this.deps.onProblems(problems, f.name);
-    if (problems.length === 0) {
-      this.print(`OK: no editor-level issues found in ${f.name}`, 'ok');
-      this.print('(full type checking runs via the kinc compiler — planned inside Studio for 0.2)', 'dim');
+    if (!backend.available) {
+      this.print('compiler backend not loaded — falling back to editor-level checks', 'warn');
+      this.print('(build it with: cd compiler && cargo build --release -p kinn-ffi --target wasm32-unknown-unknown)', 'dim');
+      this.editorCheck(f.name, f.content);
       return;
     }
-    for (const p of problems) {
-      this.print(`${p.severity} ${p.code}: ${p.message}  [${f.name}:${p.line}]`, p.severity === 'error' ? 'err' : 'warn');
+    const result = backend.check(f.name, this.deps.vfs.projectFiles());
+    this.deps.onProblems(result.diagnostics, f.name);
+    if (result.ok) {
+      const notes = result.diagnostics.filter((d) => d.severity !== 'error').length;
+      this.print(
+        `OK: no errors in ${f.name}${notes > 0 ? ` (${notes} note(s)/warning(s) shown)` : ''}`,
+        'ok',
+      );
+      for (const d of result.diagnostics) {
+        this.print(`${d.severity} ${d.code}: ${d.message}  [${d.file}:${d.line}]`, d.severity === 'error' ? 'err' : 'warn');
+      }
+    } else {
+      for (const d of result.diagnostics) {
+        if (d.severity !== 'error') continue;
+        this.print(`${d.code}: ${d.message}  [${d.file}:${d.line}:${d.col}]`, 'err');
+      }
+      this.print(`${result.diagnostics.filter((d) => d.severity === 'error').length} error(s) — see the PROBLEMS panel`, 'warn');
     }
-    this.print(`${problems.length} problem(s) — see the PROBLEMS panel`, 'warn');
+  }
+
+  private editorCheck(name: string, content: string): void {
+    const problems = quickCheck(content);
+    this.deps.onProblems(problems, name);
+    if (problems.length === 0) {
+      this.print(`OK: no editor-level issues found in ${name}`, 'ok');
+    } else {
+      for (const p of problems) {
+        this.print(`${p.severity} ${p.code}: ${p.message}  [${name}:${p.line}]`, p.severity === 'error' ? 'err' : 'warn');
+      }
+    }
   }
 
   private mode(): void {
@@ -222,12 +301,13 @@ Compiler: compiler/ (Rust). Studio: studio/ (TypeScript).`,
 
   private syntax(): void {
     this.printBlock(
-`Kin 0.1 cheat sheet
+`Kin 0.2 cheat sheet
 -------------------
 *mode = B;                    // B beginner, S standard, A advanced (first line)
 
 func main() { }               // program entry (void, no params)
 func add(a: int, b: int) -> int { return a + b; }
+import "math.kin" as math;    // modules: qualified calls math.add(1, 2)
 
 let x = 1;                    // immutable, type inferred
 var count = 0;                // mutable
@@ -235,20 +315,81 @@ count += 1;                   // += and -=
 
 if x > 0 { } else if x == 0 { } else { }
 while x < 10 { break; continue; }
+for i in 0..10 { }            // exclusive range
+for i in 0..=9 { }            // inclusive range
+for item in my_array { }      // array elements
 
-// types: int (64-bit) float (64-bit) bool string
-// no implicit int/float conversion: write 2.0, not 2
-print("text " + "concat");    // the one builtin
+let a = [1, 2, 3];            // arrays (reference semantics, deep ==)
+let m = [[1], [2]];           // nested arrays
+a[0] = 5;                     // element assignment
+let empty: [int] = [];        // empty array needs its type
+
+let f = 2 as float;           // casts: int<->float, ->string
+let s = 5 as string;
+
+print(len(a) + abs(-3) + min(1, 2) + max(1.5, 2.5));
+
+// types: int float bool string [T] void
+// no implicit int/float conversion: write 2.0, not 2 (or cast)
+print("text " + "concat");    // print, len, abs, min, max builtins
 // operators: + - * / %  < > <= >= == !=  and or not
 // comments: // line and /* block */`,
       'out');
   }
 
-  private run(): void {
-    this.print('running programs inside Studio is planned for 0.2', 'warn');
-    this.print('today: build the compiler and run locally, fully offline:', 'out');
-    this.print('  cd compiler && cargo build --release', 'out');
-    this.print('  ./target/release/kinn run path/to/file.kin', 'out');
-    this.print('details: docs/CLI_DESIGN.md', 'dim');
+  /** Compile and execute through the wasm backend. */
+  private run(args: string[]): void {
+    const f = this.resolveFile(args);
+    if (!f) return;
+    if (!backend.available) {
+      this.print('running programs inside Studio needs the compiler backend (kinn.wasm)', 'warn');
+      this.print('build it with: cd compiler && cargo build --release -p kinn-ffi --target wasm32-unknown-unknown', 'out');
+      this.print('then copy it: cp compiler/target/wasm32-unknown-unknown/release/kinn_ffi.wasm studio/public/kinn.wasm', 'out');
+      this.print('or use the CLI, fully offline: kinn run <file.kin>', 'dim');
+      return;
+    }
+    this.print(`compiling ${f.name} (kinn ${backend.version()}, wasm)...`, 'dim');
+    const result = backend.run(f.name, this.deps.vfs.projectFiles());
+    this.deps.onProblems(result.diagnostics, f.name);
+
+    if (result.stdout.length > 0) this.printBlock(result.stdout, 'out');
+    if (result.ok) {
+      this.print(`— exited 0 —`, 'ok');
+    } else if (result.exitCode === 1) {
+      for (const d of result.diagnostics) {
+        if (d.severity === 'error') this.print(`${d.code}: ${d.message}  [${d.file}:${d.line}:${d.col}]`, 'err');
+      }
+      this.print('— compilation failed —', 'err');
+    } else if (result.runtimeError) {
+      this.print(`error[${result.runtimeError.code}]: ${result.runtimeError.message}  [${f.name}:${result.runtimeError.line}]`, 'err');
+      this.print('— runtime error —', 'err');
+    }
+  }
+
+  private save(): void {
+    void this.deps.vfs.markSaved().then(() => {
+      this.print('project saved to this browser (IndexedDB)', 'ok');
+    });
+  }
+
+  private exportProject(): void {
+    const json = serializeProject(this.deps.vfs.toStoredProject());
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${this.deps.vfs.projectName}.kinnproj`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.print(`exported ${this.deps.vfs.list().length} files to ${this.deps.vfs.projectName}.kinnproj`, 'ok');
+  }
+
+  private importProject(): void {
+    if (this.deps.onImportRequest) {
+      this.print('choose a .kinnproj (project) or .kin (single file) — see the file picker', 'dim');
+      this.deps.onImportRequest();
+    } else {
+      this.print('import is not available in this host', 'err');
+    }
   }
 }

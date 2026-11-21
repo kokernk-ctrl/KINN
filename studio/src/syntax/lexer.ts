@@ -10,12 +10,12 @@ export type TokKind =
   | 'string'
   | 'ident'
   | 'comment'
-  | 'func' | 'let' | 'var' | 'if' | 'else' | 'while' | 'return' | 'break' | 'continue'
-  | 'true' | 'false' | 'and' | 'or' | 'not'
+  | 'func' | 'let' | 'var' | 'if' | 'else' | 'while' | 'for' | 'in' | 'return' | 'break' | 'continue'
+  | 'true' | 'false' | 'and' | 'or' | 'not' | 'as' | 'import'
   | 'int-ty' | 'float-ty' | 'bool-ty' | 'string-ty' | 'void-ty'
   | '*' | '+' | '-' | '/' | '%' | '=' | '+=' | '-='
   | '==' | '!=' | '<' | '>' | '<=' | '>=' | '->'
-  | '(' | ')' | '{' | '}' | ',' | ':' | ';'
+  | '(' | ')' | '{' | '}' | '[' | ']' | ',' | ':' | ';' | '.' | '..' | '..='
   | 'invalid'
   | 'eof';
 
@@ -38,8 +38,9 @@ export interface LexError {
 
 const KEYWORDS: Record<string, TokKind> = {
   func: 'func', let: 'let', var: 'var', if: 'if', else: 'else',
-  while: 'while', return: 'return', break: 'break', continue: 'continue',
+  while: 'while', for: 'for', in: 'in', return: 'return', break: 'break', continue: 'continue',
   true: 'true', false: 'false', and: 'and', or: 'or', not: 'not',
+  as: 'as', import: 'import',
   int: 'int-ty', float: 'float-ty', bool: 'bool-ty',
   string: 'string-ty', void: 'void-ty',
 };
@@ -162,12 +163,16 @@ export function lex(src: string): LexResult {
       if (chars[pos] === '.' && /[0-9]/.test(peek(1) ?? '')) {
         text += bump();
         while (pos < chars.length && /[0-9]/.test(chars[pos])) text += bump();
-        if (chars[pos] === '.') {
+        // A second '.' is only legal when it starts a range: `1.5..2`.
+        if (chars[pos] === '.' && peek(1) !== '.') {
           errors.push({ code: 'E1004', message: `malformed number literal ${text}. (a second . is not allowed)`, line: startLine, col: startCol });
           bump();
           continue;
         }
         tokens.push({ kind: 'float', text, line: startLine, col: startCol });
+      } else if (chars[pos] === '.' && peek(1) === '.') {
+        // `0..10` — the dots start a range, not a float.
+        tokens.push({ kind: 'int', text, line: startLine, col: startCol });
       } else if (chars[pos] === '.') {
         errors.push({ code: 'E1004', message: 'malformed number literal: expected a digit after .', line, col });
         bump();
@@ -187,9 +192,15 @@ export function lex(src: string): LexResult {
     }
 
     // operators and punctuation
+    // '..=' first — it is three characters and must win over '..' and '='.
+    if (c === '.' && peek(1) === '.' && peek(2) === '=') {
+      bump(); bump(); bump();
+      tokens.push({ kind: '..=', text: '..=', line: startLine, col: startCol });
+      continue;
+    }
     const twoChar: Record<string, TokKind> = {
       '==': '==', '!=': '!=', '<=': '<=', '>=': '>=', '->': '->',
-      '+=': '+=', '-=': '-=',
+      '+=': '+=', '-=': '-=', '..': '..',
     };
     const pair = c + (peek(1) ?? '');
     if (twoChar[pair]) {
@@ -199,7 +210,8 @@ export function lex(src: string): LexResult {
     }
     const singles: Record<string, TokKind> = {
       '*': '*', '+': '+', '-': '-', '/': '/', '%': '%', '=': '=',
-      '(': '(', ')': ')', '{': '{', '}': '}', ',': ',', ':': ':', ';': ';',
+      '(': '(', ')': ')', '{': '{', '}': '}', '[': '[', ']': ']',
+      ',': ',', ':': ':', ';': ';', '.': '.',
       '<': '<', '>': '>',
     };
     if (singles[c]) {

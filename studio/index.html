@@ -18,9 +18,10 @@
       </div>
       <div class="project-name" id="project-name" title="Active project">samples</div>
       <div class="topbar-actions">
-        <button class="btn" id="btn-check" type="button" title="Run editor checks on the active file (Ctrl+Enter)">Check</button>
+        <span class="backend-status" id="backend-status" title="Compiler backend state">compiler: loading…</span>
+        <button class="btn" id="btn-check" type="button" title="Full compiler check on the active file (Ctrl+Enter)">Check</button>
         <button class="btn" id="btn-tokens" type="button" title="Dump the token stream of the active file into the terminal">Tokens</button>
-        <button class="btn btn-disabled" id="btn-run" type="button" aria-disabled="true" title="Running programs inside Studio is planned for 0.2 (kinc compiled to WebAssembly). Use the kinn CLI locally.">Run</button>
+        <button class="btn" id="btn-run" type="button" title="Compile and run the active file in Studio (real compiler via WebAssembly)">Run</button>
       </div>
     </header>
 
@@ -53,7 +54,7 @@
         <div class="statusbar">
           <span id="status-pos">Ln 1, Col 1</span>
           <span id="status-count">0 lines</span>
-          <span id="status-saved">in-memory project</span>
+          <span id="status-saved">loading…</span>
         </div>
       </section>
 

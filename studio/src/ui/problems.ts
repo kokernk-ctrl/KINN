@@ -1,5 +1,7 @@
 /**
- * Problems panel: clickable list of editor-check diagnostics.
+ * Problems panel: clickable list of diagnostics — editor-level checks or
+ * full compiler diagnostics (via the wasm backend), including multi-file
+ * diagnostics that carry their own file name.
  */
 
 import type { Problem } from '../diagnostics/checks';
@@ -20,7 +22,7 @@ export class ProblemsPanel {
     if (problems.length === 0) {
       const li = document.createElement('li');
       li.className = 'problems-empty';
-      li.textContent = 'No issues from editor checks. Full type checking: kinn check <file> (0.2 integration).';
+      li.textContent = 'No issues found.';
       this.list.appendChild(li);
       return;
     }
@@ -32,12 +34,12 @@ export class ProblemsPanel {
       btn.className = `problem ${p.severity}`;
       const sev = document.createElement('span');
       sev.className = 'sev';
-      sev.textContent = p.severity === 'error' ? 'error' : p.severity === 'warning' ? 'warn' : 'info';
+      sev.textContent = p.severity === 'error' ? 'error' : p.severity === 'warning' ? 'warn' : 'note';
       const msg = document.createElement('span');
       msg.textContent = `${p.code}: ${p.message}`;
       const loc = document.createElement('span');
       loc.className = 'loc';
-      loc.textContent = `${fileName}:${p.line}`;
+      loc.textContent = `${p.file ?? fileName}:${p.line}`;
       btn.appendChild(sev);
       btn.appendChild(msg);
       btn.appendChild(loc);

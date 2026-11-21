@@ -14,7 +14,7 @@
 
 import { lex } from '../syntax/lexer';
 
-export type Severity = 'error' | 'warning' | 'info';
+export type Severity = 'error' | 'warning' | 'info' | 'note';
 
 export interface Problem {
   severity: Severity;
@@ -22,6 +22,8 @@ export interface Problem {
   message: string;
   line: number;
   col: number;
+  /** File the diagnostic came from (multi-file compiler diagnostics). */
+  file?: string;
 }
 
 export function quickCheck(text: string): Problem[] {

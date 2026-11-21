@@ -559,3 +559,25 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* --------------------------------------------------------------------------
+   0.2: compiler backend status badge
+   -------------------------------------------------------------------------- */
+
+.backend-status {
+  font: 500 11px/1.4 var(--font-mono, monospace);
+  letter-spacing: 0.04em;
+  color: var(--fg-dim, #8b949e);
+  border: 1px solid var(--border, #30363d);
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.backend-status.ready {
+  color: #3fb950;
+  border-color: #238636;
+}
+.backend-status.missing {
+  color: #d29922;
+  border-color: #9e6a03;
+}
