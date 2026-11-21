@@ -84,7 +84,9 @@ whitelist (D6). S1 and S2 are landed; S3 is next.**
       `kinn build` on an app says the dynamic pipeline is not
       implemented yet; 54 new tests, workspace 335 green; 0.3.0 web
       dist byte-identical; Studio 66/66 on a freshly built wasm;
-      grammar normative in LANGUAGE_SPEC §C3)
+      grammar normative in LANGUAGE_SPEC §C3; S2 review pass landed:
+      B.0 gate completed to 79 words, E2002 `as`-cast hint, B.4
+      errata recorded in CHANGELOG)
 - [ ] S3 App semantics: checker rules E3040–E3070, W3040–W3044
       (E3051/E3052 presence rules already landed with S2)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)

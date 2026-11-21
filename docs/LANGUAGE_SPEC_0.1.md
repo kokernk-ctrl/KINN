@@ -511,14 +511,19 @@ Normative rules:
   `bind`, `theme`, the field attributes, the event words, the theme
   tokens — remains a legal identifier outside these grammar positions.
   The test `app_words_stay_identifiers_outside_the_declaration` is the
-  regression gate (mirrors the 0.3 website gate).
+  regression gate (mirrors the 0.3 website gate); it freezes all 79
+  contextual words — the B.0 list, the event words, the theme tokens,
+  the field attributes, the field `kind` values and the shared
+  view-element words.
 - **Handler bodies are official Kin statements** (B.6): parsed by the
   ordinary statement parser — semicolons required, conditionals are
   `if` (views use `when`; the two never blur, B.5).
 - **`each` and casts**: `as` is the cast operator, so a cast in an
   `each` iterable needs parentheses (`each (vals as [string]) as v`).
   A bare `as` followed by an identifier is always the loop-variable
-  marker, never a cast.
+  marker, never a cast. Outside `each`, `x as some_ident` is a
+  positioned E2002 on the `as` with a hint naming both readings
+  (loop marker vs cast operator; casts need a type keyword).
 - **Component state vs app state**: component `state` is one
   declaration per line (like `prop`); app `state` is a `{ ... }` block.
 - **Qualified component instantiation** uses the established dot form

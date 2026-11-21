@@ -384,8 +384,11 @@ computed remaining = len(items) - done_count      // a binding expression
 ```
 
 - **Shared state** lives in the `app` `state` block: typed fields with
-  mandatory initializers. **Component state** lives in the component
-  `state` block. Both are mutable only from event handlers (B.6); view
+  mandatory initializers. **Component state** is declared per line
+  inside the component (`state expanded: bool = false`) — one
+  declaration per line, exactly like `prop` (B.3); only the app-level
+  `state` is a `{ ... }` block. Both are mutable only from event
+  handlers (B.6); view
   code only reads. Names are resolved in strict order — handler local
   (`let/var`) → component state → shared state → otherwise E3043 — and a
   handler local shadowing a state name triggers W3041 so beginners see the

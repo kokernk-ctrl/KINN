@@ -121,7 +121,11 @@ module grammar B.2–B.9: parser E2031–E2039, AST + `kinn ast` dump,
 presence rules E3051/E3052, honest run/build guards) are landed —
 335 Rust tests green, Studio 66/66, 0.3.0 web dist byte-identical.
 Grammar is normative in LANGUAGE_SPEC §C3; handler bodies are
-official statements (semicolons, `if` not `when`). Next: S3 (app
+official statements (semicolons, `if` not `when`). S2 review pass
+landed: B.0 gate = 79 words (field kinds + view elements added),
+stray `as <name>` outside `each` gets a positioned E2002 with a cast
+hint, B.4 component-state wording fixed per B.3, six S2 deviations
+recorded in the CHANGELOG errata. Next: S3 (app
 checker E3040–E3070, W3040–W3044).** Carry-overs: string
 casts/interpolation decision, native codegen spike, structs/records
 ADR (D2 stays out of 0.4.0 per the owner).

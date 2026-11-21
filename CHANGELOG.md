@@ -57,6 +57,51 @@ implementation began with S1.**
   CLI integration. 0.3.0 web dist rebuilt byte-identical; Studio
   66/66 against a freshly built wasm.
 
+### Fixed — S2 review (architect gate items)
+
+- B.0 gate completed: the stays-identifier regression loop now freezes
+  **79 words**. The S2 array held 67 (the "70-word" figure in the S2
+  entry above was a miscount) and missed the six new `field kind`
+  values (`text`, `number`, `date`, `email`, `password`, `textarea` —
+  `text` is also a theme token) plus the six 0.3 view-element words
+  the app grammar now shares (`title`, `heading`, `divider`,
+  `button`, `link`, `image`). All 79 pass as names (loop test).
+- `x as some_ident` outside `each` is still E2002, positioned on the
+  `as`, and now carries a hint: `as <name>` is only the loop variable
+  of `each <list> as <name>`; outside `each`, `as` is the cast
+  operator and needs a type keyword (like `x as int`). Pinned by a
+  new parser test (position, hint, the good cast spelling as
+  contrast, and the short hint when no identifier follows).
+- B.4 wording corrected per the B.3 ruling (errata item 6).
+
+### Errata — S2 deviations from the approved architecture doc
+
+Recorded in one place per the S2 review. All six are documentation
+corrections or additive pull-forwards — the implemented grammar and
+the approved grammar never conflicted:
+
+1. B.7's handler example used `when form_valid` — handler bodies are
+   official Kin statements, so conditionals are `if` (B.5/B.6
+   normative). Architecture doc corrected in S2.
+2. B.3's example types `Str`/`Bool` were informal notation — the
+   standard Kin type keywords are `string`/`bool`. Doc corrected in
+   S2.
+3. B.3's `module::TaskRow` spelling was informal — the established
+   dot form is `module.TaskRow(...)`. Doc corrected in S2.
+4. Checker presence rules E3051 (app outside the entry file) and
+   E3052 (website + app, or two apps) were pulled forward from S3
+   into S2 so an app half is never silently ignored by a website
+   build.
+5. The B.0 word list in the architecture doc (45 words) is a subset
+   of the implemented contextual vocabulary; the S2 regression gate
+   froze 67 words (adding the event words, theme tokens, field
+   attributes and store words) and the S2 commit message miscounted
+   them as "70". Now 79 (see Fixed above).
+6. B.4 said component state lives in the component "state block";
+   the B.3 ruling is normative — component state is a per-line
+   declaration exactly like `prop`, and only app-level state is a
+   `{ ... }` block. B.4 wording corrected in this release.
+
 ### Added — S1: cross-module value exports (`const`)
 
 - Language: `const NAME: Type = expr;` top-level declarations with a

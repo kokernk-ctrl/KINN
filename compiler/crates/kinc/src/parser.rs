@@ -158,6 +158,20 @@ impl Parser {
                 t.col,
                 t.len().max(1),
             );
+            // An unexpected `as` is almost always a malformed cast: the
+            // `each ... as <name>` marker is consumed by the `each`
+            // parser itself, so a stray `as` here deserves a hint that
+            // names both readings (S2 review item 5).
+            if !self.gave_up && matches!(t.kind, TokKind::As) {
+                let hint = if matches!(self.peek2_kind(), TokKind::Ident(_)) {
+                    "`as <name>` is only the loop variable of `each <list> as <name>`; outside `each`, `as` is the cast operator and needs a type keyword (like `x as int` or `x as string`)"
+                } else {
+                    "a cast needs a type keyword after `as` (`int`, `float`, `bool`, `string` or `[T]`)"
+                };
+                if let Some(d) = self.diags.last_mut() {
+                    d.hint = Some(hint.into());
+                }
+            }
             Err(())
         }
     }
@@ -3960,6 +3974,12 @@ mod tests {
             "click", "change", "focus", "blur", "keydown", "keyup", "pointerdown",
             "pointerup", "accent", "bg", "surface", "muted", "font", "radius",
             "max_width", "open", "alt",
+            // S2 review: the field `kind` values (E2035 whitelist) —
+            // `text` doubles as a theme token (E2034 whitelist)
+            "text", "number", "date", "email", "password", "textarea",
+            // S2 review: the 0.3 view-element words the app grammar
+            // shares — heritage closure (never gate-tested before)
+            "title", "heading", "divider", "button", "link", "image",
         ];
         for w in words {
             // as a variable name and assignment target
@@ -3973,6 +3993,35 @@ mod tests {
             let src = format!("func {}({}: int) -> int {{ return {}; }}\nfunc main() {{ print({}(1)); }}\n", w, w, w, w);
             parse_ok(&src);
         }
+    }
+
+    #[test]
+    fn as_identifier_outside_each_is_a_positioned_helpful_cast_error() {
+        // S2 review item 5: `x as some_ident` outside `each`. Cast
+        // types are keywords, so `as` + identifier is never a cast —
+        // the expression ends and the stray `as` is reported. The
+        // diagnostic must sit ON the `as` and explain both readings.
+        let diags = parse_err(
+            "func main() {\n    var y = x as some_ident;\n    print(y);\n}\n",
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E2002")
+            .expect("E2002 for the stray `as`");
+        assert_eq!(d.line, 2, "positioned: {:?}", diags);
+        assert_eq!(d.col, 15, "points at the `as` keyword: {:?}", diags);
+        assert!(d.message.contains("expected ';'"), "{}", d.message);
+        let hint = d.hint.as_deref().expect("the cast hint");
+        assert!(hint.contains("each"), "names the each marker: {}", hint);
+        assert!(hint.contains("cast"), "names the cast operator: {}", hint);
+        assert!(hint.contains("type keyword"), "says what a cast needs: {}", hint);
+        // Contrast: the legal cast spelling right next to it.
+        parse_ok("func main() {\n    let x = 1;\n    let y = x as float;\n    print(y);\n}\n");
+        // And a non-identifier follower gets the short cast hint.
+        let diags = parse_err("func main() {\n    let x = 1;\n    let y = x as;\n}\n");
+        let d = diags.iter().find(|d| d.code == "E2002").expect("E2002");
+        let hint = d.hint.as_deref().expect("short cast hint");
+        assert!(hint.contains("type keyword"), "{}", hint);
     }
 
     #[test]
