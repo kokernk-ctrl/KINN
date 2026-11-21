@@ -23,7 +23,7 @@ Studio should feel like a well-kept terminal, not a marketing page.
 Both the web shell and the Android app follow this system; the app uses
 the same palette (see `android/app/src/main/res/values/colors.xml`).
 
-## Web Studio — implemented in 0.2.0 (verified)
+## Web Studio — implemented in 0.2.0, build/preview added in 0.3.0 (verified)
 
 - **Project explorer** — file tree over the project, active-file
   marking, in-app file creation (validated `.kin` names), delete/rename
@@ -49,10 +49,26 @@ the same palette (see `android/app/src/main/res/values/colors.xml`).
   The format is versioned and validated (same format as Android).
 - **Problems panel** — full compiler diagnostics or editor checks,
   clickable to jump to the line.
-- **Integrated terminal** — command loop with history (↑/↓) and 19
+- **Integrated terminal** — command loop with history (↑/↓) and 21
   implemented commands: `help`, `version`, `about`, `clear`, `ls`,
   `cat`, `open`, `new`, `rm`, `mv`, `tokens`, `check`, `mode`,
-  `syntax`, `run`, `save`, `export`, `import`.
+  `syntax`, `run`, `save`, `export`, `import`, plus the 0.3 additions
+  `build [web|android]` and `preview`.
+
+### Target build + preview (0.3.0, verified)
+
+- **Build Web** button and `build [target]` run the same backends as
+  the CLI through the wasm bridge (`kinn_build_web` /
+  `kinn_build_android`): per-file build report, diagnostics into the
+  problems panel, honest failure output.
+- **Preview panel** (fourth tab): the built site rendered in a
+  sandboxed iframe with the stylesheet and app.js inlined; internal
+  links and buttons navigate inside the preview via `postMessage`; a
+  page selector switches pages. The real multi-page dist is not
+  faked — **Download .zip** exports it (store-only ZIP, validated
+  with `unzip`).
+- **Export Android** downloads the Android Gradle project as a .zip
+  (labeled a project, never an APK).
 - **Responsive layout** — three-pane grid ≥901px; below 900px a tab
   bar (Files / Editor / Terminal) switches panes.
 - **Keyboard** — `Ctrl+Enter` checks; `Ctrl+S` saves to the browser.
@@ -64,7 +80,7 @@ Editor-grade checks — lexical errors (E1xxx mirrors), delimiter balance
 (E3002). Real and tested; used automatically only when the wasm
 backend is unavailable.
 
-## Android app — implemented in 0.2.0 (verified)
+## Android app — implemented in 0.2.0, build/preview added in 0.3.0 (verified)
 
 `android/` — Kotlin, AGP 8.5.2, minSdk 26 (Android 8.0), targetSdk 34,
 **no permissions** (fully offline, no INTERNET permission).
@@ -75,16 +91,24 @@ backend is unavailable.
 - **Editor** — monospace editor with line-number gutter, Kin syntax
   highlighting (debounced 250 ms, skipped for files >60 KB), saves to
   device storage on every edit.
-- **Terminal** — 19 commands mirroring the web Studio (`projects` /
+- **Terminal** — commands mirroring the web Studio (`projects` /
   `project <name>` replace the web's single-project commands; `docs`
   opens the bundled documentation), history via the keyboard, colored
-  output lines.
+  output lines. 0.3 additions: `build web` (native build through JNI),
+  `build android` (project export), `preview`, `export android`
+  (.zip via SAF) — the build statuses say exactly what was produced
+  (project export, never an APK claim).
 - **Problems** — compiler diagnostics (when the native backend is
   present) with file:line:col, click to jump into the editor.
 - **Docs** — the repository's markdown docs are bundled into the APK
   at build time (gradle copy task) and readable offline.
 - **Import/export** — SAF pickers: import a `.kinnproj` project or a
   `.kin` file; export the active project as `.kinnproj`.
+- **Offline web preview (0.3)** — `build web` writes the generated
+  dist into app-private storage; **PreviewActivity** opens it in a
+  WebView over file:// with in-app page navigation (relative .html
+  links intercepted). Non-file URLs are blocked; there is no INTERNET
+  permission.
 - **On-device compiler (ARM64)** — `check`/`run` call
   `libkinn_android.so` through JNI (`dev.kinn.studio.KinnBridge` →
   `kinn-android` crate → `kinn-ffi`): the real compiler, in-process,

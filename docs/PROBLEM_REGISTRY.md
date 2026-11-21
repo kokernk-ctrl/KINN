@@ -42,3 +42,10 @@ release that fixed them. This registry is the source for GitHub issues.
 | F-010 | 0.2.0 | P-008: no CI → four workflows (test matrix, Android sign+verify, Windows, Linux), all green on develop |
 | F-011 | 0.2.0 | P-010 (0.1 boundary): for loops, arrays, casts, modules, stdlib natives all shipped in 0.2.0 |
 | F-012 | 0.2.0 | Android MainActivity termPrint lost its color parameters during a rewrite — caught by the local gradle build, fixed before merge |
+
+| P-018 | backend-android | The CLI's **local** Gradle build provider is implemented but only exercised where a real SDK+Gradle exist; CI verifies the **remote** provider end-to-end (export → gradle assembleDebug → apksigner) | local builds untested on a real desktop toolchain | use Android Studio or the CI remote provider |
+| P-019 | backend-android | The CI-built backend APK is not yet installed/launched on a physical device (extends P-017) | runtime behavior on devices unconfirmed | install `kinn-android-backend-apk` artifact on a device |
+| P-020 | backend-web | Site theming tokens (per-site CSS customization) are not in the grammar yet; the generated stylesheet is a single clean default | every generated site looks the same | edit the generated styles.css (it is plain CSS); state module planned 0.4 |
+| P-021 | studio-android | No automated UI tests for the 0.3 build/preview flows (same gap as 0.2 UI) | regressions possible in app flows | CI builds the app; manual verification on device pending |
+| P-022 | studio-web | The in-Studio preview is sandboxed and self-contained (inlined CSS/JS, postMessage navigation); `file://` hosting of the real dist differs slightly | preview ≈ but not == the exported dist | use Download .zip + a local server for exact rendering |
+| P-023 | ffi | Binary artifacts cannot pass through the wasm/JNI build bridge (text files only); asset copying is CLI-only | Studio exports contain no binary assets | use `kinn build` locally for asset-bearing projects |

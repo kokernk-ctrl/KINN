@@ -40,21 +40,21 @@ Re-scoped 2026-11-21 (product direction: KINN Studio becomes the
 development environment for real multi-target apps; details in
 docs/MULTI_TARGET_ARCHITECTURE.md):
 
-- [ ] Target/backend architecture: SiteModel, backend contract,
+- [x] Target/backend architecture: SiteModel, backend contract,
       capability declaration (ADR-0018)
-- [ ] Language: declarative `website` module (ADR-0019) with full
+- [x] Language: declarative `website` module (ADR-0019) with full
       parse/check/lower tests
-- [ ] Web backend: `kinn build --target web` producing a real dist
+- [x] Web backend: `kinn build --target web` producing a real dist
       (HTML/CSS, accessibility, navigation; ADR-0020), verified in a
       browser
-- [ ] Studio integration (web + Android): target select, build,
+- [x] Studio integration (web + Android): target select, build,
       diagnostics, preview, export
-- [ ] Android backend: exported Gradle project + build providers
+- [x] Android backend: exported Gradle project + build providers
       (local / remote CI / export; ADR-0021), APK built in CI with
       apksigner verification
-- [ ] Ecosystem foundation: `kinn.toml` manifest + MODULE_SYSTEM spec
+- [x] Ecosystem foundation: `kinn.toml` manifest + MODULE_SYSTEM spec
       (ADR-0022)
-- [ ] CI tests the actual supported targets (web smoke, backend APK)
+- [x] CI tests the actual supported targets (web smoke, backend APK)
 - [ ] String interpolation and string→number casts (ADR-0013) —
       carried to 0.4 to keep this release focused; decision unchanged
 - [ ] Native code generation investigation — moved to 0.4+ (re-scoped

@@ -153,7 +153,7 @@ missing `website` declaration (E3038 semantics). Assets copy from
 - 12 codegen unit tests (mapping, escaping, slugs, aria-current,
   determinism, unicode).
 - Parser tests (13) and checker tests (12) for the rules above.
-- 8 CLI integration tests run the real binary.
+- 9 CLI integration tests run the real binary.
 - **Real browser**: the generated dist was opened in a headless
   Chromium (`file://…/dist/index.html`), the accessibility tree
   verified (skip link, nav landmark, h1/h2 order, links), and clicking

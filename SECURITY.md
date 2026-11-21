@@ -26,6 +26,19 @@ in app-private storage.
 - If you believe a secret has leaked, rotate it immediately at the
   provider — assume it is compromised, then clean history.
 
+## Build-provider security (0.3 backends)
+
+The Android target's remote build provider runs in GitHub Actions with
+repository-scoped permissions only. It requires **no user credentials
+in chat, source files, or project configuration**: users trigger CI
+with their own GitHub authentication; release signing continues to use
+the encrypted `ANDROID_KEYSTORE_*` secrets (see below) or nothing at
+all (unsigned/UNSIGNED labeling). The exported project ships no
+signing configuration, and the generated app requests no permissions
+(verified by CI with `aapt dump badging`). The web backend generates
+static files only — no server, no network calls, no third-party
+runtime.
+
 ## Android release signing
 
 Release APKs are signed **only** with credentials supplied as encrypted
