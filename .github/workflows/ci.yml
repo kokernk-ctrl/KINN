@@ -73,18 +73,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Test the targets end-to-end with the debug CLI
+        working-directory: compiler
         run: |
           cargo build -p kinn
-          BIN=compiler/target/debug/kinn
-          "$BIN" build examples/web/site.kin --target web --out ci-web-dist
-          test -f ci-web-dist/index.html
-          "$BIN" build examples/web/site.kin --target android --out ci-android-export
-          test -f ci-android-export/settings.gradle.kts
+          BIN=target/debug/kinn
+          "$BIN" build ../examples/web/site.kin --target web --out /tmp/ci-web-dist
+          test -f /tmp/ci-web-dist/index.html
+          "$BIN" build ../examples/web/site.kin --target android --out /tmp/ci-android-export
+          test -f /tmp/ci-android-export/settings.gradle.kts
       - name: Upload the generated web dist
         uses: actions/upload-artifact@v4
         with:
           name: kinn-example-web-dist
-          path: ci-web-dist/
+          path: /tmp/ci-web-dist/
 
   studio-tests:
     name: studio tests (with real wasm backend)

@@ -321,11 +321,22 @@ fn build_reads_the_kinn_toml_manifest() {
 }
 
 #[test]
-fn android_export_degrades_honestly_without_a_toolchain() {
-    // The local android build provider must degrade honestly when
-    // Gradle/the SDK are absent (they are absent in CI and sandboxes).
-    let missing = kinn(&["build", &format!("{}/web/site.kin", EXAMPLES), "--target", "android", "--out", "/tmp/kinn-cli-test-provider"]);
-    assert_eq!(missing.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&missing.stdout);
+fn android_export_without_a_toolchain_reports_exported() {
+    // Deterministic on every machine: with PATH stripped, the local
+    // build provider cannot find gradle, so the CLI must degrade to
+    // the honest "project exported" status (never an APK claim).
+    // (With a real toolchain — e.g. GitHub runners — the same command
+    // builds a debug APK; that path is exercised by the android.yml
+    // backend job and was verified there.)
+    let dir = tempdir("provider");
+    let out = Command::new(env!("CARGO_BIN_EXE_kinn"))
+        .args(["build", &format!("{}/web/site.kin", EXAMPLES), "--target", "android", "--out", dir.to_str().unwrap()])
+        .env("PATH", "/definitely/not/here")
+        .env_remove("ANDROID_HOME")
+        .env_remove("ANDROID_SDK_ROOT")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("status: project exported"), "{}", stdout);
 }

@@ -11,5 +11,6 @@ Thumbs.db
 *.swp
 *.log
 
-# per-project build outputs (kinn build)
-build/
+# per-project build outputs (kinn build writes build/<target> next to
+# the entry file; examples keep their outputs out of git)
+examples/**/build/

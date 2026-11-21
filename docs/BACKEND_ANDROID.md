@@ -61,7 +61,7 @@ hosts must report which one actually ran:
 
 | Provider | When | How | Status reported |
 | --- | --- | --- | --- |
-| **local** | Gradle + Android SDK installed | `gradle assembleDebug` in the exported project | `local build` (+ APK path) |
+| **local** | Gradle + Android SDK installed | `gradle assembleDebug` in the exported project | `local build` (+ APK path) — verified on the CI runner; other toolchain layouts untested (P-018) |
 | **remote** | no local tooling | `.github/workflows/android-app.yml` (GitHub Actions, SDK preinstalled, `apksigner verify`, artifact upload) | `remote build pending` → `APK built (signature verified by CI)` |
 | **export** | always available | the exported project / .zip | `project exported` |
 
@@ -98,7 +98,10 @@ or the user's own GitHub authentication only (SECURITY.md, ADR-0017).
 - 9 codegen unit tests: file set, manifest (no permissions, launcher
   activity), package sanitization, Kotlin escaping, navigation
   indices, assets mapping, no-AndroidX/no-WebView, honest README.
-- CLI integration test exports a real project to disk.
+- CLI integration test exports a real project to disk; the toolless
+  provider path degrades honestly (deterministic test), and the
+  CI-verified local provider produced a real debug APK on the runner
+  (first 0.3.0 `ci` run).
 - FFI/wasm test exports the same project through the bridge.
 - **End-to-end APK**: the `android-app` CI workflow builds the
   exported project on a GitHub runner (real SDK), runs `apksigner
