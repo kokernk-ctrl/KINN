@@ -20,20 +20,21 @@ UninstPage uninstConfirm
 UninstPage instfiles
 
 Section "KINN CLI (required)"
+  ; Paths are relative to scripts/windows/ (where makensis runs).
   SetOutPath "$INSTDIR\bin"
-  File "compiler\target\release\kinn.exe"
+  File "..\..\compiler\target\release\kinn.exe"
 
   SetOutPath "$INSTDIR\examples"
-  File "examples\hello.kin"
-  File "examples\loops.kin"
-  File "examples\arrays.kin"
-  File "examples\for_loops.kin"
-  File "examples\casts.kin"
-  File "examples\stdlib.kin"
+  File "..\..\examples\hello.kin"
+  File "..\..\examples\loops.kin"
+  File "..\..\examples\arrays.kin"
+  File "..\..\examples\for_loops.kin"
+  File "..\..\examples\casts.kin"
+  File "..\..\examples\stdlib.kin"
 
   SetOutPath "$INSTDIR\docs"
-  File "docs\*.md"
-  File "README.md"
+  File "..\..\docs\*.md"
+  File "..\..\README.md"
 
   ; PATH entry (machine-wide)
   EnVar::SetHKLM "Path" "$INSTDIR\bin" "1"

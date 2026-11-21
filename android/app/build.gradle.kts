@@ -16,12 +16,14 @@ android {
     }
 
     // Release signing credentials come from the environment (CI encrypted
-    // secrets). When they are absent the release APK stays unsigned —
-    // CI documents this clearly instead of faking a signing identity.
-    val storeFileEnv = providers.environmentVariable("KINN_STORE_FILE").orNull
-    val storePasswordEnv = providers.environmentVariable("KINN_STORE_PASSWORD").orNull
-    val keyAliasEnv = providers.environmentVariable("KINN_KEY_ALIAS").orNull
-    val keyPasswordEnv = providers.environmentVariable("KINN_KEY_PASSWORD").orNull
+    // secrets). When they are absent or blank the release APK stays
+    // unsigned — CI documents this clearly instead of faking a signing
+    // identity.
+    fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+    val storeFileEnv = env("KINN_STORE_FILE")
+    val storePasswordEnv = env("KINN_STORE_PASSWORD")
+    val keyAliasEnv = env("KINN_KEY_ALIAS")
+    val keyPasswordEnv = env("KINN_KEY_PASSWORD")
 
     signingConfigs {
         if (storeFileEnv != null && storePasswordEnv != null && keyAliasEnv != null && keyPasswordEnv != null) {
