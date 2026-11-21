@@ -76,14 +76,14 @@ dependencies = [
 
 [[package]]
 name = "kinc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "kinrt",
 ]
 
 [[package]]
 name = "kinn"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "kinc",
  "kinrt",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "kinn-android"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jni",
  "kinn-ffi",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "kinn-ffi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "kinc",
  "kinrt",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "kinrt"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "log"

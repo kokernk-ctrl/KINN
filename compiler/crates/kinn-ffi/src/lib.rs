@@ -327,7 +327,7 @@ pub unsafe extern "C" fn kinn_check_text(src_ptr: *const u8, src_len: usize, ent
 #[no_mangle]
 pub extern "C" fn kinn_version() -> u32 {
     // 0x00_MM_mm_pp: major, minor, patch.
-    0x00_02_00_00
+    0x00_03_00_00
 }
 
 // ---------------------------------------------------------------------------
@@ -363,8 +363,8 @@ mod tests {
     const HELLO: &str = "*mode = S;\nfunc main() { print(\"hi\"); }";
 
     #[test]
-    fn version_encodes_0_2_0() {
-        assert_eq!(kinn_version(), 0x00_02_00_00);
+    fn version_encodes_0_3_0() {
+        assert_eq!(kinn_version(), 0x00_03_00_00);
     }
 
     #[test]

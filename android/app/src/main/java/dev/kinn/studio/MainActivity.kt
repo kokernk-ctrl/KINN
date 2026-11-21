@@ -494,7 +494,7 @@ class MainActivity : AppCompatActivity() {
     private fun version() {
         val compiler = KinnBridge.version()?.let { "compiler kinn $it (native, on-device)" }
             ?: "native compiler NOT AVAILABLE"
-        termPrint("KINN Studio 0.2.0 (Android) — $compiler")
+        termPrint("KINN Studio 0.3.0 (Android) — $compiler")
     }
 
     private fun about() {

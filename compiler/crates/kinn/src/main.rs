@@ -20,7 +20,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-const VERSION: &str = "0.2.0";
+const VERSION: &str = "0.3.0";
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
