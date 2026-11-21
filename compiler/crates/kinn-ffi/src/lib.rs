@@ -161,11 +161,11 @@ fn diags_text(diags: &[Diagnostic], sources: &HashMap<String, String>, mode: Mod
 // ---------------------------------------------------------------------------
 
 /// Pack a JSON payload into the length-prefixed result buffer.
-fn pack(json: String) -> FfiResult {
+fn pack(json: String) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(LEN_PREFIX + json.len());
     bytes.extend_from_slice(&(json.len() as u32).to_le_bytes());
     bytes.extend_from_slice(json.as_bytes());
-    FfiResult { bytes }
+    bytes
 }
 
 /// Read host-provided source bytes as UTF-8.
@@ -184,8 +184,7 @@ fn ffi_entry(f: impl FnOnce() -> String) -> *mut u8 {
             "{{\"ok\":false,\"diagnostics\":[{{\"severity\":\"error\",\"code\":\"E5000\",\"message\":\"internal compiler panic (please report this)\",\"file\":\"\",\"line\":0,\"col\":0,\"len\":0}}]}}"
         ),
     };
-    let result = pack(json);
-    let mut bytes = result.bytes;
+    let mut bytes = pack(json);
     let ptr = bytes.as_mut_ptr();
     std::mem::forget(bytes);
     // SAFETY contract: host frees with kinn_free(ptr, len).
