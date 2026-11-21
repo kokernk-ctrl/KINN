@@ -1,0 +1,12 @@
+// errors/many_errors.kin — several broken statements in one file. Since
+// 0.2 the parser recovers after each error and reports them all.
+
+// error: E2001
+
+*mode = S;
+
+func main() {
+    let x = ;
+    let y = ;
+    let z = ;
+}

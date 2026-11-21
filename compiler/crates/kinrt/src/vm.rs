@@ -11,7 +11,7 @@
 //! `Return` can simply truncate back to the frame's base after popping the
 //! return value.
 
-use crate::kir::{CastOp, Instr, Module, NativeId};
+use crate::kir::{CastTarget, Instr, Module, NativeId};
 use crate::value::Value;
 use std::cell::RefCell;
 use std::fmt;
@@ -329,24 +329,25 @@ pub fn run(module: &Module, out: &mut dyn std::io::Write) -> Result<(), KinError
                 stack.push(result);
             }
 
-            Instr::Cast(op) => {
+            Instr::Cast(target) => {
                 let v = stack.pop().expect("vm bug: cast on empty stack");
-                let out_val = match (op, v) {
-                    (CastOp::IntToFloat, Value::Int(i)) => Value::Float(i as f64),
-                    (CastOp::FloatToInt, Value::Float(f)) => {
+                let out_val = match (&v, target) {
+                    (Value::Int(i), CastTarget::Float) => Value::Float(*i as f64),
+                    (Value::Float(f), CastTarget::Int) => {
                         // Truncate toward zero; saturate at the i64 bounds,
                         // NaN converts to 0 (documented Rust `as` semantics).
-                        Value::Int(f as i64)
+                        Value::Int(*f as i64)
                     }
-                    (CastOp::IntToStr, Value::Int(i)) => Value::Str(i.to_string()),
-                    (CastOp::FloatToStr, Value::Float(f)) => {
-                        Value::Str(Value::Float(f).format())
-                    }
-                    (CastOp::BoolToStr, Value::Bool(b)) => Value::Str(
-                        if b { "true".to_string() } else { "false".to_string() },
-                    ),
-                    (op, v) => {
-                        return Err(internal(op.name(), &v, &Value::Unit, line));
+                    (Value::Int(i), CastTarget::Str) => Value::Str(i.to_string()),
+                    (Value::Float(_), CastTarget::Str) => Value::Str(v.format()),
+                    (Value::Bool(_), CastTarget::Str) => Value::Str(v.format()),
+                    _ => {
+                        return Err(internal(
+                            &format!("cast to {}", target.name()),
+                            &v,
+                            &Value::Unit,
+                            line,
+                        ));
                     }
                 };
                 stack.push(out_val);
@@ -794,22 +795,22 @@ mod tests {
     fn casts_numeric_and_to_string() {
         let m = module(vec![
             Instr::Const(Value::Int(2)),
-            Instr::Cast(CastOp::IntToFloat),
+            Instr::Cast(CastTarget::Float),
             Instr::Print, // 2.0
             Instr::Const(Value::Float(2.9)),
-            Instr::Cast(CastOp::FloatToInt),
+            Instr::Cast(CastTarget::Int),
             Instr::Print, // 2 (truncate toward zero)
             Instr::Const(Value::Float(-2.9)),
-            Instr::Cast(CastOp::FloatToInt),
+            Instr::Cast(CastTarget::Int),
             Instr::Print, // -2
             Instr::Const(Value::Int(42)),
-            Instr::Cast(CastOp::IntToStr),
+            Instr::Cast(CastTarget::Str),
             Instr::Print,
             Instr::Const(Value::Float(2.0)),
-            Instr::Cast(CastOp::FloatToStr),
+            Instr::Cast(CastTarget::Str),
             Instr::Print, // 2.0 keeps its decimal point
             Instr::Const(Value::Bool(true)),
-            Instr::Cast(CastOp::BoolToStr),
+            Instr::Cast(CastTarget::Str),
             Instr::Print,
         ]);
         assert_eq!(run_module(&m).unwrap(), "2.0\n2\n-2\n42\n2.0\ntrue\n");
@@ -819,7 +820,7 @@ mod tests {
     fn float_to_int_saturates() {
         let m = module(vec![
             Instr::Const(Value::Float(1e300)),
-            Instr::Cast(CastOp::FloatToInt),
+            Instr::Cast(CastTarget::Int),
             Instr::Print,
         ]);
         assert_eq!(run_module(&m).unwrap(), format!("{}\n", i64::MAX));

@@ -78,7 +78,7 @@ fn command_without_file_exits_two() {
 fn version_prints_version() {
     let out = kinn(&["version"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.1.0");
+    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), "kinn 0.2.0");
 }
 
 #[test]
@@ -111,4 +111,73 @@ fn kir_prints_the_disassembly() {
     assert!(stdout.contains("func fib"));
     assert!(stdout.contains("Call"));
     assert!(stdout.contains("JumpIfFalse"));
+}
+
+// -- 0.2.0 -------------------------------------------------------------------
+
+#[test]
+fn run_arrays_example() {
+    let out = kinn(&["run", &format!("{}/arrays.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "40\n60\n3\n99\n0\ntrue\n");
+}
+
+#[test]
+fn run_for_loops_example() {
+    let out = kinn(&["run", &format!("{}/for_loops.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.starts_with("0\n1\n2\n3\n4\n"));
+    assert!(stdout.ends_with("sum: 60\n"));
+}
+
+#[test]
+fn run_casts_and_stdlib_examples() {
+    let out = kinn(&["run", &format!("{}/casts.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "2.0\n2\n-2\n42\n2.0\ntrue\n7.5\n");
+
+    let out = kinn(&["run", &format!("{}/stdlib.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "5\n3\n7\n2.5\n3\n9\n1.5\n");
+}
+
+#[test]
+fn run_multi_file_module_project() {
+    let out = kinn(&["run", &format!("{}/modules/main.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "7\n25\n5\n15\n");
+
+    // `kir` shows the qualified imported function names.
+    let out = kinn(&["kir", &format!("{}/modules/main.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("func math::add"));
+    assert!(stdout.contains("func main"));
+}
+
+#[test]
+fn missing_import_is_reported_with_the_importer_position() {
+    let out = kinn(&["check", &format!("{}/errors/import_missing.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("E3017"));
+    assert!(stderr.contains("no_such_module.kin"));
+}
+
+#[test]
+fn parser_recovery_reports_all_errors_through_check() {
+    let out = kinn(&["check", &format!("{}/errors/many_errors.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(stderr.matches("error[").count(), 3, "stderr: {}", stderr);
+}
+
+#[test]
+fn array_bounds_runtime_error_exits_three() {
+    let out = kinn(&["run", &format!("{}/errors/index_oob.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(3));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("E4005"));
+    assert!(stderr.contains("-->"));
 }

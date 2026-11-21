@@ -31,28 +31,26 @@ impl NativeId {
     }
 }
 
-/// A value conversion performed by [`Instr::Cast`].
+/// The target type of a [`Instr::Cast`]. The VM picks the exact
+/// conversion from the operand value and this target; the checker has
+/// already rejected impossible combinations.
 ///
 /// `FloatToInt` truncates toward zero and saturates at the i64 bounds
 /// (NaN converts to 0), matching Rust's `as` semantics. String casts use
 /// the same formatting as `print`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CastOp {
-    IntToFloat,
-    FloatToInt,
-    IntToStr,
-    FloatToStr,
-    BoolToStr,
+pub enum CastTarget {
+    Int,
+    Float,
+    Str,
 }
 
-impl CastOp {
+impl CastTarget {
     pub fn name(&self) -> &'static str {
         match self {
-            CastOp::IntToFloat => "int as float",
-            CastOp::FloatToInt => "float as int",
-            CastOp::IntToStr => "int as string",
-            CastOp::FloatToStr => "float as string",
-            CastOp::BoolToStr => "bool as string",
+            CastTarget::Int => "int",
+            CastTarget::Float => "float",
+            CastTarget::Str => "string",
         }
     }
 }
@@ -115,8 +113,8 @@ pub enum Instr {
     ArrSet,
     /// Invoke a native builtin. Operands like a function call.
     Native(NativeId),
-    /// Pop one value and convert it.
-    Cast(CastOp),
+    /// Pop one value and convert it to the target type.
+    Cast(CastTarget),
 }
 
 /// A compiled function.

@@ -1,0 +1,44 @@
+// arrays.kin — array literals, indexing, element assignment, len.
+// Arrays have reference semantics: `b = a` shares the array.
+
+// expect:
+// 40
+// 60
+// 3
+// 99
+// 0
+// true
+
+*mode = S;
+
+func sum(xs: [int]) -> int {
+    var total = 0;
+    for x in xs {
+        total = total + x;
+    }
+    return total;
+}
+
+func main() {
+    let a = [10, 20, 30];
+    print(a[0] + a[2]);
+    print(sum(a));
+
+    // Nested arrays index with [][].
+    let m = [[1, 2], [3, 4]];
+    print(m[1][0]);
+
+    // Element assignment is visible through every binding of the array.
+    let b = a;
+    b[0] = 99;
+    print(a[0]);
+
+    // Annotated empty array + len.
+    let empty: [int] = [];
+    print(len(empty));
+
+    // Deep structural equality.
+    if [1, 2] == [1, 2] {
+        print(true);
+    }
+}

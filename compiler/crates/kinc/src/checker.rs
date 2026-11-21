@@ -1,18 +1,198 @@
 //! Semantic analysis and type checking.
 //!
-//! Two passes: collect function signatures, then check every function
-//! body against them. Also produces warnings (unreachable code) and, in
-//! Beginner mode (`*mode = B;`), extra beginner-friendly notes.
+//! Two passes over every file of a project: collect function signatures,
+//! then check each function body against them (local functions plus
+//! everything reachable through imports). Also produces warnings
+//! (unreachable code) and, in Beginner mode (`*mode = B;`), extra
+//! beginner-friendly notes.
 
 use crate::ast::*;
 use crate::diagnostics::{has_errors, Diagnostic};
+use crate::project::{FileUnit, Project};
 use std::collections::{HashMap, HashSet};
 
-/// Type-check a parsed program. Returns all diagnostics; the program is
-/// valid when no diagnostic has error severity.
+/// Builtins that cannot be redefined by user functions.
+const BUILTINS: [&str; 5] = ["print", "len", "abs", "min", "max"];
+
+/// Type-check a single-file program (no imports). Returns all
+/// diagnostics; the program is valid when no diagnostic has error
+/// severity. Multi-file projects use [`check_project`].
 pub fn check(program: &Program) -> Vec<Diagnostic> {
-    let mut c = Checker::new(program.mode);
-    c.check_program(program);
+    let project = Project {
+        files: vec![FileUnit {
+            path: "<main>".to_string(),
+            program: program.clone(),
+            imports: Vec::new(),
+        }],
+        sources: HashMap::new(),
+    };
+    check_project(&project)
+}
+
+/// Type-check a whole loaded project. `files[0]` is the entry; only the
+/// entry needs `func main()`.
+pub fn check_project(project: &Project) -> Vec<Diagnostic> {
+    let mut c = Checker {
+        diags: Vec::new(),
+        mode: project.files[0].program.mode,
+        sigs: Vec::new(),
+        imports: HashMap::new(),
+        cur_file: 0,
+        file: "<main>".to_string(),
+        scopes: Vec::new(),
+        ret: Type::Void,
+        loop_depth: 0,
+        assigned: HashSet::new(),
+        var_decls: Vec::new(),
+    };
+
+    // Pass 1: signatures of every file.
+    for unit in &project.files {
+        let mut sigs: HashMap<String, FnSig> = HashMap::new();
+        for f in &unit.program.funcs {
+            if BUILTINS.contains(&f.name.as_str()) {
+                c.error(
+                    "E3016",
+                    format!("`{}` is a builtin function and cannot be redefined", f.name),
+                    f.line,
+                    f.col,
+                    f.name.len() as u32,
+                );
+                continue;
+            }
+            if let Some(first) = sigs.get(&f.name) {
+                let fl = first.line;
+                c.error(
+                    "E3002",
+                    format!("duplicate function `{}` (first defined at line {})", f.name, fl),
+                    f.line,
+                    f.col,
+                    f.name.len() as u32,
+                );
+                continue;
+            }
+            sigs.insert(
+                f.name.clone(),
+                FnSig {
+                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                    ret: f.ret.clone(),
+                    line: f.line,
+                    col: f.col,
+                },
+            );
+        }
+        c.sigs.push(sigs);
+    }
+
+    // Pass 1b: `main` requirements — entry file only.
+    let main_info = c.sigs[0]
+        .get("main")
+        .map(|m| (m.params.len(), m.ret.clone(), m.line, m.col));
+    match main_info {
+        None => {
+            c.error("E3008", "program must define `func main()`", 1, 1, 0);
+        }
+        Some((nparams, ret, line, col)) => {
+            if nparams != 0 {
+                c.error("E3008", "`main` must not take parameters", line, col, 4);
+            }
+            if ret != Type::Void {
+                c.error(
+                    "E3008",
+                    format!("`main` must return void, found {}", ret.as_str()),
+                    line,
+                    col,
+                    4,
+                );
+            }
+        }
+    }
+
+    // Pass 2: bodies, file by file.
+    for i in 0..project.files.len() {
+        c.cur_file = i;
+        c.file = project.files[i].path.clone();
+        c.mode = project.files[i].program.mode;
+        c.imports = project.files[i]
+            .imports
+            .iter()
+            .map(|r| (r.alias.clone(), r.file))
+            .collect();
+
+        let funcs = project.files[i].program.funcs.clone();
+        for f in &funcs {
+            c.scopes.clear();
+            c.assigned.clear();
+            c.var_decls.clear();
+            c.ret = f.ret.clone();
+            c.loop_depth = 0;
+
+            let mut scope = HashMap::new();
+            for prm in &f.params {
+                if prm.ty == Type::Void {
+                    c.error(
+                        "E3014",
+                        format!("parameter `{}` cannot have type void", prm.name),
+                        prm.line,
+                        prm.col,
+                        prm.name.len() as u32,
+                    );
+                }
+                if scope.contains_key(&prm.name) {
+                    c.error(
+                        "E3002",
+                        format!("duplicate parameter `{}`", prm.name),
+                        prm.line,
+                        prm.col,
+                        prm.name.len() as u32,
+                    );
+                }
+                scope.insert(
+                    prm.name.clone(),
+                    VarInfo { ty: prm.ty.clone(), mutable: false, line: prm.line, col: prm.col },
+                );
+            }
+            c.scopes.push(scope);
+
+            c.check_block(&f.body);
+
+            if c.ret != Type::Void && !c.block_terminates(&f.body) {
+                c.error(
+                    "E3012",
+                    format!(
+                        "function `{}` must return a value of type {} on every path that reaches the end of its body",
+                        f.name,
+                        c.ret.as_str()
+                    ),
+                    f.line,
+                    f.col,
+                    f.name.len() as u32,
+                );
+            }
+
+            // Beginner-mode lint: `var` never reassigned.
+            if c.mode == Mode::B {
+                for (name, line, col) in &c.var_decls.clone() {
+                    if !c.assigned.contains(name) {
+                        c.diags.push(
+                            Diagnostic::note(
+                                "N3001",
+                                format!(
+                                    "variable `{}` is declared `var` but never reassigned; consider `let`",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            )
+                            .in_file(c.file.clone()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     c.diags
 }
 
@@ -34,7 +214,12 @@ struct VarInfo {
 struct Checker {
     diags: Vec<Diagnostic>,
     mode: Mode,
-    sigs: HashMap<String, FnSig>,
+    /// Signatures per project file, indexed like `project.files`.
+    sigs: Vec<HashMap<String, FnSig>>,
+    /// Import alias -> file index, for the file being checked.
+    imports: HashMap<String, usize>,
+    cur_file: usize,
+    file: String,
     scopes: Vec<HashMap<String, VarInfo>>,
     /// Return type of the function currently being checked.
     ret: Type,
@@ -46,156 +231,14 @@ struct Checker {
 }
 
 impl Checker {
-    fn new(mode: Mode) -> Self {
-        Checker {
-            diags: Vec::new(),
-            mode,
-            sigs: HashMap::new(),
-            scopes: Vec::new(),
-            ret: Type::Void,
-            loop_depth: 0,
-            assigned: HashSet::new(),
-            var_decls: Vec::new(),
-        }
-    }
-
     fn error(&mut self, code: &'static str, message: impl Into<String>, line: u32, col: u32, len: u32) {
-        self.diags.push(Diagnostic::error(code, message, line, col, len));
+        self.diags
+            .push(Diagnostic::error(code, message, line, col, len).in_file(self.file.clone()));
     }
 
     fn warn(&mut self, code: &'static str, message: impl Into<String>, line: u32, col: u32, len: u32) {
-        self.diags.push(Diagnostic::warning(code, message, line, col, len));
-    }
-
-    fn check_program(&mut self, p: &Program) {
-        // Pass 1: signatures.
-        for f in &p.funcs {
-            if f.name == "print" {
-                self.error(
-                    "E3016",
-                    "`print` is a builtin function and cannot be redefined",
-                    f.line,
-                    f.col,
-                    f.name.len() as u32,
-                );
-                continue;
-            }
-            if let Some(first) = self.sigs.get(&f.name) {
-                let (fl, _) = (first.line, first.col);
-                self.error(
-                    "E3002",
-                    format!("duplicate function `{}` (first defined at line {})", f.name, fl),
-                    f.line,
-                    f.col,
-                    f.name.len() as u32,
-                );
-                continue;
-            }
-            self.sigs.insert(
-                f.name.clone(),
-                FnSig {
-                    params: f.params.iter().map(|p| p.ty).collect(),
-                    ret: f.ret,
-                    line: f.line,
-                    col: f.col,
-                },
-            );
-        }
-
-        // Pass 1b: `main` requirements.
-        let main_info = self
-            .sigs
-            .get("main")
-            .map(|m| (m.params.len(), m.ret, m.line, m.col));
-        match main_info {
-            None => {
-                self.error("E3008", "program must define `func main()`", 1, 1, 0);
-            }
-            Some((nparams, ret, line, col)) => {
-                if nparams != 0 {
-                    self.error("E3008", "`main` must not take parameters", line, col, 4);
-                }
-                if ret != Type::Void {
-                    self.error(
-                        "E3008",
-                        format!("`main` must return void, found {}", ret.as_str()),
-                        line,
-                        col,
-                        4,
-                    );
-                }
-            }
-        }
-
-        // Pass 2: bodies.
-        for f in &p.funcs {
-            self.scopes.clear();
-            self.assigned.clear();
-            self.var_decls.clear();
-            self.ret = f.ret;
-            self.loop_depth = 0;
-
-            let mut scope = HashMap::new();
-            for prm in &f.params {
-                if prm.ty == Type::Void {
-                    self.error(
-                        "E3014",
-                        format!("parameter `{}` cannot have type void", prm.name),
-                        prm.line,
-                        prm.col,
-                        prm.name.len() as u32,
-                    );
-                }
-                if scope.contains_key(&prm.name) {
-                    self.error(
-                        "E3002",
-                        format!("duplicate parameter `{}`", prm.name),
-                        prm.line,
-                        prm.col,
-                        prm.name.len() as u32,
-                    );
-                }
-                scope.insert(
-                    prm.name.clone(),
-                    VarInfo { ty: prm.ty, mutable: false, line: prm.line, col: prm.col },
-                );
-            }
-            self.scopes.push(scope);
-
-            self.check_block(&f.body);
-
-            if self.ret != Type::Void && !self.block_terminates(&f.body) {
-                self.error(
-                    "E3012",
-                    format!(
-                        "function `{}` must return a value of type {} on every path that reaches the end of its body",
-                        f.name,
-                        self.ret.as_str()
-                    ),
-                    f.line,
-                    f.col,
-                    f.name.len() as u32,
-                );
-            }
-
-            // Beginner-mode lint: `var` never reassigned.
-            if self.mode == Mode::B {
-                for (name, line, col) in &self.var_decls {
-                    if !self.assigned.contains(name) {
-                        self.diags.push(Diagnostic::note(
-                            "N3001",
-                            format!(
-                                "variable `{}` is declared `var` but never reassigned; consider `let`",
-                                name
-                            ),
-                            *line,
-                            *col,
-                            name.len() as u32,
-                        ));
-                    }
-                }
-            }
-        }
+        self.diags
+            .push(Diagnostic::warning(code, message, line, col, len).in_file(self.file.clone()));
     }
 
     // -- scopes --------------------------------------------------------------
@@ -246,13 +289,20 @@ impl Checker {
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
             Stmt::VarDecl { mutable, name, ty, init, line, col } => {
-                let init_ty = self.check_expr(init);
+                // An empty array literal is only checkable against a
+                // declared array type: `let a: [int] = [];`.
+                let init_ty = match (ty, &init.kind) {
+                    (Some(Type::Array(_)), ExprKind::ArrayLit(items)) if items.is_empty() => {
+                        ty.clone().unwrap()
+                    }
+                    _ => self.check_expr(init),
+                };
                 let declared = match ty {
                     Some(t) => {
                         if init_ty != Type::Error && *t != init_ty {
-                            self.mismatch(*t, init_ty, *line, *col, name.len() as u32);
+                            self.mismatch(t, &init_ty, *line, *col, name.len() as u32);
                         }
-                        *t
+                        t.clone()
                     }
                     None => init_ty,
                 };
@@ -302,20 +352,23 @@ impl Checker {
                         *col,
                         name.len() as u32,
                     );
-                    self.diags.push(Diagnostic::note(
-                        "N3002",
-                        format!("`{}` declared here", name),
-                        vline,
-                        vcol,
-                        name.len() as u32,
-                    ));
+                    self.diags.push(
+                        Diagnostic::note(
+                            "N3002",
+                            format!("`{}` declared here", name),
+                            vline,
+                            vcol,
+                            name.len() as u32,
+                        )
+                        .in_file(self.file.clone()),
+                    );
                 }
                 let vt = self.check_expr(value);
                 if vt != Type::Error && vty != Type::Error {
                     match op {
                         AssignOp::Set => {
                             if vt != vty {
-                                self.mismatch(vty, vt, *line, *col, name.len() as u32);
+                                self.mismatch(&vty, &vt, *line, *col, name.len() as u32);
                             }
                         }
                         AssignOp::Add | AssignOp::Sub => {
@@ -329,12 +382,43 @@ impl Checker {
                                     2,
                                 );
                             } else if vt != vty {
-                                self.mismatch(vty, vt, *line, *col, 2);
+                                self.mismatch(&vty, &vt, *line, *col, 2);
                             }
                         }
                     }
                 }
                 self.assigned.insert(name.clone());
+            }
+            Stmt::IndexAssign { base, index, value, line, col } => {
+                let bt = self.check_expr(base);
+                let it = self.check_expr(index);
+                let vt = self.check_expr(value);
+                match &bt {
+                    Type::Array(elem) => {
+                        if it != Type::Int && it != Type::Error {
+                            self.error(
+                                "E3023",
+                                format!("array index must be an int, found {}", it.as_str()),
+                                *line,
+                                *col,
+                                1,
+                            );
+                        }
+                        if vt != Type::Error && vt != **elem {
+                            self.mismatch(elem, &vt, *line, *col, 1);
+                        }
+                    }
+                    Type::Error => {}
+                    other => {
+                        self.error(
+                            "E3024",
+                            format!("cannot index into {} (only arrays support `[...]`)", other.as_str()),
+                            *line,
+                            *col,
+                            1,
+                        );
+                    }
+                }
             }
             Stmt::If { cond, then_branch, else_branch, .. } => {
                 let ct = self.check_expr(cond);
@@ -367,6 +451,62 @@ impl Checker {
                 self.check_block(body);
                 self.loop_depth -= 1;
             }
+            Stmt::For { var, iter, body, line, col } => {
+                // The iterable is checked in the enclosing scope; the
+                // loop variable is a fresh immutable binding per iteration.
+                let var_ty = match iter {
+                    ForIter::Range { start, end, .. } => {
+                        let st = self.check_expr(start);
+                        if st != Type::Int && st != Type::Error {
+                            self.error(
+                                "E3027",
+                                format!("range bounds must be int, found {} for the start", st.as_str()),
+                                start.line,
+                                start.col,
+                                1,
+                            );
+                        }
+                        let et = self.check_expr(end);
+                        if et != Type::Int && et != Type::Error {
+                            self.error(
+                                "E3027",
+                                format!("range bounds must be int, found {} for the end", et.as_str()),
+                                end.line,
+                                end.col,
+                                1,
+                            );
+                        }
+                        Type::Int
+                    }
+                    ForIter::Expr(e) => match self.check_expr(e) {
+                        Type::Array(elem) => *elem,
+                        Type::Error => Type::Error,
+                        other => {
+                            self.error(
+                                "E3026",
+                                format!(
+                                    "`for` iterable must be a range (`a..b`) or an array, found {}",
+                                    other.as_str()
+                                ),
+                                e.line,
+                                e.col,
+                                3,
+                            );
+                            Type::Error
+                        }
+                    },
+                };
+                let _ = (line, col);
+                self.scopes.push(HashMap::new());
+                self.scopes.last_mut().unwrap().insert(
+                    var.clone(),
+                    VarInfo { ty: var_ty, mutable: false, line: *line, col: *col },
+                );
+                self.loop_depth += 1;
+                self.check_block(body);
+                self.loop_depth -= 1;
+                self.scopes.pop();
+            }
             Stmt::Return { value, line, col } => match value {
                 None => {
                     if self.ret != Type::Void {
@@ -384,7 +524,7 @@ impl Checker {
                     if self.ret == Type::Void {
                         self.error("E3006", "void function cannot return a value", *line, *col, 6);
                     } else if vt != Type::Error && vt != self.ret {
-                        self.mismatch(self.ret, vt, v.line, v.col, 1);
+                        self.mismatch(&self.ret.clone(), &vt, v.line, v.col, 1);
                     }
                 }
             },
@@ -428,6 +568,118 @@ impl Checker {
                     Type::Error
                 }
             },
+            ExprKind::ArrayLit(items) => {
+                if items.is_empty() {
+                    self.error(
+                        "E3022",
+                        "cannot infer the element type of an empty array literal; add a type annotation, e.g. `let a: [int] = [];`",
+                        e.line,
+                        e.col,
+                        2,
+                    );
+                    return Type::Error;
+                }
+                let mut elem: Option<Type> = None;
+                for item in items {
+                    let t = self.check_expr(item);
+                    match &elem {
+                        None => {
+                            if t != Type::Error {
+                                elem = Some(t);
+                            }
+                        }
+                        Some(expected) => {
+                            if t != Type::Error && t != *expected {
+                                self.error(
+                                    "E3028",
+                                    format!(
+                                        "array literal elements must all have the same type (first element is {}, this one is {})",
+                                        expected.as_str(),
+                                        t.as_str()
+                                    ),
+                                    item.line,
+                                    item.col,
+                                    1,
+                                );
+                            }
+                        }
+                    }
+                }
+                match elem {
+                    Some(t) => Type::Array(Box::new(t)),
+                    None => Type::Error,
+                }
+            }
+            ExprKind::Index { base, index } => {
+                let bt = self.check_expr(base);
+                let it = self.check_expr(index);
+                match bt {
+                    Type::Array(elem) => {
+                        if it != Type::Int && it != Type::Error {
+                            self.error(
+                                "E3023",
+                                format!("array index must be an int, found {}", it.as_str()),
+                                e.line,
+                                e.col,
+                                1,
+                            );
+                        }
+                        *elem
+                    }
+                    Type::Error => Type::Error,
+                    other => {
+                        self.error(
+                            "E3024",
+                            format!("cannot index into {} (only arrays support `[...]`)", other.as_str()),
+                            e.line,
+                            e.col,
+                            1,
+                        );
+                        Type::Error
+                    }
+                }
+            }
+            ExprKind::Cast { expr, ty } => {
+                let it = self.check_expr(expr);
+                if it == Type::Error {
+                    return Type::Error;
+                }
+                if &it == ty {
+                    self.error(
+                        "E3025",
+                        format!("cast from {} to {} is unnecessary", it.as_str(), ty.as_str()),
+                        e.line,
+                        e.col,
+                        2,
+                    );
+                    return ty.clone();
+                }
+                let ok = matches!(
+                    (&it, ty),
+                    (Type::Int, Type::Float)
+                        | (Type::Float, Type::Int)
+                        | (Type::Int, Type::Str)
+                        | (Type::Float, Type::Str)
+                        | (Type::Bool, Type::Str)
+                );
+                if !ok {
+                    self.diags.push(
+                        Diagnostic::error(
+                            "E3025",
+                            format!(
+                                "unsupported cast from {} to {} (supported: int as float, float as int, int as string, float as string, bool as string)",
+                                it.as_str(),
+                                ty.as_str()
+                            ),
+                            e.line,
+                            e.col,
+                            2,
+                        )
+                        .in_file(self.file.clone()),
+                    );
+                }
+                ty.clone()
+            }
             ExprKind::Unary { op, expr } => {
                 let t = self.check_expr(expr);
                 match op {
@@ -468,12 +720,12 @@ impl Checker {
                 }
                 use BinOp::*;
                 match op {
-                    Add => match (lt, rt) {
+                    Add => match (&lt, &rt) {
                         (Type::Int, Type::Int) => Type::Int,
                         (Type::Float, Type::Float) => Type::Float,
                         (Type::Str, Type::Str) => Type::Str,
                         _ => {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     },
@@ -481,7 +733,7 @@ impl Checker {
                         if matches!(lt, Type::Int | Type::Float) && lt == rt {
                             lt
                         } else {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     }
@@ -489,7 +741,7 @@ impl Checker {
                         if lt == Type::Int && rt == Type::Int {
                             Type::Int
                         } else {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     }
@@ -497,7 +749,7 @@ impl Checker {
                         if matches!(lt, Type::Int | Type::Float) && lt == rt {
                             Type::Bool
                         } else {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     }
@@ -505,7 +757,7 @@ impl Checker {
                         if lt == rt {
                             Type::Bool
                         } else {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     }
@@ -513,13 +765,16 @@ impl Checker {
                         if lt == Type::Bool && rt == Type::Bool {
                             Type::Bool
                         } else {
-                            self.bin_mismatch(*op, lt, rt, e.line, e.col);
+                            self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
                         }
                     }
                 }
             }
             ExprKind::Call { name, args } => self.check_call(name, args, e.line, e.col),
+            ExprKind::ModCall { module, name, args } => {
+                self.check_mod_call(module, name, args, e.line, e.col)
+            }
         }
     }
 
@@ -550,8 +805,11 @@ impl Checker {
             }
             return Type::Void;
         }
-        let sig = match self.sigs.get(name) {
-            Some(s) => (s.params.clone(), s.ret),
+        if let Some(result) = self.check_native(name, args, line, col) {
+            return result;
+        }
+        let sig = match self.sigs[self.cur_file].get(name) {
+            Some(s) => (s.params.clone(), s.ret.clone()),
             None => {
                 self.error(
                     "E3001",
@@ -567,6 +825,152 @@ impl Checker {
             }
         };
         let (params, ret) = sig;
+        self.check_args(name, &params, args, line, col);
+        ret
+    }
+
+    /// Native builtins: `len`, `abs`, `min`, `max`. Returns `None` when
+    /// `name` is not a native.
+    fn check_native(&mut self, name: &str, args: &[Expr], line: u32, col: u32) -> Option<Type> {
+        match name {
+            "len" => {
+                if args.len() != 1 {
+                    self.error(
+                        "E3007",
+                        format!("`len` expects 1 argument, found {}", args.len()),
+                        line,
+                        col,
+                        3,
+                    );
+                    for a in args {
+                        self.check_expr(a);
+                    }
+                    return Some(Type::Error);
+                }
+                let t = self.check_expr(&args[0]);
+                match &t {
+                    Type::Str | Type::Array(_) | Type::Error => Some(Type::Int),
+                    other => {
+                        self.error(
+                            "E3003",
+                            format!("`len` expects an array or a string, found {}", other.as_str()),
+                            args[0].line,
+                            args[0].col,
+                            3,
+                        );
+                        Some(Type::Error)
+                    }
+                }
+            }
+            "abs" => {
+                if args.len() != 1 {
+                    self.error(
+                        "E3007",
+                        format!("`abs` expects 1 argument, found {}", args.len()),
+                        line,
+                        col,
+                        3,
+                    );
+                    for a in args {
+                        self.check_expr(a);
+                    }
+                    return Some(Type::Error);
+                }
+                let t = self.check_expr(&args[0]);
+                match t {
+                    Type::Int | Type::Float | Type::Error => Some(t),
+                    other => {
+                        self.error(
+                            "E3003",
+                            format!("`abs` expects int or float, found {}", other.as_str()),
+                            args[0].line,
+                            args[0].col,
+                            3,
+                        );
+                        Some(Type::Error)
+                    }
+                }
+            }
+            "min" | "max" => {
+                if args.len() != 2 {
+                    self.error(
+                        "E3007",
+                        format!("`{}` expects 2 arguments, found {}", name, args.len()),
+                        line,
+                        col,
+                        3,
+                    );
+                    for a in args {
+                        self.check_expr(a);
+                    }
+                    return Some(Type::Error);
+                }
+                let a = self.check_expr(&args[0]);
+                let b = self.check_expr(&args[1]);
+                if a == Type::Error || b == Type::Error {
+                    return Some(Type::Error);
+                }
+                if matches!(a, Type::Int | Type::Float) && a == b {
+                    Some(a)
+                } else {
+                    self.error(
+                        "E3003",
+                        format!(
+                            "`{}` expects two ints or two floats, found {} and {}",
+                            name,
+                            a.as_str(),
+                            b.as_str()
+                        ),
+                        line,
+                        col,
+                        3,
+                    );
+                    Some(Type::Error)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn check_mod_call(&mut self, module: &str, name: &str, args: &[Expr], line: u32, col: u32) -> Type {
+        let file = match self.imports.get(module) {
+            Some(f) => *f,
+            None => {
+                self.error(
+                    "E3020",
+                    format!("unknown module `{}` (imports introduce module names — did you forget `import ... as {};`?)", module, module),
+                    line,
+                    col,
+                    module.len() as u32,
+                );
+                for a in args {
+                    self.check_expr(a);
+                }
+                return Type::Error;
+            }
+        };
+        let sig = match self.sigs[file].get(name) {
+            Some(s) => (s.params.clone(), s.ret.clone()),
+            None => {
+                self.error(
+                    "E3021",
+                    format!("module `{}` has no function `{}`", module, name),
+                    line,
+                    col,
+                    (module.len() + name.len() + 1) as u32,
+                );
+                for a in args {
+                    self.check_expr(a);
+                }
+                return Type::Error;
+            }
+        };
+        let (params, ret) = sig;
+        self.check_args(name, &params, args, line, col);
+        ret
+    }
+
+    fn check_args(&mut self, name: &str, params: &[Type], args: &[Expr], line: u32, col: u32) {
         if args.len() != params.len() {
             let plural = if params.len() == 1 { "" } else { "s" };
             self.error(
@@ -596,16 +1000,15 @@ impl Checker {
                 continue;
             }
             if at != Type::Error && i < params.len() && at != params[i] {
-                self.mismatch(params[i], at, a.line, a.col, 1);
+                self.mismatch(&params[i], &at, a.line, a.col, 1);
             }
         }
-        ret
     }
 
     // -- helpers -------------------------------------------------------------
 
     /// Type mismatch with a dedicated message when int and float are mixed.
-    fn mismatch(&mut self, expected: Type, found: Type, line: u32, col: u32, len: u32) {
+    fn mismatch(&mut self, expected: &Type, found: &Type, line: u32, col: u32, len: u32) {
         if matches!(
             (expected, found),
             (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -613,7 +1016,7 @@ impl Checker {
             self.error(
                 "E3011",
                 format!(
-                    "no implicit conversion between int and float (expected {}, found {}); use matching literals like `2.0`",
+                    "no implicit conversion between int and float (expected {}, found {}); use matching literals like `2.0` or an explicit cast",
                     expected.as_str(),
                     found.as_str()
                 ),
@@ -632,7 +1035,7 @@ impl Checker {
         }
     }
 
-    fn bin_mismatch(&mut self, op: BinOp, lt: Type, rt: Type, line: u32, col: u32) {
+    fn bin_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, line: u32, col: u32) {
         let custom = match op {
             BinOp::Mod => Some(format!(
                 "`%` requires int operands, found {} and {}",
@@ -662,7 +1065,7 @@ impl Checker {
                     self.error(
                         "E3011",
                         format!(
-                            "no implicit conversion between int and float ({} `{}` {}); use matching literals like `2.0`",
+                            "no implicit conversion between int and float ({} `{}` {}); use matching literals like `2.0` or an explicit cast",
                             lt.as_str(),
                             op,
                             rt.as_str()
@@ -690,10 +1093,12 @@ impl Checker {
     }
 
     // -- control-flow analysis -------------------------------------------------
+    //
+    // `terminates` answers "does control ever continue past this
+    // statement?" — `return`, an if/else where both branches terminate,
+    // or a `while true` loop that cannot break (it diverges; code after
+    // it is unreachable and the function cannot fall off its end).
 
-    /// Conservative "does this statement end execution of its block?"
-    /// analysis: `return`, or an `if` with an `else` where both branches
-    /// terminate. `while true` is not recognized (P-002 in the registry).
     fn terminates(&self, s: &Stmt) -> bool {
         match s {
             Stmt::Return { .. } => true,
@@ -702,12 +1107,37 @@ impl Checker {
                 None => false,
             },
             Stmt::Block { block, .. } => self.block_terminates(block),
+            Stmt::While { cond, body, .. } => {
+                matches!(&cond.kind, ExprKind::BoolLit(true)) && !self.has_direct_break(body)
+            }
             _ => false,
         }
     }
 
     fn block_terminates(&self, b: &Block) -> bool {
         b.stmts.iter().any(|s| self.terminates(s))
+    }
+
+    /// Does this block contain a `break` that targets the loop being
+    /// scanned? Breaks inside nested loops belong to those loops and do
+    /// not count; breaks inside `if` or bare blocks of *this* loop do.
+    fn has_direct_break(&self, b: &Block) -> bool {
+        b.stmts.iter().any(|s| self.stmt_has_direct_break(s))
+    }
+
+    fn stmt_has_direct_break(&self, s: &Stmt) -> bool {
+        match s {
+            Stmt::Break { .. } => true,
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.has_direct_break(then_branch)
+                    || else_branch
+                        .as_deref()
+                        .map(|e| self.stmt_has_direct_break(e))
+                        .unwrap_or(false)
+            }
+            Stmt::Block { block, .. } => self.has_direct_break(block),
+            _ => false, // While/For shield their own breaks; other stmts cannot break.
+        }
     }
 }
 
@@ -721,6 +1151,7 @@ pub fn is_valid(program: &Program) -> bool {
 mod tests {
     use super::*;
     use crate::parser::parse;
+    use crate::project;
 
     fn check_src(src: &str) -> Vec<Diagnostic> {
         let (toks, _) = crate::lexer::tokenize(src);
@@ -736,6 +1167,18 @@ mod tests {
 
     fn has(code: &str, src: &str) -> bool {
         check_src(src).iter().any(|d| d.code == code)
+    }
+
+    /// Check a two-file project: entry + one import.
+    fn check_two(entry: &str, lib_src: &str) -> Vec<Diagnostic> {
+        let files = [("lib.kin", lib_src)];
+        let map: std::collections::HashMap<String, String> = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect();
+        let mut loader = move |path: &str| map.get(path).cloned().ok_or("not found".to_string());
+        let p = project::load("main.kin", entry, &mut loader).expect("loads");
+        check_project(&p)
     }
 
     const HELLO: &str = "*mode = B;\nfunc main() { print(\"hi\"); let x = 1; }\n";
@@ -848,6 +1291,7 @@ mod tests {
     #[test]
     fn print_cannot_be_redefined() {
         assert!(has("E3016", "func print(x: int) { } func main() { }"));
+        assert!(has("E3016", "func len(x: int) { } func main() { }"));
     }
 
     #[test]
@@ -883,5 +1327,226 @@ mod tests {
     fn modulo_is_int_only() {
         assert!(has("E3003", "func main() { print(1.5 % 2.0); }"));
         clean("func main() { print(7 % 3); }");
+    }
+
+    // -- 0.2.0: control-flow analysis (P-002) --------------------------------
+
+    #[test]
+    fn while_true_without_break_satisfies_return() {
+        // The exact case from PROBLEM_REGISTRY P-002.
+        clean("func spin() -> int { while true { return 1; } } func main() { print(spin()); }");
+        // Diverging loop with no return at all is also valid.
+        clean("func spin() -> int { while true { print(1); } } func main() { spin(); }");
+    }
+
+    #[test]
+    fn while_true_with_break_still_needs_a_return() {
+        assert!(has(
+            "E3012",
+            "func f() -> int { while true { break; } } func main() { print(f()); }"
+        ));
+        // a return after the loop fixes it
+        clean("func f() -> int { while true { break; } return 1; } func main() { print(f()); }");
+    }
+
+    #[test]
+    fn nested_loop_break_does_not_stop_the_outer_loop() {
+        // The inner `break` belongs to the inner loop, so the outer
+        // `while true` still diverges — no E3012.
+        clean(
+            "func f() -> int {\n    while true {\n        while true { break; }\n        return 1;\n    }\n}\nfunc main() { print(f()); }",
+        );
+    }
+
+    #[test]
+    fn code_after_diverging_loop_is_unreachable() {
+        let diags =
+            check_src("func main() { while true { print(1); } print(2); }");
+        assert!(diags.iter().any(|d| d.code == "W3001"));
+    }
+
+    // -- 0.2.0: arrays --------------------------------------------------------
+
+    #[test]
+    fn array_literals_type_check() {
+        clean("func main() { let a = [1, 2, 3]; print(a[0]); }");
+        clean("func main() { let m = [[1], [2, 3]]; print(m[1][1]); }");
+        clean("func main() { let s = [\"a\", \"b\"]; print(s[1]); }");
+        assert!(has("E3028", "func main() { let a = [1, 2.5]; }"));
+    }
+
+    #[test]
+    fn empty_array_needs_annotation() {
+        clean("func main() { let a: [int] = []; print(len(a)); }");
+        assert!(has("E3022", "func main() { let a = []; }"));
+    }
+
+    #[test]
+    fn indexing_rules() {
+        assert!(has("E3023", "func main() { let a = [1]; print(a[true]); }"));
+        assert!(has("E3024", "func main() { let x = 5; print(x[0]); }"));
+        assert!(has("E3024", "func main() { let s = \"hi\"; print(s[0]); }"));
+    }
+
+    #[test]
+    fn index_assignment_rules() {
+        clean("func main() { let a = [1, 2]; a[0] = 9; print(a[0]); }");
+        // element type must match
+        assert!(has("E3003", "func main() { let a = [1]; a[0] = \"x\"; }"));
+        assert!(has("E3023", "func main() { let a = [1]; a[true] = 2; }"));
+        assert!(has("E3024", "func main() { let x = 1; x[0] = 2; }"));
+    }
+
+    #[test]
+    fn arrays_compare_deeply_and_pass_to_functions() {
+        clean("func sum(xs: [int]) -> int { return xs[0] + xs[1]; } func main() { print(sum([3, 4])); if [1] == [1] { print(1); } }");
+        assert!(has("E3003", "func f(xs: [int]) { } func main() { f([1.5]); }"));
+    }
+
+    // -- 0.2.0: casts ---------------------------------------------------------
+
+    #[test]
+    fn supported_casts_type_check() {
+        clean("func main() { let f = 2 as float; print(f + 0.5); }");
+        clean("func main() { let i = 2.9 as int; print(i); }");
+        clean("func main() { print(1 as string); print(true as string); }");
+    }
+
+    #[test]
+    fn unsupported_casts_are_rejected() {
+        assert!(has("E3025", "func main() { print(\"5\" as int); }"));
+        assert!(has("E3025", "func main() { print(true as int); }"));
+        assert!(has("E3025", "func main() { print(1 as int); }"));
+    }
+
+    #[test]
+    fn cast_fixes_int_float_mismatch() {
+        clean("func main() { print((1 as float) + 0.5); }");
+        // A cast on the right side alone does not fix a mismatched left side.
+        assert!(has("E3011", "func main() { print(1 + (0.5 as float)); }"));
+    }
+
+    // -- 0.2.0: natives -------------------------------------------------------
+
+    #[test]
+    fn native_functions_type_check() {
+        clean("func main() { print(len(\"hello\") + len([1, 2, 3])); }");
+        clean("func main() { print(abs(-3)); print(abs(-2.5) + 0.5); }");
+        clean("func main() { print(min(1, 2)); print(max(1.5, 2.5)); }");
+        assert!(has("E3003", "func main() { print(len(5)); }"));
+        assert!(has("E3003", "func main() { print(abs(\"x\")); }"));
+        assert!(has("E3003", "func main() { print(min(1, 2.5)); }"));
+        assert!(has("E3007", "func main() { print(len()); }"));
+        assert!(has("E3007", "func main() { print(min(1)); }"));
+    }
+
+    // -- 0.2.0: for loops -----------------------------------------------------
+
+    #[test]
+    fn for_over_ranges_type_checks() {
+        clean("func main() { for i in 0..5 { print(i); } for i in 0..=5 { print(i); } }");
+        assert!(has("E3027", "func main() { for i in 0.5..5 { print(i); } }"));
+        assert!(has("E3027", "func main() { for i in 0..\"x\" { print(i); } }"));
+    }
+
+    #[test]
+    fn for_over_arrays_type_checks() {
+        clean("func main() { let xs = [1, 2]; for x in xs { print(x); } }");
+        clean("func main() { for s in [\"a\", \"b\"] { print(s); } }");
+        assert!(has("E3026", "func main() { for x in 5 { print(x); } }"));
+        assert!(has("E3026", "func main() { for x in \"abc\" { print(x); } }"));
+    }
+
+    #[test]
+    fn for_loop_variable_is_immutable_and_scoped() {
+        assert!(has("E3004", "func main() { for i in 0..3 { i = 5; } }"));
+        assert!(has("E3001", "func main() { for i in 0..3 { print(1); } print(i); }"));
+    }
+
+    #[test]
+    fn break_and_continue_work_in_for_loops() {
+        clean("func main() { for i in 0..10 { if i == 3 { break; } if i == 1 { continue; } print(i); } }");
+    }
+
+    #[test]
+    fn for_iterable_may_use_calls() {
+        clean("func main() { let a = [1, 2, 3]; for i in 0..len(a) { print(a[i]); } }");
+    }
+
+    // -- 0.2.0: modules -------------------------------------------------------
+
+    #[test]
+    fn qualified_calls_resolve_across_files() {
+        let diags = check_two(
+            "import \"lib.kin\" as math;\nfunc main() { print(math.add(1, 2)); }",
+            "func add(a: int, b: int) -> int { return a + b; }",
+        );
+        let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errs.is_empty(), "{:#?}", errs);
+    }
+
+    #[test]
+    fn unknown_module_and_function_are_errors() {
+        let diags = check_two(
+            "import \"lib.kin\" as math;\nfunc main() { print(nope.f(1)); }",
+            "func f(x: int) { }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3020"));
+
+        let diags = check_two(
+            "import \"lib.kin\" as math;\nfunc main() { print(math.g(1)); }",
+            "func f(x: int) { }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3021"));
+    }
+
+    #[test]
+    fn imported_files_do_not_need_main() {
+        let diags = check_two(
+            "import \"lib.kin\" as math;\nfunc main() { math.f(1); }",
+            "func f(x: int) { }",
+        );
+        assert!(!diags.iter().any(|d| d.code == "E3008"));
+    }
+
+    #[test]
+    fn module_function_arguments_are_checked() {
+        let diags = check_two(
+            "import \"lib.kin\" as math;\nfunc main() { print(math.add(1, \"x\")); }",
+            "func add(a: int, b: int) -> int { return a + b; }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3003"));
+    }
+
+    #[test]
+    fn modules_compose_transitively() {
+        let files = [
+            ("a.kin", "import \"b.kin\" as b;\nfunc fa() -> int { return b.fb(); }"),
+            ("b.kin", "func fb() -> int { return 7; }"),
+        ];
+        let map: std::collections::HashMap<String, String> = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect();
+        let mut loader = move |path: &str| map.get(path).cloned().ok_or("not found".to_string());
+        let p = project::load(
+            "main.kin",
+            "import \"a.kin\" as a;\nfunc main() { print(a.fa()); }",
+            &mut loader,
+        )
+        .expect("loads");
+        let diags = check_project(&p);
+        let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errs.is_empty(), "{:#?}", errs);
+    }
+
+    #[test]
+    fn same_name_in_two_files_is_not_a_duplicate() {
+        let diags = check_two(
+            "import \"lib.kin\" as l;\nfunc f() -> int { return 1; }\nfunc main() { print(f() + l.f()); }",
+            "func f() -> int { return 2; }",
+        );
+        let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+        assert!(errs.is_empty(), "{:#?}", errs);
     }
 }
