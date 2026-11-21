@@ -3,7 +3,7 @@
 ; Version is kept in sync with the compiler workspace version.
 ; Uses only NSIS built-ins (TextFunc, WinMessages) — no third-party plugins.
 
-!include "TextFunc.nsh"
+!include "WordFunc.nsh"
 !include "WinMessages.nsh"
 
 !define NAME "KINN"
