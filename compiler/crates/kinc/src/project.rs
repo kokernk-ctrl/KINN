@@ -15,7 +15,7 @@
 //! the 0.2 module rules.
 
 use crate::ast::{ImportDecl, Program};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::{lexer, parser};
 use std::collections::HashMap;
 
@@ -313,6 +313,7 @@ pub fn dirname(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
 
     fn load_ok(
         entry: &str,

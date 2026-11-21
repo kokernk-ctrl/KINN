@@ -36,7 +36,7 @@ pub fn compile_project(
         Err(diags) => return (None, diags),
     };
 
-    let mut diags = checker::check_project(&proj);
+    let diags = checker::check_project(&proj);
     if has_errors(&diags) {
         return (None, diags);
     }
