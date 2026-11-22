@@ -88,6 +88,13 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         }
     }
     if let Some(w) = entry_site {
+        // Websites are entry-only (E3037), so their diagnostics belong
+        // to the entry file — restore `c.file` after the loop above
+        // left it at the last project file. Without this, every
+        // `check_website` diagnostic (the E3032 family, W3035–W3037)
+        // in a multi-file program rendered under the last imported
+        // module (P-028); this mirrors the app path below.
+        c.file = project.files[0].path.clone();
         check_website(&mut c, w);
     }
 
@@ -2339,6 +2346,36 @@ mod tests {
             "website \"S\" { page Home { text \"x\" } }\nfunc f() -> int { return 1; }",
         );
         assert!(diags.iter().any(|d| d.code == "E3037"), "{:?}", diags);
+    }
+
+    #[test]
+    fn website_diagnostics_are_attributed_to_the_entry_file() {
+        // P-028 regression: the pass-0 loop leaves `file` at the last
+        // project file, so an entry-file website diagnostic (E3032
+        // family) used to render under the last imported module. The
+        // checker restores the entry path before `check_website`
+        // (mirroring the app path).
+        let diags = check_two(
+            concat!(
+                "import \"lib.kin\" as l;\n",
+                "website \"S\" {\n",
+                "    page Home { button \"Go\" open Missing }\n",
+                "    page Other { text \"y\" }\n",
+                "}\n",
+                "func main() { print(l.f()); }\n",
+            ),
+            "func f() -> int { return 1; }",
+        );
+        let d = diags.iter().find(|d| d.code == "E3032").expect("E3032");
+        assert_eq!(d.file, "main.kin", "the entry file, not lib.kin");
+        assert_eq!(d.line, 3, "the `open Missing` target");
+        assert_eq!(d.col, 34, "the target identifier");
+        assert_eq!(d.len, 7, "the width of `Missing`");
+        // The same restore covers the rest of check_website: the
+        // unreachable-page warning names the entry file too.
+        let w = diags.iter().find(|d| d.code == "W3035").expect("W3035");
+        assert_eq!(w.file, "main.kin");
+        assert_eq!(w.line, 4, "the `page Other` declaration");
     }
 
     #[test]

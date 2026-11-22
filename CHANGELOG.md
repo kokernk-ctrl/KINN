@@ -11,6 +11,28 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Fixed — P-028: website diagnostics carried the wrong filename in multi-file programs
+
+- Checker: in a website program **with imports**, every diagnostic
+  emitted inside `check_website` (E3030–E3036 including E3032's
+  explicit file field, W3035–W3037) was attributed to the **last
+  project file** — the pass-0 loop leaves `c.file` at the last unit
+  before `check_website` runs, so an entry-file E3032 ("opens page …
+  which is not declared") rendered under `lib.kin`. The checker now
+  restores the entry path before `check_website`, mirroring the app
+  path that S3 slice 1 already had. Single-file programs are
+  unchanged (the entry path is the only path). **Gate authorization**
+  (architect ruling, 2026-11-22): the "website checking untouched"
+  gate means no regressions, not no bug fixes.
+- Tests: +1 multi-file regression
+  (`website_diagnostics_are_attributed_to_the_entry_file` — E3032
+  asserts file/line/col/len, W3035 asserts file/line). No existing
+  test froze the buggy attribution: the only other multi-file website
+  test asserts E3037, which is emitted inside the pass-0 loop itself
+  with correct per-unit attribution.
+- Registry: P-028 closed as F-017. 0.3.0 web dist rebuilt
+  **byte-identical**; workspace 358 tests green.
+
 ### Added — S2: the `app` declaration — grammar, AST and honest guards
 
 - Language: the full dynamic-app grammar of
