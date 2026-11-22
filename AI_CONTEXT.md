@@ -109,6 +109,9 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
 - P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
+- P-030 app scope/handler/prop/store/field/animation semantics still
+  unchecked (slice 3+); page targets and page/component name rules
+  ARE resolved since S3 slice 2 (P-028/P-029 closed as F-017/F-018).
 
 ## Current task and next milestone
 
@@ -131,11 +134,22 @@ validation — E3062 (empty app name, F-015 closed), E3055–E3057
 scope); registered in LANGUAGE_SPEC §C2; +21 tests, workspace 357
 green, 0.3.0 web dist byte-identical, Studio 66/66; P-028 (website
 diagnostic file attribution) and P-029 (no code for unknown app
-pages / duplicate page names) surfaced in the audit. Next: **the
-remaining S3 slices — scope resolution, handler subset, prop
-checking, computed cycles, stores/fields/animations, plus P-029 code
-assignment.** Carry-overs: string casts/interpolation decision,
-native codegen spike, structs/records ADR (D2 stays out of 0.4.0).
+pages / duplicate page names) surfaced in the audit. S3 slice 2
+landed (P-028 fix + P-029 code assignment, architect ruling
+2026-11-22): P-028 fixed as F-017 (website diagnostics name the
+entry file in multi-file programs); E3063 (unknown app page target
+at every page-target position), E3064 (duplicate page name,
+case-insensitive), E3065 (duplicate component name, case-sensitive)
+assigned from the free E3063–E3069 span, E3066–E3069 reserved;
+pages and components are separate namespaces; registered in B.11 +
+LANGUAGE_SPEC §C2; +12 tests (incl. the P-028 regression), workspace
+370 green, 0.3.0 web dist byte-identical; P-030 registered for the
+remaining unchecked app semantics. Next: **slice 3 = scope
+resolution + handler subset + prop checking (E3040/E3041/E3043–
+E3046 and the B.11 warnings), audit-first on the scope design;
+Playwright-with-S6 proposal APPROVED.** Carry-overs: string
+casts/interpolation decision, native codegen spike, structs/records
+ADR (D2 stays out of 0.4.0).
 
 ## Standing rules
 
@@ -148,11 +162,17 @@ pushes.)
 assertions in the same commit**, including the packaging smoke tests
 (linux DEB, windows, android). S1's example change without the
 linux.yml golden update was exactly this miss.
-- **Credentials come from the environment, never from chat.** If a
-token is pasted into a conversation anyway: use it at most once for
-the requested operation, never persist it (no files, no remote URLs,
-no config, no logs), and the owner revokes it immediately after the
-push. A pasted token is a compromised token.
+- **Credentials come from the environment, never from chat**;
+environment injection is preferred. When the sandbox cannot persist
+env between calls, a transient 0600 file OUTSIDE the repo — sourced
+without echoing and deleted at session end — is acceptable, and its
+use must be disclosed. Never in the repo, git config, remote URLs,
+or logs. If a token is pasted into a conversation anyway: use it at
+most once for the requested operation, and the owner revokes it
+immediately after the push. A pasted token is a compromised token.
+(Amended 2026-11-22, architect ruling: the transient-file exception
+replaces the previous no-files-at-all wording; the earlier PAT was
+revoked after chat exposure.)
 
 ## Conventions
 

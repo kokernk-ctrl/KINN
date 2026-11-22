@@ -439,6 +439,63 @@ fn duplicate_app_names_are_e3042_at_the_cli() {
 }
 
 #[test]
+fn unknown_app_page_targets_are_e3063_at_the_cli() {
+    // S3 slice 2 (P-029): unknown page targets resolve now — routes,
+    // not_found and open. A target that names a component gets the
+    // namespace note in the hint.
+    let dir = tempdir("e3063");
+    let path = dir.join("targets.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    navigation spa\n",
+            "    not_found Ghost\n",
+            "    route \"items\" -> Missing\n",
+            "    component Row { view { text \"r\" } }\n",
+            "    route \"other\" -> Row\n",
+            "    page Home { button \"Go\" open Home }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3063"));
+    assert!(stderr.contains("is not declared in this app"));
+    assert!(stderr.contains("declared pages:"));
+    assert!(stderr.contains("'Row' is a component; routes target pages"));
+}
+
+#[test]
+fn duplicate_app_page_and_component_names_are_e3064_e3065_at_the_cli() {
+    // S3 slice 2 (P-029): duplicate app pages (case-insensitive) and
+    // duplicate components (case-sensitive) are registered errors.
+    let dir = tempdir("e3064");
+    let path = dir.join("dups.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    page Home { text \"a\" }\n",
+            "    page home { text \"b\" }\n",
+            "    component Card { view { text \"x\" } }\n",
+            "    component Card { view { text \"y\" } }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3064"));
+    assert!(stderr.contains("duplicate page name `home` (first defined at line 2)"));
+    assert!(stderr.contains("E3065"));
+    assert!(stderr.contains("duplicate component name `Card` (first defined at line 4)"));
+}
+
+#[test]
 fn targets_command_lists_both_targets() {
     let out = kinn(&["targets"]);
     assert_eq!(out.status.code(), Some(0));

@@ -1,16 +1,18 @@
 // examples/web/tasks_app.kin — the 0.4.0 dynamic app target shape
 // (grammar showcase; docs/DYNAMIC_WEB_ARCHITECTURE.md B.2–B.9).
 //
-// STATUS (0.4.0 S3 slice 1): this file parses, `kinn ast` shows its
+// STATUS (0.4.0 S3 slice 2): this file parses, `kinn ast` shows its
 // tree, and `kinn check` validates the app declaration — name, route
-// paths, duplicate route/state/computed/prop names and the
-// navigation/not_found pairing. Scope resolution, handlers, props,
+// paths, duplicate route/state/computed/prop names, the
+// navigation/not_found pairing, page-target resolution (routes,
+// not_found, open on buttons/links) and page/component name
+// uniqueness (separate namespaces). Scope resolution, handlers, props,
 // stores, fields and animations are not checked yet, and building
 // dynamic apps (runtime, routing, forms, persistence) arrives with the
 // later 0.4.0 steps — run `kinn build` on it today and it says so
-// honestly instead of pretending. (The `not_found Missing` target is
-// not resolved yet either — no code is registered for unknown app
-// pages, P-029.)
+// honestly instead of pretending. (Since S3 slice 2, unknown page
+// targets are caught too — E3063 — so every route/not_found/open here
+// names a declared page.)
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin

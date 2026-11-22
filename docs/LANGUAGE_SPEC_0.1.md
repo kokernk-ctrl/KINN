@@ -437,6 +437,9 @@ const_decl := 'const' IDENT ':' type '=' const_expr ';'
 | E3056 | checker | duplicate route — the same match shape as an earlier route (literals equal, parameters at the same positions; parameter names may differ) |
 | E3057 | checker | SPA without `not_found`, or `not_found` in MPA (including the default mode) |
 | E3062 | checker | the app name must not be empty (trim check; mirrors E3033) |
+| E3063 | checker | unknown app page target — any page-target position (`route "x" -> Missing`, `not_found Missing`, `open <Page>` on buttons/links in page and component views, nested views included); app-scoped sibling of E3032, never reuses it |
+| E3064 | checker | duplicate page name inside an app — case-insensitive (mirrors E3031) |
+| E3065 | checker | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names) |
 
 E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
 presence rules and E3042/E3055–E3057/E3062 the declaration-validation
@@ -475,19 +478,56 @@ codes and meanings are frozen, tests pin the wording):
   component name sharing an app-state name, are not duplicates
   (shadowing rules arrive with scope resolution).
 
+S3 slice 2 rulings (P-029 code assignment, architect ruling
+2026-11-22; codes and meanings frozen, tests pin the wording):
+
+- **E3063 resolves every page-target position**: `route "path" ->
+  Page`, `not_found Page`, and `open <Page>` on buttons and links
+  anywhere in the app's views — pages and components, `when`/
+  `otherwise`, `each` and `form` bodies included. It is the
+  app-scoped sibling of E3032 (website-scoped, frozen by ADR-0011) —
+  never reused. The diagnostic anchors on the target identifier with
+  its width; the message words the position (`route "x" targets page
+  …`, `` `not_found` targets page … ``, `button "Go" opens page …`,
+  non-literal labels fall back to the element kind name). The hint
+  lists the declared pages (`declared pages: A, B`; an app with no
+  pages says so); a target that names a **component** says "'X' is a
+  component; routes target pages" ahead of the list. A `not_found`
+  rejected by E3057 (MPA) is not further resolved — the established
+  "invalid declarations are not further checked" pattern (E3062,
+  E3055). `input bind`/`field bind` targets are **state keys**, not
+  page targets — their resolution is scope resolution (slice 3).
+- **E3064/E3065 and the two-namespace rule**: pages and components
+  are SEPARATE namespaces — a page and a component may share a name,
+  because use-site position disambiguates (`<Card>(...)` instantiates
+  the component; `open Card` / `route -> Card` targets the page).
+  Within each namespace the name is unique: page names compare
+  case-insensitively (mirrors E3031 — page slugs are lowercased by
+  the backends), component names compare case-sensitively (identifiers,
+  matching function names). Both diagnostics anchor on the section
+  keyword of the later declaration (`page` → width 4, `component` →
+  width 9) and name the first definition's line.
+- **E3066–E3069 stay reserved** for the remaining S3 slices (scope
+  resolution, handler subset, prop checking, stores, fields,
+  animations — see B.11 and ROADMAP).
+
 ## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
 
 `app` is the dynamic sibling of `website` (ADR-0024). **S2 delivered
 the grammar; S3 slice 1 adds declaration validation** — E3062 (empty
 app name), E3055–E3057 (route rules) and E3042 (duplicate
-state/computed/prop names per scope), all registered in §C2. An app
-program parses, `kinn ast` shows its tree, the presence rules
-(E3051/E3052, no `main` required) and the slice 1 declaration rules
-hold. **Still unchecked, honestly**: scope resolution, handler subset
-enforcement, prop checking at instantiation sites, computed cycles,
-store/field/animation semantics, and route/`not_found` **target**
-resolution — no code is registered yet for unknown app pages
-(P-029). Every other command says honestly that dynamic builds are
+state/computed/prop names per scope), all registered in §C2. **Slice 2
+resolves app page targets** — E3063 (unknown page target at every
+page-target position: routes, `not_found`, `open` on buttons/links in
+page and component views) and the page/component name rules E3064
+(case-insensitive) / E3065 (case-sensitive); pages and components are
+separate namespaces. An app program parses, `kinn ast` shows its tree,
+the presence rules (E3051/E3052, no `main` required), the slice 1
+declaration rules and **page-target resolution** hold. **Still
+unchecked, honestly**: scope resolution, handler subset enforcement,
+prop checking at instantiation sites, computed cycles, and
+store/field/animation semantics (slice 3+ — E3066–E3069 stay
+reserved). Every other command says honestly that dynamic builds are
 not implemented yet. Lowering arrives with S4.
 
 ```

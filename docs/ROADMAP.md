@@ -94,10 +94,18 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       name, F-015 closed), E3055–E3057 (route rules), E3042 (duplicate
       state/computed/prop names per scope); +21 tests, workspace 357
       green, 0.3.0 web dist byte-identical, Studio 66/66 on fresh
-      wasm.** Remaining slices: scope resolution, handler subset, prop
-      checking (E3040/E3041), computed cycles (E3044), stores/fields/
-      animations (E3047–E3061), W3040–W3044 — plus code assignment for
-      unknown app pages and duplicate page/component names (P-029)
+      wasm. Slice 2 landed (P-028 fix + P-029 code assignment):
+      E3063 (unknown app page target at every page-target position —
+      routes, `not_found`, `open` on buttons/links in page and
+      component views), E3064 (duplicate app page name,
+      case-insensitive), E3065 (duplicate app component name,
+      case-sensitive); pages and components are separate namespaces;
+      E3066–E3069 reserved; P-028 fixed (website diagnostics name the
+      entry file in multi-file programs); remaining unchecked
+      semantics tracked as P-030.** Remaining slices: scope
+      resolution, handler subset, prop checking (E3040/E3041),
+      computed cycles (E3044), stores/fields/animations (E3047–E3061),
+      W3040–W3044 (P-030)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

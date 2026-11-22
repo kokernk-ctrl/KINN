@@ -1,0 +1,23 @@
+// errors/app_unknown_page.kin — a dynamic app whose route targets a
+// page that is never declared. Page targets resolve since S3 slice 2:
+// routes, `not_found` and `open` on buttons/links must name a declared
+// page (E3063, the app-scoped sibling of the website E3032). Here
+// `route "items/:id" -> ItemDetail` points at a page that does not
+// exist — the declared page is `Items`.
+
+// error: E3063
+
+*mode = S;
+
+app "Shop" {
+    navigation spa
+    not_found Home
+    route "items/:id" -> ItemDetail
+    page Home {
+        text "Shop"
+        button "Catalog" open Items
+    }
+    page Items {
+        text "Catalog"
+    }
+}

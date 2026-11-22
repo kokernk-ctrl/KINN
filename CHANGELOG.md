@@ -11,6 +11,49 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S3 slice 2: app page targets resolved, page/component name rules (P-029)
+
+- Language: **app page targets are resolved now**. New checker codes
+  per the architect ruling of 2026-11-22, using the free
+  E3063–E3069 span (**E3066–E3069 stay reserved**):
+  **E3063** "unknown app page target" — fires at **every page-target
+  position** the app grammar admits: `route "path" -> Page`,
+  `not_found Page`, and `open <Page>` on buttons and links anywhere
+  in the app's views (pages and components; `when`/`otherwise`,
+  `each` and `form` bodies included). It is the app-scoped sibling
+  of E3032 — E3032 is website-scoped and frozen (ADR-0011), never
+  reused. The diagnostic anchors on the target identifier; the hint
+  lists the declared pages, and a target that names a **component**
+  says "'X' is a component; routes target pages". A MPA `not_found`
+  rejected by E3057 is not further resolved (the established
+  "invalid declarations are not further checked" pattern).
+  **E3064** duplicate page name inside an app — **case-insensitive**
+  (mirrors E3031: page slugs are lowercased by the backends).
+  **E3065** duplicate component name inside an app — **case-sensitive**
+  (identifier semantics, matching function names). **Pages and
+  components are separate namespaces**: a page and a component may
+  share a name — use-site position disambiguates (`<Card>(...)`
+  instantiates the component, `open Card` / `route -> Card` targets
+  the page). `input bind`/`field bind` targets are state keys, not
+  page targets — untouched (scope resolution, slice 3).
+- Docs: B.11 table gains E3063/E3064/E3065 (+ explicit E3066–E3069
+  reservations); LANGUAGE_SPEC §C2 registers all three codes with the
+  implementation rulings and §C3 updates the honest limits — **app
+  page targets ARE now resolved; scope/handler/prop/store/field/
+  animation semantics remain unchecked (slice 3+)**, now tracked as
+  **P-030** in the registry.
+- Registry: **P-029 closed as F-018**; P-030 registered for the
+  remaining unchecked app semantics.
+- Example: `examples/errors/app_unknown_page.kin` (`// error: E3063`)
+  joins the error corpus; `examples/web/tasks_app.kin` status comment
+  updated to the slice 2 checking surface.
+- Tests: +12 (workspace 358 → 370, all green): 10 checker (every code
+  positive + negative, positions and hints asserted; all four
+  page-target positions; nested-view collection; E3032-never-reused;
+  namespace-separation; MPA-not_found-not-resolved; case-sensitivity
+  matrix) and 2 CLI integration (E3063 with the component-target hint,
+  E3064/E3065 messages through `kinn check`).
+
 ### Fixed — P-028: website diagnostics carried the wrong filename in multi-file programs
 
 - Checker: in a website program **with imports**, every diagnostic

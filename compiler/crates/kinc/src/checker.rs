@@ -555,14 +555,19 @@ fn check_website(c: &mut Checker, w: &WebsiteDecl) {
     }
 }
 
-/// S3 slice 1: app declaration validation (B.11 registered meanings).
-/// Covers E3042 (duplicate state/computed/prop name in one scope),
-/// E3055 (malformed route path), E3056 (duplicate route) and E3057
-/// (SPA without `not_found`, or `not_found` in MPA). NOT covered yet,
-/// honestly: scope resolution, handler subset enforcement, prop
-/// checking at instantiation sites, computed cycles, store/field/
-/// animation semantics, and route/`not_found` target resolution (no
-/// code is registered for unknown app pages — see PROBLEM_REGISTRY).
+/// S3 slices 1–2: app declaration validation (B.11 registered
+/// meanings). Covers E3042 (duplicate state/computed/prop name in one
+/// scope), E3055 (malformed route path), E3056 (duplicate route),
+/// E3057 (SPA without `not_found`, or `not_found` in MPA), E3063
+/// (unknown page target — routes, `not_found`, and `open` on buttons
+/// and links anywhere in the app's views), E3064 (duplicate page
+/// name, case-insensitive) and E3065 (duplicate component name,
+/// case-sensitive). Pages and components are separate namespaces: a
+/// page and a component may share a name (use-site position
+/// disambiguates). NOT covered yet, honestly: scope resolution,
+/// handler subset enforcement, prop checking at instantiation sites,
+/// computed cycles, and store/field/animation semantics (later S3
+/// slices — see LANGUAGE_SPEC §C3 and ROADMAP).
 fn check_app(c: &mut Checker, a: &AppDecl) {
     // -- E3042: duplicate names in one scope --------------------------------
     //
@@ -665,6 +670,61 @@ fn check_app(c: &mut Checker, a: &AppDecl) {
         }
     }
 
+    // -- E3064/E3065: duplicate page and component names ---------------------
+    //
+    // Pages and components are SEPARATE namespaces: a page and a
+    // component may share a name, because use sites disambiguate —
+    // `<Card>(...)` instantiates the component, `open Card` /
+    // `route -> Card` targets the page. Within each namespace the name
+    // must be unique. Page names compare case-insensitively (mirrors
+    // E3031: page slugs are lowercased by the backends); component
+    // names are identifiers and compare case-sensitively (matching
+    // function names, E3002).
+    let mut seen_app_pages: HashMap<String, u32> = HashMap::new();
+    for p in &a.pages {
+        let key = p.name.to_lowercase();
+        if let Some(first_line) = seen_app_pages.get(&key) {
+            let mut d = Diagnostic::error(
+                "E3064",
+                format!(
+                    "duplicate page name `{}` (first defined at line {})",
+                    p.name, first_line
+                ),
+                p.line,
+                p.col,
+                4, // the `page` keyword anchors the duplicate
+            );
+            d.hint = Some(
+                "page names are case-insensitive (they become lowercase slugs in the generated output)"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        }
+        seen_app_pages.insert(key, p.line);
+    }
+    let mut seen_components: HashMap<&str, u32> = HashMap::new();
+    for comp in &a.components {
+        if let Some(first_line) = seen_components.get(comp.name.as_str()) {
+            let mut d = Diagnostic::error(
+                "E3065",
+                format!(
+                    "duplicate component name `{}` (first defined at line {})",
+                    comp.name, first_line
+                ),
+                comp.line,
+                comp.col,
+                9, // the `component` keyword anchors the duplicate
+            );
+            d.hint = Some(
+                "component names are case-sensitive identifiers (like function names)".to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        }
+        seen_components.insert(comp.name.as_str(), comp.line);
+    }
+
     // -- E3055/E3056: routes -------------------------------------------------
     //
     // A route path is relative (no leading/trailing `/`), has no empty
@@ -743,6 +803,135 @@ fn check_app(c: &mut Checker, a: &AppDecl) {
                     .to_string(),
             );
             c.diags.push(d.in_file(c.file.clone()));
+        }
+    }
+
+    // -- E3063: page-target resolution ---------------------------------------
+    //
+    // Every page-target position must name a declared page: `route
+    // "path" -> Page`, `not_found Page`, and `open <Page>` on buttons
+    // and links anywhere in the app's views (pages and components;
+    // `when`/`otherwise`, `each` and `form` bodies included). This is
+    // the app-scoped sibling of E3032 — E3032 is website-scoped and
+    // frozen, it is never reused here. A `not_found` rejected by E3057
+    // (MPA) is not further resolved, mirroring the established "invalid
+    // declarations are not further checked" pattern (E3062, E3055).
+    let page_names: Vec<&str> = a.pages.iter().map(|p| p.name.as_str()).collect();
+    let component_names: HashSet<&str> =
+        a.components.iter().map(|comp| comp.name.as_str()).collect();
+    for r in &a.routes {
+        unknown_page_target(
+            c,
+            &r.target,
+            &format!("route \"{}\"", r.path),
+            "targets",
+            &page_names,
+            &component_names,
+        );
+    }
+    if spa {
+        if let Some(nf) = &a.not_found {
+            unknown_page_target(
+                c,
+                nf,
+                "`not_found`",
+                "targets",
+                &page_names,
+                &component_names,
+            );
+        }
+    }
+    let mut opens: Vec<(&OpenTarget, String, &str)> = Vec::new();
+    for p in &a.pages {
+        collect_open_targets(&p.elements, &mut opens);
+    }
+    for comp in &a.components {
+        collect_open_targets(&comp.view, &mut opens);
+    }
+    for (t, subject, verb) in opens {
+        unknown_page_target(c, t, &subject, verb, &page_names, &component_names);
+    }
+}
+
+/// One E3063 for an unknown page target. The hint lists the declared
+/// pages; a target that names a **component** gets the namespace note
+/// ('X' is a component; routes target pages) — pages and components
+/// are separate namespaces, so only pages satisfy a target.
+fn unknown_page_target(
+    c: &mut Checker,
+    target: &OpenTarget,
+    subject: &str,
+    verb: &str,
+    page_names: &[&str],
+    component_names: &HashSet<&str>,
+) {
+    if page_names.iter().any(|p| *p == target.page) {
+        return;
+    }
+    let mut d = Diagnostic::error(
+        "E3063",
+        format!(
+            "{} {} page `{}` which is not declared in this app",
+            subject, verb, target.page
+        ),
+        target.line,
+        target.col,
+        target.page.chars().count() as u32,
+    );
+    let pages_list = if page_names.is_empty() {
+        "this app declares no pages".to_string()
+    } else {
+        format!("declared pages: {}", page_names.join(", "))
+    };
+    d.hint = Some(if component_names.contains(target.page.as_str()) {
+        format!(
+            "'{}' is a component; routes target pages — {}",
+            target.page, pages_list
+        )
+    } else {
+        pages_list
+    });
+    c.diags.push(d.in_file(c.file.clone()));
+}
+
+/// Every `open <Page>` target inside a view list, in source order,
+/// paired with its message subject and verb ("opens", mirroring
+/// E3032). Literal labels name the button (`button "Go"`); non-literal
+/// labels fall back to the element kind name (`button`). Recursive
+/// over `when`/`otherwise`, `each` and `form` bodies. `input bind`/
+/// `field bind` reuse the `OpenTarget` type for **state keys** — they
+/// are not page targets, so they are not collected (scope resolution
+/// arrives in slice 3).
+fn collect_open_targets<'a>(
+    elements: &'a [ViewElement],
+    targets: &mut Vec<(&'a OpenTarget, String, &'static str)>,
+) {
+    for e in elements {
+        match &e.kind {
+            ViewElementKind::Button { label, open: Some(t), .. } => {
+                let subject = match &label.kind {
+                    ExprKind::StrLit(s) => format!("button \"{s}\""),
+                    _ => "button".to_string(),
+                };
+                targets.push((t, subject, "opens"));
+            }
+            ViewElementKind::Link { label, open: Some(t), .. } => {
+                let subject = match &label.kind {
+                    ExprKind::StrLit(s) => format!("link \"{s}\""),
+                    _ => "link".to_string(),
+                };
+                targets.push((t, subject, "opens"));
+            }
+            ViewElementKind::Button { open: None, .. } | ViewElementKind::Link { open: None, .. } => {}
+            ViewElementKind::When { then_branch, else_branch, .. } => {
+                collect_open_targets(then_branch, targets);
+                if let Some(els) = else_branch {
+                    collect_open_targets(els, targets);
+                }
+            }
+            ViewElementKind::Each { body, .. } => collect_open_targets(body, targets),
+            ViewElementKind::Form { body, .. } => collect_open_targets(body, targets),
+            _ => {}
         }
     }
 }
@@ -2631,13 +2820,234 @@ mod tests {
     fn app_diagnostics_are_attributed_to_the_entry_file() {
         // The Pass 0b loop leaves `file` at the last project file; the
         // checker restores the entry path before checking app internals
-        // (unlike the website path — see P-028).
+        // (the website path does the same since P-028 was fixed).
         let diags = check_two(
             "import \"lib.kin\" as l;\napp \"A\" { navigation spa page Home { text \"x\" } }\n",
             "func f() { }\n",
         );
         let d = diags.iter().find(|d| d.code == "E3057").expect("E3057");
         assert_eq!(d.file, "main.kin");
+    }
+
+    // -- 0.4.0 S3 slice 2: page-target resolution (E3063) and ----------------
+    //    page/component name rules (E3064/E3065; P-029 code assignment) ------
+
+    #[test]
+    fn unknown_app_page_targets_are_rejected() {
+        // Every page-target position the app grammar admits: route ->,
+        // not_found, and open on buttons/links.
+        let src = "app \"A\" { route \"x\" -> Missing page Home { text \"x\" } }";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063 for route target");
+        assert_eq!((d.line, d.col, d.len), (1, 24, 7), "the `Missing` identifier");
+        assert!(
+            d.message
+                .contains("route \"x\" targets page `Missing` which is not declared in this app"),
+            "{}",
+            d.message
+        );
+
+        let src = "app \"A\" { navigation spa not_found Missing page Home { text \"x\" } }";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063 for not_found target");
+        assert_eq!((d.line, d.col, d.len), (1, 36, 7));
+        assert!(
+            d.message
+                .contains("`not_found` targets page `Missing` which is not declared in this app"),
+            "{}",
+            d.message
+        );
+
+        let src = "app \"A\" { page Home { button \"Go\" open Missing } }";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063 for button open target");
+        assert_eq!((d.line, d.col, d.len), (1, 40, 7));
+        assert!(
+            d.message
+                .contains("button \"Go\" opens page `Missing` which is not declared in this app"),
+            "{}",
+            d.message
+        );
+
+        let src = "app \"A\" { page Home { link \"More\" open Missing } }";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063 for link open target");
+        assert_eq!((d.line, d.col, d.len), (1, 40, 7));
+        assert!(
+            d.message
+                .contains("link \"More\" opens page `Missing` which is not declared in this app"),
+            "{}",
+            d.message
+        );
+
+        // A non-literal label falls back to the element kind name.
+        let diags = check_src("app \"A\" { page Home { button label open Missing } }");
+        let d = diags.iter().find(|d| d.code == "E3063").expect("E3063");
+        assert!(d.message.starts_with("button opens page"), "{}", d.message);
+    }
+
+    #[test]
+    fn e3063_hint_lists_declared_pages() {
+        let src = "app \"A\" {\n    route \"items\" -> Missing\n    page Home { text \"x\" }\n}\n";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063");
+        assert_eq!(d.hint.as_deref().unwrap(), "declared pages: Home");
+        // An app with no pages at all still words the hint honestly.
+        let diags = check_src("app \"A\" { route \"x\" -> Missing }");
+        let d = diags.iter().find(|d| d.code == "E3063").expect("E3063");
+        assert_eq!(d.hint.as_deref().unwrap(), "this app declares no pages");
+    }
+
+    #[test]
+    fn e3063_hint_names_a_component_target() {
+        // Pages and components are separate namespaces: a target that
+        // names a component is unknown as a page, and the hint says so
+        // (architect ruling — 'X' is a component; routes target pages).
+        let src = "app \"A\" { route \"x\" -> Row component Row { view { text \"y\" } } page Home { text \"x\" } }";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3063")
+            .expect("E3063");
+        assert!(
+            d.hint
+                .as_deref()
+                .unwrap()
+                .starts_with("'Row' is a component; routes target pages"),
+            "{}",
+            d.hint.unwrap()
+        );
+        assert!(d.hint.as_deref().unwrap().contains("declared pages: Home"));
+    }
+
+    #[test]
+    fn valid_app_page_targets_pass() {
+        // All four positions, all resolved: routes, not_found (SPA),
+        // and open on buttons/links in page and component views.
+        clean(
+            "app \"A\" {\n    navigation spa\n    not_found About\n    route \"items/:id\" -> Item\n    page About { text \"back\" }\n    page Item { button \"Go\" open About link \"More\" open About }\n    component Nav { view { button \"N\" open About } }\n}\n",
+        );
+    }
+
+    #[test]
+    fn e3063_fires_inside_nested_views() {
+        // `when`/`otherwise`, `each` and `form` bodies and component
+        // views hold page-target positions too.
+        let src = concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        when true { button \"W\" open MissingW }\n",
+            "        each [1, 2] as item { link \"E\" open MissingE }\n",
+            "        form \"F\" { button \"F1\" open MissingF }\n",
+            "    }\n",
+            "    component Card { view { button \"C\" open MissingC } }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let codes: Vec<_> = diags.iter().filter(|d| d.code == "E3063").collect();
+        assert_eq!(codes.len(), 4, "{:#?}", diags);
+        for name in ["MissingW", "MissingE", "MissingF", "MissingC"] {
+            assert!(
+                codes.iter().any(|d| d.message.contains(name)),
+                "no E3063 for {name}"
+            );
+        }
+        // Lines: the four targets anchor on their identifiers.
+        assert_eq!(codes[0].line, 3);
+        assert_eq!(codes[1].line, 4);
+        assert_eq!(codes[2].line, 5);
+        assert_eq!(codes[3].line, 7);
+    }
+
+    #[test]
+    fn app_page_targets_never_reuse_e3032() {
+        // E3032 is website-scoped and frozen (ADR-0011); the app-side
+        // sibling never borrows it.
+        let src = "app \"A\" { route \"x\" -> Missing page Home { button \"Go\" open Missing } }";
+        assert!(has("E3063", src));
+        assert!(!has("E3032", src));
+    }
+
+    #[test]
+    fn mpa_not_found_target_is_not_resolved() {
+        // A `not_found` rejected by E3057 (MPA) is not further resolved
+        // — the same "invalid declarations are not further checked"
+        // pattern as E3062 and malformed E3055 routes.
+        let diags = check_src("app \"A\" { not_found Missing page Home { text \"x\" } }");
+        assert!(diags.iter().any(|d| d.code == "E3057"));
+        assert!(!diags.iter().any(|d| d.code == "E3063"), "{:?}", diags);
+    }
+
+    #[test]
+    fn app_pages_and_components_are_separate_namespaces() {
+        // A page and a component may share a name: `<Card>(...)`
+        // instantiates the component, `route -> Card` targets the page.
+        clean(
+            "app \"A\" { route \"card\" -> Card component Card { view { text \"c\" } } page Card { text \"p\" } }",
+        );
+        // The same with an open target: it resolves to the page.
+        clean(
+            "app \"A\" { component Card { view { text \"c\" } } page Home { button \"Go\" open Card } page Card { text \"p\" } }",
+        );
+    }
+
+    #[test]
+    fn duplicate_app_page_names_are_rejected_case_insensitively() {
+        // Mirrors E3031 (website pages): slugs are lowercased, so
+        // `Home` and `home` would collide in the output directory.
+        let src = "app \"A\" {\n    page Home { text \"a\" }\n    page home { text \"b\" }\n}\n";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3064")
+            .expect("E3064");
+        assert_eq!(d.line, 3, "the later page");
+        assert_eq!(d.col, 5, "the `page` keyword");
+        assert_eq!(d.len, 4);
+        assert!(
+            d.message.contains("duplicate page name `home` (first defined at line 2)"),
+            "{}",
+            d.message
+        );
+        assert!(
+            d.hint
+                .as_deref()
+                .unwrap()
+                .contains("case-insensitive"),
+            "{}",
+            d.hint.unwrap()
+        );
+    }
+
+    #[test]
+    fn duplicate_app_component_names_are_rejected_case_sensitively() {
+        let src = "app \"A\" {\n    component Card { view { text \"x\" } }\n    component Card { view { text \"y\" } }\n}\n";
+        let d = check_src(src)
+            .into_iter()
+            .find(|d| d.code == "E3065")
+            .expect("E3065");
+        assert_eq!(d.line, 3, "the later component");
+        assert_eq!(d.col, 5, "the `component` keyword");
+        assert_eq!(d.len, 9);
+        assert!(
+            d.message
+                .contains("duplicate component name `Card` (first defined at line 2)"),
+            "{}",
+            d.message
+        );
+        // Identifier semantics: `card` and `Card` are different names
+        // (matching function names, E3002).
+        clean(
+            "app \"A\" { component Card { view { text \"x\" } } component card { view { text \"y\" } } }",
+        );
     }
 
     // -- 0.4.0 S1: cross-module value exports (`const`) ----------------------

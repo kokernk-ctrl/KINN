@@ -678,6 +678,13 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E3060 | store type/shape mismatch against state |
 | E3061 | field kind/state type mismatch (e.g. `kind number` bound to `Str`) |
 | E3062 | app name empty or whitespace-only (mirrors E3033; assigned at S3, found in the S2 review — F-015) |
+| E3063 | unknown app page target — any page-target position (`route "x" -> Missing`, `not_found Missing`, `open <Page>` on buttons/links in page and component views, nested views included). App-scoped sibling of E3032 (website-scoped, frozen) — never reused. Hint lists declared pages; a target that names a component says "'X' is a component; routes target pages" (assigned in slice 2 — P-029) |
+| E3064 | duplicate page name inside an app — case-insensitive (mirrors E3031: page slugs are lowercased; assigned in slice 2 — P-029) |
+| E3065 | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names; assigned in slice 2 — P-029) |
+| E3066 | (reserved — remaining S3 slices: scope/handler/prop/store/field/animation semantics) |
+| E3067 | (reserved) |
+| E3068 | (reserved) |
+| E3069 | (reserved) |
 | E3070 | target does not support `app` (android) |
 | W3040 | `while` inside an event handler |
 | W3041 | handler local shadows a state name |
