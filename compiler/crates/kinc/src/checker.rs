@@ -91,11 +91,13 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         check_website(&mut c, w);
     }
 
-    // Pass 0b: app declarations (0.4.0 S2). Presence rules only — the
-    // full semantic layer (B.11) arrives with S3. E3051/E3052 are
-    // implemented now so a program never silently builds its `website`
+    // Pass 0b: app declarations (0.4.0 S2 presence + S3 slice 1
+    // declaration validation). Presence rules first: E3051/E3052 are
+    // implemented so a program never silently builds its `website`
     // while an `app` half is ignored, and so imported modules cannot
-    // smuggle an app past the entry-file rule.
+    // smuggle an app past the entry-file rule. E3062 (empty app name)
+    // mirrors E3033's placement in pass 0: checked before registration,
+    // and an unnamed app is not further checked.
     let mut entry_app: Option<&AppDecl> = None;
     for (i, unit) in project.files.iter().enumerate() {
         c.file = unit.path.clone();
@@ -130,14 +132,38 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
                 );
                 continue;
             }
+            if a.name.trim().is_empty() {
+                let mut d = Diagnostic::error(
+                    "E3062",
+                    "the app name must not be empty",
+                    a.line,
+                    a.col,
+                    (a.name.chars().count() as u32) + 2,
+                );
+                d.hint = Some(
+                    "name the app in its declaration, like `app \"Tasks\" { ... }` — \
+                     whitespace-only names are rejected too"
+                        .to_string(),
+                );
+                c.diags.push(d.in_file(c.file.clone()));
+                continue;
+            }
             entry_app = Some(a);
         }
     }
-    // App internals are parsed (S2) but not yet checked: that is the
-    // honest 0.4.0 intermediate state, documented in CHANGELOG and
-    // LANGUAGE_SPEC. Lowering and building arrive with S4+; `kinn
-    // build` reports a precise guard instead of silently ignoring the
-    // app.
+    // S3 slice 1: declaration validation for the registered app —
+    // route rules (E3055–E3057) and duplicate state/computed/prop
+    // names per scope (E3042). Everything else (scope resolution,
+    // handler subset, prop checking, computed cycles, stores, fields,
+    // animations) stays unchecked until later S3 slices — the honest
+    // intermediate state is documented in LANGUAGE_SPEC §C3.
+    if let Some(a) = entry_app {
+        // The app is entry-only (E3051), so its diagnostics belong to
+        // the entry file — restore `c.file` after the loop above left
+        // it at the last project file.
+        c.file = project.files[0].path.clone();
+        check_app(&mut c, a);
+    }
 
     // Pass 1: signatures of every file.
     for unit in &project.files {
@@ -519,6 +545,283 @@ fn check_website(c: &mut Checker, w: &WebsiteDecl) {
                 p.name.chars().count() as u32,
             );
         }
+    }
+}
+
+/// S3 slice 1: app declaration validation (B.11 registered meanings).
+/// Covers E3042 (duplicate state/computed/prop name in one scope),
+/// E3055 (malformed route path), E3056 (duplicate route) and E3057
+/// (SPA without `not_found`, or `not_found` in MPA). NOT covered yet,
+/// honestly: scope resolution, handler subset enforcement, prop
+/// checking at instantiation sites, computed cycles, store/field/
+/// animation semantics, and route/`not_found` target resolution (no
+/// code is registered for unknown app pages — see PROBLEM_REGISTRY).
+fn check_app(c: &mut Checker, a: &AppDecl) {
+    // -- E3042: duplicate names in one scope --------------------------------
+    //
+    // Two scopes exist at declaration level: the app scope (state
+    // fields + computed values share one namespace — `state` blocks
+    // merge) and each component's own scope (props + component state
+    // fields). Cross-kind collisions count (`state x` + `computed x`
+    // is a duplicate): a binding expression could not tell them apart.
+
+    // App scope. State fields anchor on the name token; computed
+    // declarations anchor on the `computed` keyword.
+    let mut app_scope: HashMap<&str, (&'static str, u32)> = HashMap::new();
+    for f in &a.state {
+        if let Some((kind, first_line)) = app_scope.get(f.name.as_str()) {
+            let mut d = Diagnostic::error(
+                "E3042",
+                format!(
+                    "duplicate name `{}` in the app scope (first declared as a {} at line {})",
+                    f.name, kind, first_line
+                ),
+                f.line,
+                f.col,
+                f.name.chars().count() as u32,
+            );
+            d.hint = Some(
+                "app state fields and `computed` values share one namespace — rename one of them"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        }
+        app_scope.insert(f.name.as_str(), ("state field", f.line));
+    }
+    for cd in &a.computed {
+        if let Some((kind, first_line)) = app_scope.get(cd.name.as_str()) {
+            let mut d = Diagnostic::error(
+                "E3042",
+                format!(
+                    "duplicate name `{}` in the app scope (first declared as a {} at line {})",
+                    cd.name, kind, first_line
+                ),
+                cd.line,
+                cd.col,
+                8, // the `computed` keyword
+            );
+            d.hint = Some(
+                "app state fields and `computed` values share one namespace — rename one of them"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        }
+        app_scope.insert(cd.name.as_str(), ("computed value", cd.line));
+    }
+
+    // Component scopes: props and component state fields.
+    for comp in &a.components {
+        let mut scope: HashMap<&str, (&'static str, u32)> = HashMap::new();
+        for p in &comp.props {
+            if let Some((kind, first_line)) = scope.get(p.name.as_str()) {
+                let mut d = Diagnostic::error(
+                    "E3042",
+                    format!(
+                        "duplicate name `{}` in component `{}` (first declared as a {} at line {})",
+                        p.name, comp.name, kind, first_line
+                    ),
+                    p.line,
+                    p.col,
+                    4, // the `prop` keyword
+                );
+                d.hint = Some(format!(
+                    "props and state fields of component `{}` share one namespace — rename one of them",
+                    comp.name
+                ));
+                c.diags.push(d.in_file(c.file.clone()));
+                continue;
+            }
+            scope.insert(p.name.as_str(), ("prop", p.line));
+        }
+        for f in &comp.state {
+            if let Some((kind, first_line)) = scope.get(f.name.as_str()) {
+                let mut d = Diagnostic::error(
+                    "E3042",
+                    format!(
+                        "duplicate name `{}` in component `{}` (first declared as a {} at line {})",
+                        f.name, comp.name, kind, first_line
+                    ),
+                    f.line,
+                    f.col,
+                    f.name.chars().count() as u32,
+                );
+                d.hint = Some(format!(
+                    "props and state fields of component `{}` share one namespace — rename one of them",
+                    comp.name
+                ));
+                c.diags.push(d.in_file(c.file.clone()));
+                continue;
+            }
+            scope.insert(f.name.as_str(), ("state field", f.line));
+        }
+    }
+
+    // -- E3055/E3056: routes -------------------------------------------------
+    //
+    // A route path is relative (no leading/trailing `/`), has no empty
+    // segments, and every segment is either a literal of
+    // `[A-Za-z0-9._-]` (`.`/`..` excluded — they would escape the
+    // generated output directory) or a `:name` parameter (identifier,
+    // unique within the path). Two routes are duplicates (E3056) when
+    // their match shapes are identical — literals equal and parameters
+    // at the same positions; parameter NAMES may differ (`item/:id`
+    // and `item/:name` match the same addresses and no router could
+    // tell them apart).
+    let mut shapes: HashMap<RouteShape, (&str, u32)> = HashMap::new();
+    for r in &a.routes {
+        if let Some(reason) = route_path_error(&r.path) {
+            let mut d = Diagnostic::error(
+                "E3055",
+                format!("malformed route path `{}`: {}", r.path, reason),
+                r.path_line,
+                r.path_col,
+                (r.path.chars().count() as u32) + 2,
+            );
+            d.hint = Some(
+                "route paths are `/`-separated literal or `:param` segments, like \"items/:id\""
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue; // a malformed path cannot be shape-compared
+        }
+        let shape = RouteShape::of(&r.path);
+        if let Some((first_path, first_line)) = shapes.get(&shape) {
+            let mut d = Diagnostic::error(
+                "E3056",
+                format!(
+                    "duplicate route `{}` — it matches the same addresses as `route \"{}\"` (line {})",
+                    r.path, first_path, first_line
+                ),
+                r.path_line,
+                r.path_col,
+                (r.path.chars().count() as u32) + 2,
+            );
+            d.hint = Some(
+                "two routes must be distinguishable — change one path or remove one route".to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        }
+        shapes.insert(shape, (r.path.as_str(), r.path_line));
+    }
+
+    // -- E3057: navigation mode vs not_found ---------------------------------
+    let spa = a.navigation == Some(NavigationMode::Spa);
+    if spa && a.not_found.is_none() {
+        let mut d = Diagnostic::error(
+            "E3057",
+            "SPA navigation needs a `not_found` page — the router must render something for unknown paths",
+            a.line,
+            a.col,
+            3, // the `app` keyword
+        );
+        d.hint = Some(
+            "add `not_found <Page>` next to `navigation spa`, pointing at a declared page".to_string(),
+        );
+        c.diags.push(d.in_file(c.file.clone()));
+    }
+    if !spa {
+        if let Some(nf) = &a.not_found {
+            let mut d = Diagnostic::error(
+                "E3057",
+                "`not_found` is a SPA-only section — MPA serves one file per page and has no unknown-path fallback to render",
+                nf.line,
+                nf.col,
+                nf.page.chars().count() as u32,
+            );
+            d.hint = Some(
+                "remove the `not_found` section, or switch to `navigation spa` (MPA is the default)"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+        }
+    }
+}
+
+/// Why a route path is malformed (E3055); `None` = valid. See
+/// [`check_app`] for the full rule.
+fn route_path_error(path: &str) -> Option<String> {
+    if path.trim().is_empty() {
+        return Some("the path is empty".to_string());
+    }
+    if path.starts_with('/') {
+        return Some(
+            "paths are relative and must not start with `/` (write \"items/:id\", not \"/items/:id\")"
+                .to_string(),
+        );
+    }
+    if path.ends_with('/') {
+        return Some("the path must not end with `/`".to_string());
+    }
+    let mut params: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        if seg.is_empty() {
+            return Some("the path has an empty segment (`//`)".to_string());
+        }
+        if let Some(name) = seg.strip_prefix(':') {
+            if name.is_empty() {
+                return Some("a `:` segment needs a parameter name, like `:id`".to_string());
+            }
+            let mut chars = name.chars();
+            let first_ok = chars.next().map_or(false, |ch| ch.is_ascii_alphabetic() || ch == '_');
+            let rest_ok = chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            if !first_ok || !rest_ok {
+                return Some(format!(
+                    "`:{name}` is not a valid parameter name (identifiers are letters, digits and `_`, starting with a letter)"
+                ));
+            }
+            if params.contains(&name) {
+                return Some(format!("the parameter `:{name}` appears twice in this path"));
+            }
+            params.push(name);
+        } else {
+            if seg.contains(':') {
+                return Some(format!(
+                    "segment `{seg}` mixes a literal with a `:` parameter marker — a segment is either a literal or `:name`"
+                ));
+            }
+            let charset_ok = seg.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-');
+            if !charset_ok {
+                return Some(
+                    "literal segments may contain letters, digits, `.`, `_` and `-` only".to_string(),
+                );
+            }
+            if seg == "." || seg == ".." {
+                return Some(format!(
+                    "segment `{seg}` is not allowed (it would escape the generated output directory)"
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// The match shape of a valid route path for E3056: literals compared
+/// exactly, parameters by position only (their names do not change
+/// which addresses a route matches).
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum RouteShape {
+    Segments(Vec<ShapeSeg>),
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+enum ShapeSeg {
+    Lit(String),
+    Param,
+}
+
+impl RouteShape {
+    fn of(path: &str) -> RouteShape {
+        RouteShape::Segments(
+            path.split('/')
+                .map(|seg| match seg.strip_prefix(':') {
+                    Some(_) => ShapeSeg::Param,
+                    None => ShapeSeg::Lit(seg.to_string()),
+                })
+                .collect(),
+        )
     }
 }
 
@@ -2094,6 +2397,210 @@ mod tests {
         let src = format!("{}{}", APP, APP);
         assert!(has("E3052", &src));
         assert!(!has("E3030", &src)); // E3030 stays website-specific
+    }
+
+    // -- 0.4.0 S3 slice 1: app declaration validation (E3062, E3042, ------
+    //    E3055-E3057) -------------------------------------------------------
+
+    #[test]
+    fn empty_app_name_is_rejected() {
+        assert!(has("E3062", "app \"\" { page Home { text \"x\" } }"));
+        assert!(has("E3062", "app \"   \" { page Home { text \"x\" } }"));
+        // A name that trims to content is fine (mirrors E3033's trim rule).
+        clean("app \"  Tasks  \" { page Home { text \"x\" } }");
+    }
+
+    #[test]
+    fn empty_app_name_is_positioned_with_hint_and_skips_internals() {
+        // Mirrors E3033 exactly: the diagnostic anchors on the app
+        // declaration, carries a hint, and an unnamed app is not
+        // registered — its internals are not further checked (the
+        // broken route adds no E3055), and E3008 pairs with it just as
+        // it does for websites.
+        let src = "app \"\" { route \"bad path\" -> Home page Home { text \"x\" } }";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3062").expect("E3062");
+        assert_eq!((d.line, d.col), (1, 1));
+        assert!(d.hint.as_deref().unwrap().contains("app \"Tasks\" {"));
+        assert!(!diags.iter().any(|d| d.code == "E3055"), "{:?}", diags);
+        assert!(diags.iter().any(|d| d.code == "E3008"));
+    }
+
+    #[test]
+    fn duplicate_app_state_fields_are_rejected() {
+        let src = "app \"A\" {\n    state { n: int = 0 }\n    state { n: int = 1 }\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3042").expect("E3042");
+        assert_eq!(d.line, 3, "the duplicate, not the first");
+        assert_eq!(d.len, 1, "the width of `n`");
+        assert!(
+            d.message.contains("first declared as a state field at line 2"),
+            "{}",
+            d.message
+        );
+        assert!(d.hint.is_some());
+    }
+
+    #[test]
+    fn state_and_computed_names_collide_in_the_app_scope() {
+        let diags = check_src(
+            "app \"A\" { state { n: int = 0 } computed n = 1 page Home { text \"x\" } }",
+        );
+        let d = diags.iter().find(|d| d.code == "E3042").expect("E3042");
+        assert!(d.message.contains("state field"), "{}", d.message);
+        // The reverse order collides too.
+        assert!(has(
+            "E3042",
+            "app \"A\" { computed n = 1 state { n: int = 0 } page Home { text \"x\" } }"
+        ));
+    }
+
+    #[test]
+    fn duplicate_computed_names_are_rejected() {
+        let diags =
+            check_src("app \"A\" { computed a = 1 computed a = 2 page Home { text \"x\" } }");
+        let d = diags.iter().find(|d| d.code == "E3042").expect("E3042");
+        assert_eq!(d.len, 8, "the `computed` keyword anchors the duplicate");
+    }
+
+    #[test]
+    fn duplicate_component_names_in_one_scope_are_rejected() {
+        // prop vs prop
+        assert!(has(
+            "E3042",
+            "app \"A\" { component R { prop l: string prop l: string view { text l } } page Home { text \"x\" } }"
+        ));
+        // prop vs state
+        assert!(has(
+            "E3042",
+            "app \"A\" { component R { prop l: string state l: string = \"x\" view { text l } } page Home { text \"x\" } }"
+        ));
+        // state vs state
+        assert!(has(
+            "E3042",
+            "app \"A\" { component R { state n: int = 0 state n: int = 1 view { text \"x\" } } page Home { text \"x\" } }"
+        ));
+    }
+
+    #[test]
+    fn same_name_in_two_components_is_not_a_duplicate() {
+        // Component scopes are independent.
+        clean(
+            "app \"A\" { component R1 { prop l: string view { text l } } component R2 { prop l: string view { text l } } page Home { text \"x\" } }",
+        );
+        // A component prop may share a name with app state — different
+        // scopes; the shadowing rules arrive with scope resolution.
+        clean(
+            "app \"A\" { state { l: string = \"x\" } component R { prop l: string view { text l } } page Home { text \"x\" } }",
+        );
+    }
+
+    #[test]
+    fn malformed_route_paths_are_rejected() {
+        for bad in [
+            "", "/about", "about/", "a//b", "a/:", "x/:1id", "x/:id/:id", "a:b", "../secret",
+            "./here", "item list",
+        ] {
+            let src = format!(
+                "app \"A\" {{ route \"{bad}\" -> Home page Home {{ text \"x\" }} }}"
+            );
+            assert!(has("E3055", &src), "expected E3055 for path {bad:?}");
+        }
+    }
+
+    #[test]
+    fn valid_route_paths_pass() {
+        clean(
+            "app \"A\" { route \"about\" -> Home route \"items/:id\" -> Home route \"a/b/:c/d\" -> Home route \"user-1/_p\" -> Home route \"v1.2/api\" -> Home page Home { text \"x\" } }",
+        );
+    }
+
+    #[test]
+    fn malformed_route_path_is_positioned_on_the_string_with_hint() {
+        let src = "app \"A\" {\n    route \"/about\" -> Home\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3055").expect("E3055");
+        assert_eq!((d.line, d.col, d.len), (2, 11, 8), "the quoted \"/about\"");
+        assert!(d.message.contains("must not start with `/`"), "{}", d.message);
+        assert!(d.hint.as_deref().unwrap().contains(":param"));
+    }
+
+    #[test]
+    fn duplicate_routes_are_rejected() {
+        let src = "app \"A\" {\n    route \"items/:id\" -> Home\n    route \"items/:id\" -> Home\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3056").expect("E3056");
+        assert_eq!(d.line, 3, "the later route");
+        assert!(d.message.contains("line 2"), "{}", d.message);
+        assert!(d.hint.is_some());
+    }
+
+    #[test]
+    fn same_shape_with_different_param_names_is_a_duplicate_route() {
+        // "item/:id" and "item/:name" match the same addresses; no
+        // router could tell them apart (implementation ruling, C2).
+        assert!(has(
+            "E3056",
+            "app \"A\" { route \"item/:id\" -> Home route \"item/:name\" -> Home page Home { text \"x\" } }"
+        ));
+    }
+
+    #[test]
+    fn different_shapes_are_not_duplicates() {
+        clean(
+            "app \"A\" { route \"item/:id\" -> Home route \"item/detail\" -> Home route \"about\" -> Home route \"about/us\" -> Home page Home { text \"x\" } }",
+        );
+    }
+
+    #[test]
+    fn spa_without_not_found_is_rejected() {
+        let src = "app \"A\" {\n    navigation spa\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3057").expect("E3057");
+        assert_eq!((d.line, d.col), (1, 1), "the app declaration");
+        assert!(d.hint.as_deref().unwrap().contains("not_found"));
+    }
+
+    #[test]
+    fn not_found_in_mpa_is_rejected() {
+        // Default mode (no navigation section) is mpa.
+        let src = "app \"A\" {\n    not_found Missing\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3057").expect("E3057");
+        assert_eq!(d.line, 2, "positioned on the not_found target");
+        // Explicit mpa behaves the same.
+        assert!(has(
+            "E3057",
+            "app \"A\" { navigation mpa not_found Missing page Home { text \"x\" } }"
+        ));
+    }
+
+    #[test]
+    fn spa_with_not_found_and_mpa_without_both_pass() {
+        clean("app \"A\" { navigation spa not_found Home page Home { text \"x\" } }");
+        clean("app \"A\" { navigation mpa page Home { text \"x\" } }");
+        clean("app \"A\" { page Home { text \"x\" } }"); // default mpa
+    }
+
+    #[test]
+    fn app_diagnostics_accumulate() {
+        let src = "app \"A\" {\n    navigation spa\n    route \"bad path\" -> Home\n    route \"/x\" -> Home\n    page Home { text \"x\" }\n}\n";
+        let diags = check_src(src);
+        assert_eq!(diags.iter().filter(|d| d.code == "E3055").count(), 2);
+        assert!(diags.iter().any(|d| d.code == "E3057"));
+    }
+
+    #[test]
+    fn app_diagnostics_are_attributed_to_the_entry_file() {
+        // The Pass 0b loop leaves `file` at the last project file; the
+        // checker restores the entry path before checking app internals
+        // (unlike the website path — see P-028).
+        let diags = check_two(
+            "import \"lib.kin\" as l;\napp \"A\" { navigation spa page Home { text \"x\" } }\n",
+            "func f() { }\n",
+        );
+        let d = diags.iter().find(|d| d.code == "E3057").expect("E3057");
+        assert_eq!(d.file, "main.kin");
     }
 
     // -- 0.4.0 S1: cross-module value exports (`const`) ----------------------

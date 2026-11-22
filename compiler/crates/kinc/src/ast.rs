@@ -382,12 +382,16 @@ pub struct StoreDecl {
 /// `route "item/:id" -> ItemDetail` — one route mapping (B.9). Path
 /// syntax (literal/`:param` segments) is validated by the checker
 /// (E3055, S3); the parser only requires the string and the target.
+/// `path_line`/`path_col` point at the opening quote of the path
+/// string (checker diagnostics for E3055/E3056 anchor there).
 #[derive(Debug, Clone)]
 pub struct RouteDecl {
     pub path: String,
     pub target: OpenTarget,
     pub line: u32,
     pub col: u32,
+    pub path_line: u32,
+    pub path_col: u32,
 }
 
 /// `page Home { view elements }` inside an app. App pages hold dynamic

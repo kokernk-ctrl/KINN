@@ -1,12 +1,19 @@
 // examples/web/tasks_app.kin — the 0.4.0 dynamic app target shape
 // (grammar showcase; docs/DYNAMIC_WEB_ARCHITECTURE.md B.2–B.9).
 //
-// STATUS (0.4.0 S2): this file parses and `kinn ast` shows its tree.
-// App checking is partial, and building dynamic apps (runtime, routing,
-// forms, persistence) arrives with the later 0.4.0 steps — run
-// `kinn build` on it today and it says so honestly instead of pretending.
+// STATUS (0.4.0 S3 slice 1): this file parses, `kinn ast` shows its
+// tree, and `kinn check` validates the app declaration — name, route
+// paths, duplicate route/state/computed/prop names and the
+// navigation/not_found pairing. Scope resolution, handlers, props,
+// stores, fields and animations are not checked yet, and building
+// dynamic apps (runtime, routing, forms, persistence) arrives with the
+// later 0.4.0 steps — run `kinn build` on it today and it says so
+// honestly instead of pretending. (The `not_found Missing` target is
+// not resolved yet either — no code is registered for unknown app
+// pages, P-029.)
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
+//           kinn check examples/web/tasks_app.kin
 
 *mode = B;
 

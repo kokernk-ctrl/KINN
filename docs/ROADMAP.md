@@ -89,7 +89,15 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       errata recorded in CHANGELOG)
 - [ ] S3 App semantics: checker rules E3040–E3070, W3040–W3044
       (E3051/E3052 presence rules already landed with S2; E3062
-      empty-app-name rule assigned to S3 — S2 review finding, F-015)
+      empty-app-name rule assigned to S3 — S2 review finding, F-015).
+      **Slice 1 landed: app declaration validation — E3062 (empty app
+      name, F-015 closed), E3055–E3057 (route rules), E3042 (duplicate
+      state/computed/prop names per scope); +21 tests, workspace 357
+      green, 0.3.0 web dist byte-identical, Studio 66/66 on fresh
+      wasm.** Remaining slices: scope resolution, handler subset, prop
+      checking (E3040/E3041), computed cycles (E3044), stores/fields/
+      animations (E3047–E3061), W3040–W3044 — plus code assignment for
+      unknown app pages and duplicate page/component names (P-029)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

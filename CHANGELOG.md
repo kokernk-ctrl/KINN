@@ -57,6 +57,55 @@ implementation began with S1.**
   CLI integration. 0.3.0 web dist rebuilt byte-identical; Studio
   66/66 against a freshly built wasm.
 
+### Added — S3 slice 1: app declaration validation
+
+- Checker: the registered B.11 meanings for app declarations, per the
+  S3 plan in 2cb7ebe — **E3062** (empty/whitespace-only app name; trim
+  check, positioned on the app declaration, hint included; mirrors
+  E3033 exactly, including that an unnamed app is not further checked
+  and E3008 pairs with it as it does for websites — E3033 was NOT
+  reused, its website meaning is frozen), **E3055** (malformed route
+  path: relative, non-empty, no empty segments; literal segments
+  `A-Za-z0-9._-` — `.`/`..` rejected because MPA generates one file
+  per route and they would escape the output directory; `:name`
+  params are unique identifiers; anchored on the path string, quote
+  to quote), **E3056** (duplicate route by **match shape** —
+  `item/:id` vs `item/:name` match the same addresses and no router
+  could tell them apart; the diagnostic names the first route), and
+  **E3057** (`navigation spa` without `not_found` → error on the app
+  declaration; `not_found` in MPA, default included → error on the
+  target). **E3042** (duplicate names in one scope: app scope =
+  state fields ∪ computed — state blocks merge; component scope =
+  props ∪ state fields; cross-kind collisions count, the first
+  declaration's kind and line are named). All five frozen by tests and
+  registered in LANGUAGE_SPEC §C2 with the implementation-time
+  rulings.
+- Parser/AST (additive): `RouteDecl` records `path_line`/`path_col`
+  (the path string token) so route diagnostics anchor precisely; the
+  `kinn ast` dump output is unchanged.
+- Checker hygiene: app diagnostics are attributed to the entry file
+  (the checker restores the path after the pass-0b loop). The website
+  checker has a pre-existing attribution gap in the same spot —
+  registered as **P-028**, untouched in this slice per the
+  website-untouched gate.
+- Out of scope, honestly (later S3 slices): scope resolution, handler
+  subset enforcement, prop checking, computed cycles, store/field/
+  animation semantics, and route/`not_found` **target** resolution —
+  no code is registered for unknown app pages (**P-029**), surfaced
+  for assignment; duplicate page/component names inside an app are
+  likewise unregistered (P-029).
+- Example: `examples/errors/app_bad_route.kin` (`// error: E3055`)
+  joins the error corpus; `examples/web/tasks_app.kin` status comment
+  updated to the slice 1 checking surface.
+- Tests: +21 (workspace 336 → 357, all green): 18 checker (every code
+  positive + negative, positions, hints, cross-kind and cross-scope
+  cases, multi-error accumulation, entry-file attribution) and 3 CLI
+  integration (E3062 hint/position, the three route codes together,
+  E3042 first-declaration reference). Gates re-verified: all 336
+  pre-existing tests green; website checking untouched; 0.3.0 web
+  dist **byte-identical** to the 77c3e6d baseline (diff -r); Studio
+  **66/66** against a freshly built wasm.
+
 ### Fixed — S2 review (architect gate items)
 
 - B.0 gate completed: the stays-identifier regression loop now freezes

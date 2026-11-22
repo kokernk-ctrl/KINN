@@ -1356,6 +1356,7 @@ impl Parser {
     /// `route "path/:param" -> Page`.
     fn app_route(&mut self, app: &mut AppDecl) -> PResult<()> {
         let kw = self.bump(); // "route"
+        let str_tok = self.peek_token().clone();
         let path = self.string_after("route")?;
         self.expect(TokKind::Arrow, "`->`")?;
         let t = self.expect_ident()?;
@@ -1363,7 +1364,14 @@ impl Parser {
             TokKind::Ident(n) => OpenTarget { page: n, line: t.line, col: t.col },
             _ => unreachable!("expect_ident guarantees an identifier"),
         };
-        app.routes.push(RouteDecl { path, target, line: kw.line, col: kw.col });
+        app.routes.push(RouteDecl {
+            path,
+            target,
+            line: kw.line,
+            col: kw.col,
+            path_line: str_tok.line,
+            path_col: str_tok.col,
+        });
         Ok(())
     }
 

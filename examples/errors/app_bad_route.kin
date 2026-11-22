@@ -1,0 +1,18 @@
+// errors/app_bad_route.kin — a dynamic app whose route path is
+// malformed: paths are relative and must not start with `/`.
+
+// error: E3055
+
+*mode = S;
+
+app "Shop" {
+    navigation spa
+    not_found Missing
+    route "/items/:id" -> ItemDetail
+    page Home {
+        text "Shop"
+    }
+    page ItemDetail {
+        text "Detail"
+    }
+}

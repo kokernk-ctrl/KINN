@@ -432,19 +432,63 @@ const_decl := 'const' IDENT ':' type '=' const_expr ';'
 | E2039 | parser | malformed input/field/`on` structure (`input` without `bind`, `field` without `kind`, `on key` without a filter, key filter on a non-keyboard event) |
 | E3051 | checker | `app` declaration outside the entry file |
 | E3052 | checker | both `website` and `app` declared, or more than one `app` |
+| E3042 | checker | duplicate state/computed/prop name in one scope (app scope: state fields + computed; component scope: props + state fields; cross-kind collisions count) |
+| E3055 | checker | malformed route path (must be relative and non-empty, no empty segments; each segment a literal of `A-Za-z0-9._-` or a unique `:name` parameter; `.`/`..` segments rejected) |
+| E3056 | checker | duplicate route — the same match shape as an earlier route (literals equal, parameters at the same positions; parameter names may differ) |
+| E3057 | checker | SPA without `not_found`, or `not_found` in MPA (including the default mode) |
+| E3062 | checker | the app name must not be empty (trim check; mirrors E3033) |
 
 E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
-presence rules (frozen by the S2 checker tests — the full semantic layer
-E3040–E3079 / W3040–W3049 arrives with S3). E3039 sits outside those
-reserved ranges and is fully owned by `const` (S1).
+presence rules and E3042/E3055–E3057/E3062 the declaration-validation
+rules — both frozen by the S2/S3 checker test suites (the remaining
+semantic layer E3040–E3079 / W3040–W3049 arrives with the later S3
+slices). E3039 sits outside those reserved ranges and is fully owned
+by `const` (S1).
+
+S3 slice 1 rulings (B.11 authorizes implementation-time wording;
+codes and meanings are frozen, tests pin the wording):
+
+- **E3062 mirrors E3033 exactly**: trim check, the diagnostic anchored
+  on the `app` keyword with the quoted name's width, a hint included.
+  An unnamed app is not registered — its internals are not further
+  checked — and `E3008` pairs with it exactly as it does for websites
+  with an empty name.
+- **E3055 anchors on the path string** (quote to quote). Route paths
+  are relative: `"items/:id"`, not `"/items/:id"` (B.9). Literal
+  segments are `A-Za-z0-9._-` — URL- and filename-safe, because MPA
+  generates one file per route; `.` and `..` are rejected since they
+  would escape the generated output directory. `:name` parameters are
+  identifiers and unique within a path.
+- **E3056 compares match shapes, not spellings**: `item/:id` and
+  `item/:name` match the same addresses, so they are duplicates — no
+  router could tell them apart. The diagnostic anchors on the later
+  route and names the first (path and line).
+- **E3057**: the default navigation mode is `mpa` (B.9/D3), so a
+  `not_found` section without `navigation spa` is an error (anchored
+  on the target); a SPA app without `not_found` errors on the app
+  declaration with a hint.
+- **E3042 scopes**: the app scope is state fields + computed values
+  (`state` blocks merge); each component's scope is its props + its
+  state fields. Cross-kind collisions count — a binding expression
+  could not tell them apart. The diagnostic names the kind and line
+  of the first declaration. Same names in different components, or a
+  component name sharing an app-state name, are not duplicates
+  (shadowing rules arrive with scope resolution).
 
 ## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
 
-`app` is the dynamic sibling of `website` (ADR-0024). **S2 delivers the
-grammar only**: an app program parses and `kinn ast` shows its tree, the
-presence rules (E3051/E3052, no `main` required) hold, and every other
-command says honestly that dynamic builds are not implemented yet.
-Semantic rules arrive with S3, lowering with S4.
+`app` is the dynamic sibling of `website` (ADR-0024). **S2 delivered
+the grammar; S3 slice 1 adds declaration validation** — E3062 (empty
+app name), E3055–E3057 (route rules) and E3042 (duplicate
+state/computed/prop names per scope), all registered in §C2. An app
+program parses, `kinn ast` shows its tree, the presence rules
+(E3051/E3052, no `main` required) and the slice 1 declaration rules
+hold. **Still unchecked, honestly**: scope resolution, handler subset
+enforcement, prop checking at instantiation sites, computed cycles,
+store/field/animation semantics, and route/`not_found` **target**
+resolution — no code is registered yet for unknown app pages
+(P-029). Every other command says honestly that dynamic builds are
+not implemented yet. Lowering arrives with S4.
 
 ```
 app_decl      := "app" STRING "{" app_section* "}"            ; E2016 when the name is not a string

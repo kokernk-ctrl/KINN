@@ -1,9 +1,9 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2 + the F-016 CI
-fix (develop @ 77c3e6d, all four workflows green on GitHub).** Update this
-file after significant milestones. Keep it between 500 and 900 words.
+**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2 + F-016 CI fix +
+S3 slice 1 (develop past 77c3e6d).** Update this file after significant
+milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
 
@@ -59,9 +59,9 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **336 Rust tests** (227 kinc unit incl. app grammar,
-const, website parser/checker/backends/consteval, 27 kinrt, 28
-pipeline, 38 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
+Test totals: **357 Rust tests** (245 kinc unit incl. app grammar,
+const, website, app declaration validation, 27 kinrt, 28 pipeline,
+41 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
@@ -125,12 +125,17 @@ presence E3051/E3052, honest guards), the S2 review pass (B.0 = 79
 words, E2002 `as` hint, B.4 fix) and the F-016 CI fix — errata
 recorded: the S1/S2 commits DID run on GitHub (77c3e6d's message
 claimed otherwise; linux was red ~1h35m from the S1 push, the macOS
-race first failed at 2cb7ebe). Next: **S3 slice 1 — app declaration
-validation: E3062 (empty app name), E3055–E3057 (routes), E3042
-(duplicate state/computed/prop names per B.11); later slices cover
-scope resolution, handlers, props, stores/fields/animations.**
-Carry-overs: string casts/interpolation decision, native codegen
-spike, structs/records ADR (D2 stays out of 0.4.0).
+race first failed at 2cb7ebe). **S3 slice 1 landed: app declaration
+validation — E3062 (empty app name, F-015 closed), E3055–E3057
+(route rules), E3042 (duplicate state/computed/prop names per
+scope); registered in LANGUAGE_SPEC §C2; +21 tests, workspace 357
+green, 0.3.0 web dist byte-identical, Studio 66/66; P-028 (website
+diagnostic file attribution) and P-029 (no code for unknown app
+pages / duplicate page names) surfaced in the audit. Next: **the
+remaining S3 slices — scope resolution, handler subset, prop
+checking, computed cycles, stores/fields/animations, plus P-029 code
+assignment.** Carry-overs: string casts/interpolation decision,
+native codegen spike, structs/records ADR (D2 stays out of 0.4.0).
 
 ## Standing rules
 

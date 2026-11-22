@@ -368,6 +368,77 @@ fn website_and_app_in_one_program_is_e3052_at_the_cli() {
 }
 
 #[test]
+fn empty_app_name_is_e3062_at_the_cli_with_hint_and_position() {
+    // S3 slice 1: `kinn check` renders E3062 with the caret under the
+    // app declaration and the how-to-fix hint.
+    let dir = tempdir("e3062");
+    let path = dir.join("unnamed.kin");
+    std::fs::write(&path, "app \"\" {\n    page Home { text \"x\" }\n}\n").unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3062"));
+    assert!(stderr.contains("the app name must not be empty"));
+    assert!(stderr.contains("hint: name the app"));
+    assert!(stderr.contains("-->"));
+    assert!(stderr.contains("^"));
+}
+
+#[test]
+fn app_route_rules_are_reported_at_the_cli() {
+    // S3 slice 1: malformed path (E3055) + duplicate route (E3056) +
+    // SPA without not_found (E3057) all surface through `kinn check`.
+    let dir = tempdir("e305x");
+    let path = dir.join("routes.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    navigation spa\n",
+            "    route \"items/:id\" -> Home\n",
+            "    route \"items/:id\" -> Home\n",
+            "    route \"/bad\" -> Home\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3056"));
+    assert!(stderr.contains("duplicate route"));
+    assert!(stderr.contains("E3055"));
+    assert!(stderr.contains("must not start with `/`"));
+    assert!(stderr.contains("E3057"));
+    assert!(stderr.contains("not_found"));
+}
+
+#[test]
+fn duplicate_app_names_are_e3042_at_the_cli() {
+    // S3 slice 1: E3042 names the duplicate and where the first one
+    // was declared.
+    let dir = tempdir("e3042");
+    let path = dir.join("dup.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    computed n = 1\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3042"));
+    assert!(stderr.contains("first declared as a state field at line 2"));
+}
+
+#[test]
 fn targets_command_lists_both_targets() {
     let out = kinn(&["targets"]);
     assert_eq!(out.status.code(), Some(0));
