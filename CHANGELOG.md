@@ -108,6 +108,51 @@ the approved grammar never conflicted:
    declaration exactly like `prop`, and only app-level state is a
    `{ ... }` block. B.4 wording corrected in this release.
 
+### Errata — the first-push claim in the F-016 CI fix (77c3e6d)
+
+The F-016 fix stated "the S1/S2 commits had never run on GitHub (they
+were pushed together with the S2 review)". Both halves are wrong;
+re-verified against the GitHub Actions API on 2026-11-22:
+
+- S1 (6905f74) was pushed **alone** at 2026-11-21T21:49:13Z and four
+  workflows ran on it: ci success (run 44953504346), windows success
+  (44953504318), android success (44953504410) and linux **failure**
+  (run 44953504257) — the DEB smoke-test golden S1 had made stale.
+- S2 (699c43d, 23:09:47Z), the S2 review (711cb6e, 23:17:43Z) and the
+  S3 plan (2cb7ebe, 23:18:49Z) were pushed separately; linux stayed red
+  on all three (runs 44960409403, 44961075439, 44961164227). The DEB
+  golden was red from 21:49:13Z to the fix push at 23:24:45Z (~1h35m),
+  unnoticed across four pushes.
+- The macOS race is intermittent and pre-existing — macOS passed on
+  6905f74/699c43d/711cb6e and **first failed on 2cb7ebe** (ci run
+  44961164278, job `rust tests (macos-latest)`).
+- 77c3e6d is the first all-green push (linux 44961665490, android
+  44961665523, windows 44961665547, ci 44961665552).
+
+The commit message is immutable history; PROBLEM_REGISTRY F-016 and
+this entry are the correction of record. Two standing rules were added
+to AI_CONTEXT so the miss cannot recur: a push is not done until every
+triggered workflow has been watched to green (run IDs reported with the
+final SHA), and any commit that changes observable behavior updates all
+golden assertions in the same commit, including the packaging smoke
+tests.
+
+### Decisions — Part E follow-up: D4 and D5 owner-confirmed (2026-11-22)
+
+D1–D3 and D6 stand as previously recorded (owner directive plus the
+silence clause). The owner explicitly confirmed the remaining two:
+
+- **D4 — YES**: `kinn serve` (localhost dev server with SPA fallback)
+  is in 0.4.0, landing in S11 per the roadmap.
+- **D5 — YES**: Playwright (headless Chromium) joins CI as a dev
+  dependency — CI only; the compiler core and kinnrt.js remain
+  dependency-free. Proposed landing: wired with S6 (the first slice
+  with a real app to drive), mandatory at the S11 browser gate (D.2);
+  if runner flakiness would break green steps it parks as a manual log
+  until S11.
+
+Neither is implemented yet — both are recorded decisions only.
+
 ### Added — S1: cross-module value exports (`const`)
 
 - Language: `const NAME: Type = expr;` top-level declarations with a

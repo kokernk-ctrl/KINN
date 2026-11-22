@@ -67,11 +67,11 @@ Re-scoped per owner direction: the 0.4 theme is the dynamic web stack —
 multi-file app projects, MPA/SPA, reactive state, events, components,
 animations, forms/persistence, and the KINN Web Runtime. Design,
 audit and roadmap: `docs/DYNAMIC_WEB_ARCHITECTURE.md` (Phases 1–4),
-ADRs 0023–0027. **Phase 5 implementation started 2026-11-22 after the
-owner approved all Part E decisions (D1–D6): roadmap renumber (D1),
-records stay out (D2), MPA default (D3), serve with a security
-boundary (D4), Playwright browser tests in CI (D5), animation
-whitelist (D6). S1 and S2 are landed; S3 is next.**
+ADRs 0023–0027. **Phase 5 implementation started 2026-11-22. Part E:
+D1–D3 and D6 stand per the owner directive and the silence clause;
+D4 (`kinn serve`, S11) and D5 (Playwright in CI) were explicitly
+owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
+77c3e6d, all four CI workflows green on GitHub); S3 is next.**
 
 - [x] S1 Cross-module value exports (`const`) — prerequisite
       (landed: parser/checker/lowering/KIR `Module.consts`, qualified
@@ -93,7 +93,12 @@ whitelist (D6). S1 and S2 are landed; S3 is next.**
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
-      lifecycle) — dependency-free, ≤ 16 KB, no frameworks
+      lifecycle) — dependency-free, ≤ 16 KB, no frameworks. Playwright
+      browser harness (D5, owner-confirmed 2026-11-22) is proposed to
+      land here: a CI-only dev dependency driving the S6 todo app
+      headlessly; if runner flakiness would break green steps it parks
+      as a manual log until S11, where the browser gate (D.2) is
+      mandatory
 - [ ] S7 SPA router + MPA hydration/stores; dynamic route params,
       not-found, honest `file://` fallback
 - [ ] S8 Animations (declarative whitelist → generated CSS)
@@ -101,8 +106,10 @@ whitelist (D6). S1 and S2 are landed; S3 is next.**
       (local-only, never presented as a backend database)
 - [ ] S10 Studio: folder project browser (Vfs v2), SPA preview, runtime
       error + console forwarding; Android app preview v2
-- [ ] S11 CLI/docs/verification: E3038 alignment, `kinn serve` (D4),
-      spec updates, browser verification log, packaging version fix
+- [ ] S11 CLI/docs/verification: E3038 alignment, `kinn serve` (D4,
+      owner-confirmed 2026-11-22 — scope locked: localhost dev server
+      with SPA fallback), spec updates, browser verification log with
+      the Playwright gate mandatory (D5), packaging version fix
       (P-024), doc drift fix (P-025)
 - [ ] Carry-overs unchanged: string interpolation / string→number casts
       decision (ADR-0013/P-013), native codegen spike (ADR-0002),

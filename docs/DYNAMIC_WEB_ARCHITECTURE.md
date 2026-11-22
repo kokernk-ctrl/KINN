@@ -1025,7 +1025,8 @@ Estimates are ordering and dependency statements, not dates.
 ### S11 — CLI, docs, verification, release hygiene
 
 - Scope: CLI guards/report updates (E3038 alignment, SPA file:// note);
-  `kinn serve` if D4 approved; docs: BACKEND_WEB rewrite (0.4 section),
+  `kinn serve` (D4 — owner-confirmed 2026-11-22); docs: BACKEND_WEB
+  rewrite (0.4 section),
   LANGUAGE_SPEC additions, RUNTIME_ARCHITECTURE (web runtime chapter),
   SYNTAX refresh (P-025), MODULE_SYSTEM (consts), COMPILER_ARCHITECTURE
   crate-count fix; CHANGELOG/AI_CONTEXT/PROBLEM_REGISTRY; packaging CI
@@ -1044,7 +1045,7 @@ Estimates are ordering and dependency statements, not dates.
 | Unit | parser/checker/lowering/codegen per construct | `kinc` tests (target ≥ +120 tests over the release) |
 | Differential | VM vs generated JS, byte-identical stdout | S5 harness, in CI (studio job has Node) |
 | Runtime | jsdom-driven reactivity/router/store/animation suites | Studio vitest |
-| Browser | headless Chromium: todo-app flows, a11y tree (landmarks, aria-current, focus), no console errors, route deep-link, reduced-motion | manual log + optional Playwright step (if D5 approved) |
+| Browser | headless Chromium: todo-app flows, a11y tree (landmarks, aria-current, focus), no console errors, route deep-link, reduced-motion | manual log until the Playwright harness lands (D5 — owner-confirmed 2026-11-22; harness proposed with S6, mandatory here at S11) |
 | Budget | kinnrt.js ≤ 16 KB; app.js reported; no eval/innerHTML (source scan) | CI assertion |
 | Compat | 0.3 dist golden checksum + full existing suite | CI |
 | Perf sanity | update-batching assertions; steady-state allocation check in jsdom; manual low-end device note (honest: emulator only, P-017 analog) | S6/S10 tests + audit report |
@@ -1064,11 +1065,15 @@ Estimates are ordering and dependency statements, not dates.
 
 ## Part E — Decisions required from the owner (Phase 5 gate)
 
-> **RESOLVED 2026-11-22: the owner approved all six decisions as
-> recommended** — D1 renumber (0.4.0 dynamic web; graphics 0.5.0;
-> developer comfort 0.6.0), D2 no records/structs in 0.4.0, D3 MPA
-> default, D4 `kinn serve` with the documented security boundary, D5
-> Playwright in CI, D6 animation whitelist freeze. Phase 5 runs
+> **RESOLVED 2026-11-22.** D1–D3 and D6 stand per the owner directive
+> and the silence clause (recommendation = decision): D1 renumber (0.4.0
+> dynamic web; graphics 0.5.0; developer comfort 0.6.0), D2 no
+> records/structs in 0.4.0, D3 MPA default, D6 animation whitelist
+> freeze. **D4 and D5 were explicitly owner-confirmed on 2026-11-22**:
+> D4 include `kinn serve` with the documented security boundary (lands
+> in S11), D5 add Playwright to CI as a dev dependency, CI only — the
+> compiler core and kinnrt.js stay dependency-free (harness proposed to
+> land with S6; mandatory at the S11 browser gate, D.2). Phase 5 runs
 > S1→S11 in order; ADR-0023…0028 encode the decisions and the S1/S2
 > landing.
 

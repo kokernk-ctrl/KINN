@@ -1,7 +1,8 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2.** Update this
+**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2 + the F-016 CI
+fix (develop @ 77c3e6d, all four workflows green on GitHub).** Update this
 file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
@@ -58,9 +59,9 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **335 Rust tests** (226 kinc unit incl. app grammar,
+Test totals: **336 Rust tests** (227 kinc unit incl. app grammar,
 const, website parser/checker/backends/consteval, 27 kinrt, 28
-pipeline, 33 CLI, 16 ffi, 5 manifest) and **66 Studio vitest tests**
+pipeline, 38 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
@@ -114,21 +115,39 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 0.3.0 is complete and committed (web vertical slice, Android backend,
 Studio integration, package foundation, CI for real targets). Current:
 **0.4.0 — Dynamic web applications (owner directive, 2026-11-22)**.
-Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` and
-ADR-0023–0028; **the owner approved D1–D6 on 2026-11-22 and Phase 5
-runs: S1 (cross-module `const` exports, ADR-0028) and S2 (`app`
-module grammar B.2–B.9: parser E2031–E2039, AST + `kinn ast` dump,
-presence rules E3051/E3052, honest run/build guards) are landed —
-335 Rust tests green, Studio 66/66, 0.3.0 web dist byte-identical.
-Grammar is normative in LANGUAGE_SPEC §C3; handler bodies are
-official statements (semicolons, `if` not `when`). S2 review pass
-landed: B.0 gate = 79 words (field kinds + view elements added),
-stray `as <name>` outside `each` gets a positioned E2002 with a cast
-hint, B.4 component-state wording fixed per B.3, six S2 deviations
-recorded in the CHANGELOG errata. Next: S3 (app
-checker E3040–E3070, W3040–W3044).** Carry-overs: string
-casts/interpolation decision, native codegen spike, structs/records
-ADR (D2 stays out of 0.4.0 per the owner).
+Phase 1–4 delivered as `docs/DYNAMIC_WEB_ARCHITECTURE.md` +
+ADR-0023–0028. Part E: D1–D3/D6 by directive + silence clause; **D4
+(`kinn serve`) and D5 (Playwright in CI) explicitly owner-confirmed
+2026-11-22** — Playwright proposed to land with S6, mandatory at the
+S11 browser gate; neither implemented yet. Phase 5 landed S1
+(cross-module `const`, ADR-0028), S2 (`app` grammar E2031–E2039,
+presence E3051/E3052, honest guards), the S2 review pass (B.0 = 79
+words, E2002 `as` hint, B.4 fix) and the F-016 CI fix — errata
+recorded: the S1/S2 commits DID run on GitHub (77c3e6d's message
+claimed otherwise; linux was red ~1h35m from the S1 push, the macOS
+race first failed at 2cb7ebe). Next: **S3 slice 1 — app declaration
+validation: E3062 (empty app name), E3055–E3057 (routes), E3042
+(duplicate state/computed/prop names per B.11); later slices cover
+scope resolution, handlers, props, stores/fields/animations.**
+Carry-overs: string casts/interpolation decision, native codegen
+spike, structs/records ADR (D2 stays out of 0.4.0).
+
+## Standing rules
+
+- **A push is not done until every triggered workflow has been watched
+to green.** Report the run IDs together with the final SHA; no success
+claim before GitHub confirms. (Added 2026-11-22 after the F-016
+errata: a red linux workflow went unnoticed for ~1h35 across four
+pushes.)
+- **Any commit that changes observable behavior updates all golden
+assertions in the same commit**, including the packaging smoke tests
+(linux DEB, windows, android). S1's example change without the
+linux.yml golden update was exactly this miss.
+- **Credentials come from the environment, never from chat.** If a
+token is pasted into a conversation anyway: use it at most once for
+the requested operation, never persist it (no files, no remote URLs,
+no config, no logs), and the owner revokes it immediately after the
+push. A pasted token is a compromised token.
 
 ## Conventions
 

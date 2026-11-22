@@ -23,6 +23,11 @@ in app-private storage.
   provided out-of-band by the owner and is never written to any file,
   commit, log or document. Rotate any token shared over a chat channel
   after use.
+- Tokens are injected through the environment, never accepted from
+  chat. If a token is pasted into a conversation anyway, it is treated
+  as compromised from that moment: used at most once for the requested
+  operation, never persisted to any file, remote URL or configuration,
+  and revoked by the owner immediately after the push.
 - If you believe a secret has leaked, rotate it immediately at the
   provider — assume it is compromised, then clean history.
 
