@@ -38,14 +38,14 @@ func greet(name: string) -> string {
 ## Variables
 
 ```kin
-let x = 1;              // immutable, type inferred (int)
-let ratio: float = 0.5; // immutable, annotated
+fin x = 1;              // immutable (final value), type inferred (int)
+fin ratio: float = 0.5; // immutable, annotated
 var count = 0;          // mutable
 count += 1;             // compound assignment: += and -=
 x = 2;                  // ERROR: x is immutable (E3004)
 ```
 
-- `let` cannot be reassigned; `var` can.
+- `fin` (a final value; renamed from `let`, ADR-0029) cannot be reassigned; `var` can. A legacy `let x = 1;` reports E2017.
 - Type annotations are optional (inferred from the initializer).
 - Same-scope redeclaration is an error; shadowing inside a nested
   block is allowed.

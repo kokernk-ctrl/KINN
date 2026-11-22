@@ -44,7 +44,7 @@ describe.skipIf(!hasWasm)('KinnBackend against the real kinn.wasm', () => {
 
   it('returns positioned diagnostics for type errors', () => {
     const result = backend.check('main.kin', [
-      { name: 'main.kin', content: 'func main() { let x = 1; x = 2; }' },
+      { name: 'main.kin', content: 'func main() { fin x = 1; x = 2; }' },
     ]);
     expect(result.ok).toBe(false);
     const e = result.diagnostics.find((d) => d.code === 'E3004');
@@ -57,7 +57,7 @@ describe.skipIf(!hasWasm)('KinnBackend against the real kinn.wasm', () => {
     const result = backend.run('main.kin', [
       {
         name: 'main.kin',
-        content: 'func main() {\n    let a = [1, 2, 3];\n    for x in a { print(x * 2); }\n    print(len(a) + abs(-4));\n}',
+        content: 'func main() {\n    fin a = [1, 2, 3];\n    for x in a { print(x * 2); }\n    print(len(a) + abs(-4));\n}',
       },
     ]);
     expect(result.ok).toBe(true);
@@ -67,7 +67,7 @@ describe.skipIf(!hasWasm)('KinnBackend against the real kinn.wasm', () => {
 
   it('reports runtime errors with the failing line', () => {
     const result = backend.run('main.kin', [
-      { name: 'main.kin', content: 'func main() {\n    let a = [1];\n    print(a[9]);\n}' },
+      { name: 'main.kin', content: 'func main() {\n    fin a = [1];\n    print(a[9]);\n}' },
     ]);
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBe(3);

@@ -284,3 +284,45 @@ for `kinn kir` to show. Importers read consts qualified (`m.NAME`).
 Selective/renamed exports remain out of scope (P-014 narrowed).
 `const` is a contextual keyword per the ADR-0019 recipe, with the
 word-stays-identifier regression gate.
+
+## ADR-0029 — The binding-keyword rename: `let` → `fin`
+
+**Status: accepted (2026-11-23, 0.4.0 — owner design decision,
+explicitly authorized in the architect directive of 2026-11-23).**
+The local-binding keyword trio becomes **`fin` / `var` / `const`**:
+
+- **`fin`** — an immutable local: a **final value**. This is `let`'s
+  former role, with identical semantics (reassignment stays E3004,
+  element writes into a `fin`-bound array still mutate the shared
+  array object per ADR-0014's binding/contents distinction).
+- **`var`** — a mutable local (unchanged).
+- **`const`** — a top-level compile-time constant (ADR-0028,
+  unchanged).
+
+Only the keyword changes; codegen, KIR, the VM and all output-based
+goldens (0.3 web dist bytes, DEB stdout) are byte-identical across
+the rename. The word `let` stops being a keyword entirely: it lexes
+as a plain identifier, and the legacy declaration shape
+(statement-position `let` immediately followed by an identifier)
+produces the **positioned migration diagnostic E2017** — "`let` was
+renamed to `fin`; use `fin`" — after which the parser continues
+parsing the declaration as `fin`, so each legacy use reports exactly
+once and the rest of the program parses normally (the A6 multi-error
+philosophy applied to migration). Outside that pattern `let` is a
+legal identifier (`fin let = 1;` compiles), mirroring the ADR-0019
+word-stays-identifier gates; handler bodies (B.6) are covered because
+they use the ordinary statement parser. E2017 was the first free
+parser code (0.1/0.2 took E2001–E2015 and E2099; 0.3 took E2016 and
+E2030; the app grammar owns E2031–E2039), registered in
+LANGUAGE_SPEC §C2 and frozen by tests.
+
+**This is intentionally breaking for `let`-sources and supersedes the
+A2 source-compatibility clause ("existing 0.3.0 projects keep
+working") for this keyword only** — the A2 guarantee continues to
+hold for everything else (website programs still compile
+byte-identically; `website`-era 0.3 sources need exactly one
+mechanical edit, `let` → `fin`, per declaration). No backward
+compatibility for `let` is claimed or provided beyond the E2017
+migration diagnostic. Earlier ADR prose that used `let` in examples
+(e.g. ADR-0006, ADR-0014) remains as the historical record; this ADR
+is the ruling of record for the binding keywords.

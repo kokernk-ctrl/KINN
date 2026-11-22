@@ -26,7 +26,7 @@ world
 42
 
 $ kinn check examples/errors/immutable.kin ; echo "exit: $?"
-error[E3004]: cannot reassign immutable variable `x` (declared with `let`)
+error[E3004]: cannot reassign immutable variable `x` (declared with `fin`)
   --> examples/errors/immutable.kin:10:5
    |
 10 |     x = 2;
@@ -34,7 +34,7 @@ error[E3004]: cannot reassign immutable variable `x` (declared with `let`)
 note[N3002]: `x` declared here
   --> examples/errors/immutable.kin:9:5
    |
- 9 |     let x = 1;
+ 9 |     fin x = 1;
    |     ^
 exit: 1
 

@@ -16,7 +16,7 @@ import android.text.style.StyleSpan
 object KinSyntax {
 
     private val KEYWORDS = setOf(
-        "func", "let", "var", "if", "else", "while", "for", "in",
+        "func", "fin", "var", "if", "else", "while", "for", "in",
         "return", "break", "continue", "and", "or", "not", "as", "import",
         "true", "false",
     )

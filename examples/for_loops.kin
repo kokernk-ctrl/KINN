@@ -41,7 +41,7 @@ func main() {
     }
 
     // Loop over array elements, with bounds from len().
-    let xs = [10, 20, 30];
+    fin xs = [10, 20, 30];
     var total = 0;
     for i in 0..len(xs) {
         total = total + xs[i];

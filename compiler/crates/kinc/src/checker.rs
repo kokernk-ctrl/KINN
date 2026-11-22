@@ -396,7 +396,7 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
                             Diagnostic::note(
                                 "N3001",
                                 format!(
-                                    "variable `{}` is declared `var` but never reassigned; consider `let`",
+                                    "variable `{}` is declared `var` but never reassigned; consider `fin`",
                                     name
                                 ),
                                 *line,
@@ -1197,7 +1197,7 @@ impl Checker {
                 if !vmutable {
                     self.error(
                         "E3004",
-                        format!("cannot reassign immutable variable `{}` (declared with `let`)", name),
+                        format!("cannot reassign immutable variable `{}` (declared with `fin`)", name),
                         *line,
                         *col,
                         name.len() as u32,
@@ -1439,7 +1439,7 @@ impl Checker {
                 if items.is_empty() {
                     self.error(
                         "E3022",
-                        "cannot infer the element type of an empty array literal; add a type annotation, e.g. `let a: [int] = [];`",
+                        "cannot infer the element type of an empty array literal; add a type annotation, e.g. `fin a: [int] = [];`",
                         e.line,
                         e.col,
                         2,
@@ -2107,7 +2107,7 @@ mod tests {
         check_project(&p)
     }
 
-    const HELLO: &str = "*mode = B;\nfunc main() { print(\"hi\"); let x = 1; }\n";
+    const HELLO: &str = "*mode = B;\nfunc main() { print(\"hi\"); fin x = 1; }\n";
 
     #[test]
     fn valid_program_passes() {
@@ -2134,15 +2134,35 @@ mod tests {
 
     #[test]
     fn immutable_reassignment_is_rejected_with_note() {
-        let diags = check_src("func main() { let x = 1; x = 2; }");
+        let diags = check_src("func main() { fin x = 1; x = 2; }");
         assert!(diags.iter().any(|d| d.code == "E3004"));
         assert!(diags.iter().any(|d| d.code == "N3002" && d.message.contains("declared here")));
     }
 
     #[test]
+    fn reassigning_fin_reports_the_fin_wording() {
+        // ADR-0029: the immutable keyword is `fin`; E3004 still fires and
+        // its message names the new keyword.
+        let diags = check_src("func main() { fin x = 1; x = 2; }");
+        let d = diags.iter().find(|d| d.code == "E3004").expect("E3004");
+        assert!(d.message.contains("(declared with `fin`)"), "{}", d.message);
+        // The old wording is gone.
+        assert!(!d.message.contains("`let`"), "{}", d.message);
+        // var keeps compiling when reassigned.
+        clean("func main() { var x = 1; x = 2; print(x); }");
+    }
+
+    #[test]
+    fn var_never_reassigned_note_suggests_fin() {
+        // B-mode lint N3001 suggests the new keyword.
+        let diags = check_src("*mode = B;\nfunc main() { var x = 1; print(x); }");
+        assert!(diags.iter().any(|d| d.code == "N3001" && d.message.contains("consider `fin`")));
+    }
+
+    #[test]
     fn no_implicit_int_float_conversion() {
         assert!(has("E3011", "func main() { print(1 + 0.5); }"));
-        assert!(has("E3011", "func main() { let f: float = 1.5; f = 2; }"));
+        assert!(has("E3011", "func main() { fin f: float = 1.5; f = 2; }"));
     }
 
     #[test]
@@ -2179,14 +2199,14 @@ mod tests {
 
     #[test]
     fn void_values_cannot_be_consumed() {
-        assert!(has("E3015", "func main() { let x = print(\"a\"); }"));
+        assert!(has("E3015", "func main() { fin x = print(\"a\"); }"));
         assert!(has("E3010", "func main() { print(print(\"a\")); }"));
     }
 
     #[test]
     fn void_params_and_vars_are_rejected() {
         assert!(has("E3014", "func f(x: void) { } func main() { f(); }"));
-        assert!(has("E3015", "func main() { let x: void = 1; }"));
+        assert!(has("E3015", "func main() { fin x: void = 1; }"));
     }
 
     #[test]
@@ -2205,13 +2225,13 @@ mod tests {
     #[test]
     fn duplicate_definitions_are_rejected() {
         assert!(has("E3002", "func f() { } func f() { } func main() { f(); }"));
-        assert!(has("E3002", "func main() { let x = 1; let x = 2; }"));
+        assert!(has("E3002", "func main() { fin x = 1; fin x = 2; }"));
         assert!(has("E3002", "func f(a: int, a: int) { } func main() { f(1, 2); }"));
     }
 
     #[test]
     fn shadowing_in_inner_scope_is_allowed() {
-        clean("func main() { let x = 1; { let x = 2.5; print(x); } print(x); }");
+        clean("func main() { fin x = 1; { fin x = 2.5; print(x); } print(x); }");
     }
 
     #[test]
@@ -2295,32 +2315,32 @@ mod tests {
 
     #[test]
     fn array_literals_type_check() {
-        clean("func main() { let a = [1, 2, 3]; print(a[0]); }");
-        clean("func main() { let m = [[1], [2, 3]]; print(m[1][1]); }");
-        clean("func main() { let s = [\"a\", \"b\"]; print(s[1]); }");
-        assert!(has("E3028", "func main() { let a = [1, 2.5]; }"));
+        clean("func main() { fin a = [1, 2, 3]; print(a[0]); }");
+        clean("func main() { fin m = [[1], [2, 3]]; print(m[1][1]); }");
+        clean("func main() { fin s = [\"a\", \"b\"]; print(s[1]); }");
+        assert!(has("E3028", "func main() { fin a = [1, 2.5]; }"));
     }
 
     #[test]
     fn empty_array_needs_annotation() {
-        clean("func main() { let a: [int] = []; print(len(a)); }");
-        assert!(has("E3022", "func main() { let a = []; }"));
+        clean("func main() { fin a: [int] = []; print(len(a)); }");
+        assert!(has("E3022", "func main() { fin a = []; }"));
     }
 
     #[test]
     fn indexing_rules() {
-        assert!(has("E3023", "func main() { let a = [1]; print(a[true]); }"));
-        assert!(has("E3024", "func main() { let x = 5; print(x[0]); }"));
-        assert!(has("E3024", "func main() { let s = \"hi\"; print(s[0]); }"));
+        assert!(has("E3023", "func main() { fin a = [1]; print(a[true]); }"));
+        assert!(has("E3024", "func main() { fin x = 5; print(x[0]); }"));
+        assert!(has("E3024", "func main() { fin s = \"hi\"; print(s[0]); }"));
     }
 
     #[test]
     fn index_assignment_rules() {
-        clean("func main() { let a = [1, 2]; a[0] = 9; print(a[0]); }");
+        clean("func main() { fin a = [1, 2]; a[0] = 9; print(a[0]); }");
         // element type must match
-        assert!(has("E3003", "func main() { let a = [1]; a[0] = \"x\"; }"));
-        assert!(has("E3023", "func main() { let a = [1]; a[true] = 2; }"));
-        assert!(has("E3024", "func main() { let x = 1; x[0] = 2; }"));
+        assert!(has("E3003", "func main() { fin a = [1]; a[0] = \"x\"; }"));
+        assert!(has("E3023", "func main() { fin a = [1]; a[true] = 2; }"));
+        assert!(has("E3024", "func main() { fin x = 1; x[0] = 2; }"));
     }
 
     #[test]
@@ -2333,8 +2353,8 @@ mod tests {
 
     #[test]
     fn supported_casts_type_check() {
-        clean("func main() { let f = 2 as float; print(f + 0.5); }");
-        clean("func main() { let i = 2.9 as int; print(i); }");
+        clean("func main() { fin f = 2 as float; print(f + 0.5); }");
+        clean("func main() { fin i = 2.9 as int; print(i); }");
         clean("func main() { print(1 as string); print(true as string); }");
     }
 
@@ -2377,7 +2397,7 @@ mod tests {
 
     #[test]
     fn for_over_arrays_type_checks() {
-        clean("func main() { let xs = [1, 2]; for x in xs { print(x); } }");
+        clean("func main() { fin xs = [1, 2]; for x in xs { print(x); } }");
         clean("func main() { for s in [\"a\", \"b\"] { print(s); } }");
         assert!(has("E3026", "func main() { for x in 5 { print(x); } }"));
         assert!(has("E3026", "func main() { for x in \"abc\" { print(x); } }"));
@@ -2396,7 +2416,7 @@ mod tests {
 
     #[test]
     fn for_iterable_may_use_calls() {
-        clean("func main() { let a = [1, 2, 3]; for i in 0..len(a) { print(a[i]); } }");
+        clean("func main() { fin a = [1, 2, 3]; for i in 0..len(a) { print(a[i]); } }");
     }
 
     // -- 0.2.0: modules -------------------------------------------------------
@@ -3064,12 +3084,12 @@ mod tests {
 
     #[test]
     fn const_read_types_like_its_declared_type() {
-        clean("const GREETING: string = \"hi\";\nfunc main() { let s: string = GREETING; print(s); }");
+        clean("const GREETING: string = \"hi\";\nfunc main() { fin s: string = GREETING; print(s); }");
         // Type flows: passing a string const where int is expected fails
         // (E3003, the general type-mismatch code; E3011 is int/float only).
         assert!(has(
             "E3003",
-            "const GREETING: string = \"hi\";\nfunc main() { let x: int = GREETING; }"
+            "const GREETING: string = \"hi\";\nfunc main() { fin x: int = GREETING; }"
         ));
     }
 
@@ -3113,7 +3133,7 @@ mod tests {
         // A local variable can never be a constant.
         assert!(has(
             "E3039",
-            "func main() { let y = 1; }\nconst X: int = y;\n"
+            "func main() { fin y = 1; }\nconst X: int = y;\n"
         ));
         // A forward reference (const declared later in the file).
         assert!(has(
@@ -3179,7 +3199,7 @@ mod tests {
         // A local binding wins over a const of the same name (documented
         // rule); the program is valid and no diagnostic fires.
         let diags = check_src(
-            "const X: int = 1;\nfunc main() { let X: int = 2; print(X); }\n",
+            "const X: int = 1;\nfunc main() { fin X: int = 2; print(X); }\n",
         );
         assert!(
             !diags.iter().any(|d| d.is_error()),
@@ -3191,7 +3211,7 @@ mod tests {
     #[test]
     fn qualified_const_read_checks_types() {
         let diags = check_two(
-            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.LIMIT; print(x); }",
+            "import \"lib.kin\" as l;\nfunc main() { fin x: int = l.LIMIT; print(x); }",
             "const LIMIT: int = 100;\nfunc f() { }\n",
         );
         assert!(
@@ -3201,7 +3221,7 @@ mod tests {
         );
         // Wrong type through the qualified read.
         let diags = check_two(
-            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.NAME; }",
+            "import \"lib.kin\" as l;\nfunc main() { fin x: int = l.NAME; }",
             "const NAME: string = \"kinn\";\nfunc f() { }\n",
         );
         assert!(diags.iter().any(|d| d.code == "E3003"), "{:?}", diags);
@@ -3211,13 +3231,13 @@ mod tests {
     fn qualified_read_of_unknown_member_is_rejected() {
         // Unknown const name.
         let diags = check_two(
-            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.NOPE; }",
+            "import \"lib.kin\" as l;\nfunc main() { fin x: int = l.NOPE; }",
             "const LIMIT: int = 1;\nfunc f() { }\n",
         );
         assert!(diags.iter().any(|d| d.code == "E3021"), "{:?}", diags);
         // Reading a function as a const tells the user to call it.
         let diags = check_two(
-            "import \"lib.kin\" as l;\nfunc main() { let x: int = l.f; }",
+            "import \"lib.kin\" as l;\nfunc main() { fin x: int = l.f; }",
             "const LIMIT: int = 1;\nfunc f() -> int { return 1; }\n",
         );
         let d = diags.iter().find(|d| d.code == "E3021").expect("E3021");
@@ -3234,7 +3254,7 @@ mod tests {
     #[test]
     fn qualified_read_of_unknown_module_is_rejected() {
         let diags = check_two(
-            "func main() { let x: int = nope.NOPE; }",
+            "func main() { fin x: int = nope.NOPE; }",
             "const LIMIT: int = 1;\nfunc f() { }\n",
         );
         assert!(diags.iter().any(|d| d.code == "E3020"), "{:?}", diags);

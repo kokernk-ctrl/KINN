@@ -22,8 +22,8 @@ func main() {
         print("not equal");
     }
 
-    let project = "kinn";
-    let shout: string = "KINN";
+    fin project = "kinn";
+    fin shout: string = "KINN";
     if project == "kinn" {
         print(shout);
     }

@@ -106,7 +106,7 @@ Verified structure (line counts from `wc -l`):
 **Language surface today.** A `.kin` file holds: a mode directive
 (`*mode = B;` first line), imports (`import "path.kin" as alias;`),
 functions, and at most one `website` declaration (entry file only).
-Statements: `let/var`, assignment (`=`, `+=`, `-=`), index assignment, `if`
+Statements: `fin/var` (`fin` = final value; renamed from `let`, ADR-0029), assignment (`=`, `+=`, `-=`), index assignment, `if`
 (no `else if` chains limit), `while` (break/continue), `for` (exclusive and
 inclusive ranges, arrays), `return`, blocks. Expressions: literals, arrays,
 indexing, calls (bare and qualified `m.f(...)`), casts (`as`), unary
@@ -136,7 +136,7 @@ explicitly *out of scope* for 0.4.0 (see Part E, D2).
 `divider`, `open`, `alt` are recognized by the parser only in
 grammar positions (`parser.rs:249, 313, 344–449`); the regression test
 `website_words_stay_identifiers_outside_the_declaration`
-(`parser.rs:1584–1592`) proves `let website = 1;` still compiles. The same
+(`parser.rs:1584–1592`, updated for the fin rename) proves `fin website = 1;` still compiles. The same
 recipe (enter grammar on `Ident(word)`, recover via sync-word lists —
 `recover_page_element`, `parser.rs:478–500`) is the template for all 0.4.0
 grammar.
@@ -390,7 +390,7 @@ computed remaining = len(items) - done_count      // a binding expression
   `state` is a `{ ... }` block. Both are mutable only from event
   handlers (B.6); view
   code only reads. Names are resolved in strict order — handler local
-  (`let/var`) → component state → shared state → otherwise E3043 — and a
+  (`fin/var`) → component state → shared state → otherwise E3043 — and a
   handler local shadowing a state name triggers W3041 so beginners see the
   shadow immediately.
 - **`computed`** declares a derived value: a pure binding expression over

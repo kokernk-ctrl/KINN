@@ -368,7 +368,7 @@ impl Lexer {
 fn keyword(word: &str) -> Option<TokKind> {
     Some(match word {
         "func" => TokKind::Func,
-        "let" => TokKind::Let,
+        "fin" => TokKind::Fin,
         "var" => TokKind::Var,
         "if" => TokKind::If,
         "else" => TokKind::Else,
@@ -410,11 +410,11 @@ mod tests {
 
     #[test]
     fn keywords_and_identifiers() {
-        let ks = kinds("func let var if else while return break continue and or not");
+        let ks = kinds("func fin var if else while return break continue and or not");
         assert_eq!(
             ks,
             vec![
-                TokKind::Func, TokKind::Let, TokKind::Var, TokKind::If, TokKind::Else,
+                TokKind::Func, TokKind::Fin, TokKind::Var, TokKind::If, TokKind::Else,
                 TokKind::While, TokKind::Return, TokKind::Break, TokKind::Continue,
                 TokKind::And, TokKind::Or, TokKind::Not, TokKind::Eof,
             ]
@@ -423,6 +423,26 @@ mod tests {
         assert_eq!(ks[0], TokKind::Ident("my_var".into()));
         assert_eq!(ks[1], TokKind::Ident("_x".into()));
         assert_eq!(ks[2], TokKind::Ident("x2".into()));
+    }
+
+    #[test]
+    fn let_lexes_as_an_identifier_after_the_fin_rename() {
+        // `let` was renamed to `fin` (ADR-0029): the word is no longer a
+        // keyword and lexes as a plain identifier — the parser turns a
+        // statement-position `let x ...` into the E2017 migration
+        // diagnostic instead.
+        let ks = kinds("let");
+        assert_eq!(ks[0], TokKind::Ident("let".into()));
+        let ks = kinds("let x;");
+        assert_eq!(
+            ks,
+            vec![
+                TokKind::Ident("let".into()),
+                TokKind::Ident("x".into()),
+                TokKind::Semi,
+                TokKind::Eof,
+            ]
+        );
     }
 
     #[test]
@@ -458,11 +478,11 @@ mod tests {
 
     #[test]
     fn comments_are_skipped() {
-        let ks = kinds("// line comment\nlet x; /* block\ncomment */ let y;");
+        let ks = kinds("// line comment\nfin x; /* block\ncomment */ fin y;");
         assert_eq!(
             ks,
-            vec![TokKind::Let, TokKind::Ident("x".into()), TokKind::Semi,
-                 TokKind::Let, TokKind::Ident("y".into()), TokKind::Semi, TokKind::Eof]
+            vec![TokKind::Fin, TokKind::Ident("x".into()), TokKind::Semi,
+                 TokKind::Fin, TokKind::Ident("y".into()), TokKind::Semi, TokKind::Eof]
         );
     }
 
@@ -482,12 +502,12 @@ mod tests {
     fn positions_track_lines() {
         let (_, diags) = tokenize("");
         assert!(diags.is_empty());
-        let (toks, _) = tokenize("let x;\nlet y;");
+        let (toks, _) = tokenize("fin x;\nfin y;");
         assert_eq!(toks[0].line, 1);
         assert_eq!(toks[0].col, 1);
-        let second_let = toks.iter().find(|t| t.line == 2).unwrap();
-        assert_eq!(second_let.col, 1);
-        assert_eq!(second_let.kind, TokKind::Let);
+        let second_fin = toks.iter().find(|t| t.line == 2).unwrap();
+        assert_eq!(second_fin.col, 1);
+        assert_eq!(second_fin.kind, TokKind::Fin);
     }
 
     #[test]
@@ -506,7 +526,7 @@ mod tests {
 
     #[test]
     fn invalid_characters_are_reported() {
-        let (_, diags) = tokenize("let $x;");
+        let (_, diags) = tokenize("fin $x;");
         assert!(diags.iter().any(|d| d.code == "E1001" && d.message.contains('$')));
         // `!` alone is invalid, with a helpful message.
         let (_, diags) = tokenize("a ! b");

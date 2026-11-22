@@ -641,11 +641,11 @@ class MainActivity : AppCompatActivity() {
             "}",
             "func main() { }",
             "import \"math.kin\" as math; // modules: math.add(1, 2)",
-            "let x = 1; var y = 2; y += 1;",
+            "fin x = 1; var y = 2; y += 1;",
             "if x > 0 { } else { }  while x < 3 { }",
             "for i in 0..10 { }  for i in 0..=9 { }  for item in arr { }",
-            "let a = [1, 2, 3]; a[0] = 5; print(len(a));",
-            "let f = 2 as float;  let s = 5 as string;",
+            "fin a = [1, 2, 3]; a[0] = 5; print(len(a));",
+            "fin f = 2 as float;  fin s = 5 as string;",
         ).forEach { termPrint(it) }
     }
 

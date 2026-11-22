@@ -20,21 +20,21 @@ func sum(xs: [int]) -> int {
 }
 
 func main() {
-    let a = [10, 20, 30];
+    fin a = [10, 20, 30];
     print(a[0] + a[2]);
     print(sum(a));
 
     // Nested arrays index with [][].
-    let m = [[1, 2], [3, 4]];
+    fin m = [[1, 2], [3, 4]];
     print(m[1][0]);
 
     // Element assignment is visible through every binding of the array.
-    let b = a;
+    fin b = a;
     b[0] = 99;
     print(a[0]);
 
     // Annotated empty array + len.
-    let empty: [int] = [];
+    fin empty: [int] = [];
     print(len(empty));
 
     // Deep structural equality.

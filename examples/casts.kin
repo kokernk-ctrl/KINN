@@ -14,7 +14,7 @@
 
 func main() {
     // int -> float keeps arithmetic types aligned.
-    let f = 2 as float;
+    fin f = 2 as float;
     print(f);
 
     // float -> int truncates toward zero.

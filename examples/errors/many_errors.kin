@@ -6,7 +6,7 @@
 *mode = S;
 
 func main() {
-    let x = ;
-    let y = ;
-    let z = ;
+    fin x = ;
+    fin y = ;
+    fin z = ;
 }

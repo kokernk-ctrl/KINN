@@ -10,7 +10,7 @@ export type TokKind =
   | 'string'
   | 'ident'
   | 'comment'
-  | 'func' | 'let' | 'var' | 'if' | 'else' | 'while' | 'for' | 'in' | 'return' | 'break' | 'continue'
+  | 'func' | 'fin' | 'var' | 'if' | 'else' | 'while' | 'for' | 'in' | 'return' | 'break' | 'continue'
   | 'true' | 'false' | 'and' | 'or' | 'not' | 'as' | 'import'
   | 'int-ty' | 'float-ty' | 'bool-ty' | 'string-ty' | 'void-ty'
   | '*' | '+' | '-' | '/' | '%' | '=' | '+=' | '-='
@@ -37,7 +37,7 @@ export interface LexError {
 }
 
 const KEYWORDS: Record<string, TokKind> = {
-  func: 'func', let: 'let', var: 'var', if: 'if', else: 'else',
+  func: 'func', fin: 'fin', var: 'var', if: 'if', else: 'else',
   while: 'while', for: 'for', in: 'in', return: 'return', break: 'break', continue: 'continue',
   true: 'true', false: 'false', and: 'and', or: 'or', not: 'not',
   as: 'as', import: 'import',

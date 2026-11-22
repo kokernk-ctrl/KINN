@@ -29,10 +29,16 @@ comment_blk  := '/*' ... '*/'                   ; non-nesting (E1006 if untermin
 Keywords (cannot be identifiers):
 
 ```
-func let var if else while return break continue
+func fin var if else while return break continue
 true false and or not
 int float bool string void
 ```
+
+`let` was renamed to `fin` in 0.4.0 (ADR-0029): `fin` declares a
+**final (immutable) value**; the word `let` is no longer a keyword and
+lexes as a plain identifier. A statement-position `let x = ...;`
+produces the E2017 migration diagnostic. (Historical note: `let` was
+the 0.1–0.3 spelling; see §C1a and ADR-0029.)
 
 Operators and punctuation:
 
@@ -56,7 +62,7 @@ block        := '{' stmt* '}'
 stmt         := var_decl | assign | if_stmt | while_stmt | return_stmt
               | 'break' ';' | 'continue' ';'
               | expr ';' | block
-var_decl     := ('let'|'var') IDENT (':' type)? '=' expr ';'
+var_decl     := ('fin'|'var') IDENT (':' type)? '=' expr ';'
 assign       := IDENT ('='|'+='|'-=') expr ';'
 if_stmt      := 'if' expr block ('else' (if_stmt | block))?
 while_stmt   := 'while' expr block
@@ -85,7 +91,9 @@ Notes:
 
 ### 4.1 Declarations
 
-- `let` binds immutably; `var` mutably. Reassigning a `let` is E3004.
+- `fin` binds immutably (`fin` = final value; 0.1–0.3 spelled this
+  `let`, renamed by ADR-0029); `var` mutably. Reassigning a `fin` is
+  E3004. A legacy `let x = ...;` is E2017 with the migration hint.
 - Types are inferred from the initializer when the annotation is
   absent; when present they must match exactly (E3003).
 - Redeclaration in the same scope is E3002. Inner blocks may shadow.
@@ -387,7 +395,7 @@ const_decl := 'const' IDENT ':' type '=' const_expr ';'
 - `const` is a **contextual keyword** (ADR-0019 recipe): at top level a
   `const` identifier always starts a const-declaration attempt (the
   only other top-level items are `import`, `func` and `website`);
-  everywhere else it remains an ordinary identifier, so `let const = 1;`
+  everywhere else it remains an ordinary identifier, so `fin const = 1;`
   and `func f(const: int)` keep compiling.
 - Constant expressions allow exactly: literals (int, float, bool,
   string), array literals of constant expressions, unary/binary
@@ -416,11 +424,41 @@ const_decl := 'const' IDENT ':' type '=' const_expr ';'
   under qualified names (no new KIR instructions), and `kinn kir`
   prints them.
 
+## C1a. The binding-keyword rename: `let` → `fin` (0.4.0, ADR-0029)
+
+**Owner design decision.** The local-binding keyword trio is now:
+
+- **`fin`** — an immutable local (a **final value**; `let`'s former
+  role). `fin x = 1;` — reassignment is E3004.
+- **`var`** — a mutable local (unchanged).
+- **`const`** — a top-level compile-time constant (C1, unchanged).
+
+Semantics are unchanged: only the keyword changes. The rename is
+**intentionally breaking for `let`-sources**: the word `let` is no
+longer a keyword and lexes as a plain identifier, and a
+statement-position `let x = ...;` (the legacy declaration shape:
+`let` immediately followed by an identifier) produces **E2017**,
+a positioned migration diagnostic — "`let` was renamed to `fin`;
+use `fin`" — after which the parser continues parsing the
+declaration as `fin`, so every legacy use reports exactly once and
+the rest of the program parses normally. Handler bodies (B.6) are
+covered by the same rule (they use the ordinary statement parser).
+Outside the declaration pattern, `let` is a legal identifier
+(`fin let = 1;` compiles), mirroring the ADR-0019 contextual-word
+gates. This supersedes the A2 backwards-compatibility clause **for
+this keyword only** (ADR-0029).
+
+Token/AST surface: the token kind prints as `FIN` in `kinn tokens`;
+`kinn ast` prints `fin x = 1;`. Codegen, KIR and the VM are
+untouched — output-based goldens (0.3 web dist, DEB stdout) are
+byte-identical across the rename.
+
 ## C2. New diagnostic codes (complete for 0.4 additions so far)
 
 | Code | Stage | Meaning |
 | --- | --- | --- |
 | E3039 | checker | invalid constant expression (non-constant construct, or constant arithmetic overflow/division by zero) |
+| E2017 | parser | `let` was renamed to `fin` (ADR-0029): a statement-position `let` followed by an identifier — the legacy local-declaration shape — is the migration diagnostic; the declaration then parses as `fin`. The word `let` stays a legal identifier elsewhere |
 | E2031 | parser | unknown event name in `on` (supported: click, input, change, submit, focus, blur, key, keydown, keyup, pointerdown, pointerup) |
 | E2032 | parser | malformed `each`/`when`/component instantiation syntax (missing `as`, positional prop args, missing `(`) |
 | E2033 | parser | a view argument must be a string or an expression (the next token cannot start one) |
@@ -446,7 +484,11 @@ presence rules and E3042/E3055–E3057/E3062 the declaration-validation
 rules — both frozen by the S2/S3 checker test suites (the remaining
 semantic layer E3040–E3079 / W3040–W3049 arrives with the later S3
 slices). E3039 sits outside those reserved ranges and is fully owned
-by `const` (S1).
+by `const` (S1). E2017 likewise sits outside the app-grammar span
+(E2017 was free: 0.1/0.2 took E2001–E2015 and E2099, 0.3 took E2016
+and E2030, the app grammar E2031–E2039) and is fully owned by the
+`let`→`fin` rename (ADR-0029), frozen by its parser/lexer/CLI test
+suite.
 
 S3 slice 1 rulings (B.11 authorizes implementation-time wording;
 codes and meanings are frozen, tests pin the wording):

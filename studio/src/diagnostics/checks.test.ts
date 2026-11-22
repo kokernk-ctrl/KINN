@@ -14,7 +14,7 @@ describe('editor quick checks', () => {
   });
 
   it('flags unterminated strings', () => {
-    const problems = quickCheck('func main() {\n    let s = "oops;\n}\n');
+    const problems = quickCheck('func main() {\n    fin s = "oops;\n}\n');
     expect(problems.some((p) => p.code === 'E1002')).toBe(true);
   });
 
@@ -47,7 +47,7 @@ describe('editor quick checks', () => {
 
   it('does not confuse multiplication with the mode directive', () => {
     // The `*` in `6 * 7` is multiplication, not a directive.
-    const src = '*mode = B;\nfunc main() { let answer = 6 * 7; print(answer); }\n';
+    const src = '*mode = B;\nfunc main() { fin answer = 6 * 7; print(answer); }\n';
     expect(quickCheck(src)).toEqual([]);
   });
 
@@ -57,7 +57,7 @@ describe('editor quick checks', () => {
   });
 
   it('sorts problems by line', () => {
-    const problems = quickCheck('func f() {\n  let s = "x\n}\n}\n');
+    const problems = quickCheck('func f() {\n  fin s = "x\n}\n}\n');
     expect(problems.length).toBeGreaterThan(0);
     const lines = problems.map((p) => p.line);
     expect([...lines].sort((a, b) => a - b)).toEqual(lines);

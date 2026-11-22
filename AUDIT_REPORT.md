@@ -41,7 +41,7 @@ test still passes untouched.
 ### Website module — verified (new in 0.3)
 
 - **Parser**: contextual keywords (`website`, `page`, element words)
-  parsed in their positions only; `let website = 1;` etc. still
+  parsed in their positions only; `fin website = 1;` etc. still
   compile (dedicated test). E2016 (non-string site name), E2030
   (unknown element), missing-`open` rejection with hint, image-alt
   parse requirement, element-level error recovery (one error, later

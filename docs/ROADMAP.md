@@ -87,6 +87,15 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       grammar normative in LANGUAGE_SPEC §C3; S2 review pass landed:
       B.0 gate completed to 79 words, E2002 `as`-cast hint, B.4
       errata recorded in CHANGELOG)
+- [x] **Owner decision (2026-11-23, ADR-0029): the binding keyword
+      `let` was renamed to `fin`** (fin = final value; `var`/`const`
+      unchanged). **Intentionally breaking for `let`-sources — no
+      backward compatibility is claimed for this keyword**; the
+      E2017 migration diagnostic ("`let` was renamed to `fin`; use
+      `fin`") is the bridge. Semantics, codegen and all output-based
+      goldens unchanged (0.3 web dist byte-identical). Whole repo
+      migrated: examples, tests, docs, Studio web + Android
+      (highlighting, cheat sheets, samples).
 - [ ] S3 App semantics: checker rules E3040–E3070, W3040–W3044
       (E3051/E3052 presence rules already landed with S2; E3062
       empty-app-name rule assigned to S3 — S2 review finding, F-015).

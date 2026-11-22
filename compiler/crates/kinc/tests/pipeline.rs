@@ -111,7 +111,7 @@ fn recursion_fibonacci_15() {
 fn short_circuit_evaluation_avoids_division_by_zero() {
     // If `and` were eager, `100 / x` would divide by zero.
     let src = "func main() {\n    \
-               let x = 0;\n    \
+               fin x = 0;\n    \
                if x != 0 and 100 / x > 1 { print(\"unreachable\"); }\n    \
                print(\"safe\");\n\
                }\n";
@@ -121,8 +121,8 @@ fn short_circuit_evaluation_avoids_division_by_zero() {
 #[test]
 fn scoping_and_shadowing() {
     let src = "func main() {\n    \
-               let x = 1;\n    \
-               {\n        let x = 2.5;\n        print(x);\n    }\n    \
+               fin x = 1;\n    \
+               {\n        fin x = 2.5;\n        print(x);\n    }\n    \
                print(x);\n\
                }\n";
     assert_eq!(run_src(src), "2.5\n1\n");
@@ -138,7 +138,7 @@ fn nested_calls_and_multiple_arguments() {
 #[test]
 fn string_concat_and_equality() {
     let src = "func main() {\n    \
-               let s = \"KIN\" + \"N\";\n    \
+               fin s = \"KIN\" + \"N\";\n    \
                print(s);\n    \
                if s == \"KINN\" { print(\"match\"); }\n\
                }\n";
@@ -147,7 +147,7 @@ fn string_concat_and_equality() {
 
 #[test]
 fn runtime_division_by_zero_reports_line() {
-    let src = "func main() {\n    let a = 1;\n    let b = 0;\n    print(a / b);\n}\n";
+    let src = "func main() {\n    fin a = 1;\n    fin b = 0;\n    print(a / b);\n}\n";
     let c = driver::compile(src).expect("compiles");
     let mut buf = Vec::new();
     let err = vm::run(&c.module, &mut buf).expect_err("must fail at runtime");
@@ -183,7 +183,7 @@ fn while_true_divergence_compiles_and_runs() {
 #[test]
 fn slots_are_reused_after_scope_exit() {
     // P-003: three sequential one-variable scopes must share one slot.
-    let src = "func main() {\n    { let a = 1; print(a); }\n    { let b = 2; print(b); }\n    { let c = 3; print(c); }\n}";
+    let src = "func main() {\n    { fin a = 1; print(a); }\n    { fin b = 2; print(b); }\n    { fin c = 3; print(c); }\n}";
     let c = driver::compile(src).expect("compiles");
     let main = &c.module.funcs[c.module.find("main").unwrap()];
     assert_eq!(main.nlocals, 1, "expected slot reuse, got {} locals", main.nlocals);
@@ -215,13 +215,13 @@ fn for_break_exits_the_loop() {
 
 #[test]
 fn arrays_end_to_end() {
-    let src = "func main() {\n    let a = [1, 2];\n    let b = a;\n    b[0] = 9;\n    print(a[0]);\n    if a == [9, 2] { print(true); }\n    print(len(a) + len(\"ab\"));\n}";
+    let src = "func main() {\n    fin a = [1, 2];\n    fin b = a;\n    b[0] = 9;\n    print(a[0]);\n    if a == [9, 2] { print(true); }\n    print(len(a) + len(\"ab\"));\n}";
     assert_eq!(run_src(src), "9\ntrue\n4\n");
 }
 
 #[test]
 fn array_bounds_errors_carry_the_line() {
-    let src = "func main() {\n    let a = [1];\n    print(a[3]);\n}";
+    let src = "func main() {\n    fin a = [1];\n    print(a[3]);\n}";
     let c = driver::compile(src).expect("compiles");
     let mut buf = Vec::new();
     let err = vm::run(&c.module, &mut buf).expect_err("must fail");
@@ -231,7 +231,7 @@ fn array_bounds_errors_carry_the_line() {
 
 #[test]
 fn arrays_pass_through_functions_by_reference() {
-    let src = "func fill(xs: [int], v: int) { xs[0] = v; }\nfunc main() { let a = [0, 0]; fill(a, 7); print(a[0]); }";
+    let src = "func fill(xs: [int], v: int) { xs[0] = v; }\nfunc main() { fin a = [0, 0]; fill(a, 7); print(a[0]); }";
     assert_eq!(run_src(src), "7\n");
 }
 
@@ -274,7 +274,7 @@ fn modules_link_and_run() {
 
 #[test]
 fn multiple_syntax_errors_are_reported_through_the_driver() {
-    let src = "func main() {\n    let x = ;\n    let y = ;\n}\n";
+    let src = "func main() {\n    fin x = ;\n    fin y = ;\n}\n";
     let diags = driver::compile(src).expect_err("must fail");
     let errs: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
     assert_eq!(errs.len(), 2, "{:#?}", diags);
@@ -349,7 +349,7 @@ fn const_array_is_one_shared_object_adr0014() {
     // any binding are visible through every binding — including the const
     // itself. Scalars stay immutable (E3004), contents are mutable.
     let m = run_two(
-        "const A: [int] = [1, 2];\nfunc main() { let x = A; x[0] = 9; print(A[0]); print(A); }\n",
+        "const A: [int] = [1, 2];\nfunc main() { fin x = A; x[0] = 9; print(A[0]); print(A); }\n",
         LIMIT_LIB,
     );
     let mut buf = Vec::new();

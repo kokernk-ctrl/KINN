@@ -23,9 +23,9 @@ quietly instead of piling on.
 Declaration-site inference only, from the initializer:
 
 ```kin
-let x = 1;              // int
-let y = 1.0;            // float
-let z: float = 2.0;     // annotated, must match (E3003 otherwise)
+fin x = 1;              // int
+fin y = 1.0;            // float
+fin z: float = 2.0;     // annotated, must match (E3003 otherwise)
 var flags = true;       // bool
 ```
 
@@ -55,7 +55,7 @@ planned for 0.2 and will be the only way to convert.
 - Blocks `{ ... }` introduce scopes; inner declarations may shadow
   outer ones with any type.
 - Redeclaring in the *same* scope is `E3002`.
-- `let` bindings are immutable; reassignment is `E3004` with an N3002
+- `fin` bindings are immutable (`fin` = final value; the 0.1–0.3 keyword was `let`, renamed by ADR-0029); reassignment is `E3004` with an N3002
   note pointing at the declaration.
 - Function signatures are collected before bodies are checked, so
   forward calls work; duplicate functions are `E3002`.

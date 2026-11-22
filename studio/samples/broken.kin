@@ -4,5 +4,5 @@
 *mode = B;
 
 func main() {
-    let greeting = "Hello, Kin!;
+    fin greeting = "Hello, Kin!;
     print(greeting);

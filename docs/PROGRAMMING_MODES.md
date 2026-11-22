@@ -30,7 +30,7 @@ program valid in B is valid unchanged in S and A.
 
 | Behavior | B | S | A |
 | --- | --- | --- | --- |
-| Extra lint: `var` never reassigned → note N3001 suggesting `let` | yes | no | no |
+| Extra lint: `var` never reassigned → note N3001 suggesting `fin` | yes | no | no |
 | `note`-severity diagnostics (e.g. "declared here" N3002) shown | yes | yes | **hidden** (terse output) |
 | Error/warning rendering identical | yes | yes | yes |
 

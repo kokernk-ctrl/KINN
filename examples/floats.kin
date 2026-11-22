@@ -16,10 +16,10 @@ func scaled_area(r: float) -> float {
 func main() {
     print(scaled_area(2.5));
 
-    let half: float = 1.0 / 2.0;
+    fin half: float = 1.0 / 2.0;
     print(half);
 
-    let whole: float = 2.0;
+    fin whole: float = 2.0;
     print(whole);
 
     print(1.5 + 1.75);

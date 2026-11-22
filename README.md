@@ -17,7 +17,7 @@ WebAssembly) and as an Android app with on-device compilation.
 import "math.kin" as math;
 
 func main() {
-    let a = [10, 20, 30];
+    fin a = [10, 20, 30];
     for x in a {
         print(math.square(x));
     }

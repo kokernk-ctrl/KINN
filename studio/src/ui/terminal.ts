@@ -337,7 +337,7 @@ func main() { }               // program entry (void, no params)
 func add(a: int, b: int) -> int { return a + b; }
 import "math.kin" as math;    // modules: qualified calls math.add(1, 2)
 
-let x = 1;                    // immutable, type inferred
+fin x = 1;                    // immutable, type inferred
 var count = 0;                // mutable
 count += 1;                   // += and -=
 
@@ -347,13 +347,13 @@ for i in 0..10 { }            // exclusive range
 for i in 0..=9 { }            // inclusive range
 for item in my_array { }      // array elements
 
-let a = [1, 2, 3];            // arrays (reference semantics, deep ==)
-let m = [[1], [2]];           // nested arrays
+fin a = [1, 2, 3];            // arrays (reference semantics, deep ==)
+fin m = [[1], [2]];           // nested arrays
 a[0] = 5;                     // element assignment
-let empty: [int] = [];        // empty array needs its type
+fin empty: [int] = [];        // empty array needs its type
 
-let f = 2 as float;           // casts: int<->float, ->string
-let s = 5 as string;
+fin f = 2 as float;           // casts: int<->float, ->string
+fin s = 5 as string;
 
 print(len(a) + abs(-3) + min(1, 2) + max(1.5, 2.5));
 

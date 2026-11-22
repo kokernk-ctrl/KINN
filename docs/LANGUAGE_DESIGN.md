@@ -12,7 +12,7 @@ in [LANGUAGE_SPEC_0.1.md](LANGUAGE_SPEC_0.1.md); this is the *why*.
    sees, and errors point at real positions.
 2. **Readable keywords over symbol soup.** Boolean logic reads
    `and`, `or`, `not`. Mutable declarations say `var`; immutable ones
-   say `let`. `func` introduces functions. A beginner can pronounce
+   say `fin`. `func` introduces functions. A beginner can pronounce
    every construct in the language.
 3. **No hidden conversions.** `1 + 0.5` is a type error (E3011), not a
    silent promotion. Mixing `int` and `float` forces the writer to

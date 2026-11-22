@@ -3,10 +3,16 @@ import { lex } from './lexer';
 
 describe('studio lexer', () => {
   it('tokenizes keywords, types and identifiers', () => {
-    const { tokens, errors } = lex('func let var if while int float string');
+    const { tokens, errors } = lex('func fin var if while int float string');
     expect(errors).toEqual([]);
     const kinds = tokens.map((t) => t.kind);
-    expect(kinds).toEqual(['func', 'let', 'var', 'if', 'while', 'int-ty', 'float-ty', 'string-ty', 'eof']);
+    expect(kinds).toEqual(['func', 'fin', 'var', 'if', 'while', 'int-ty', 'float-ty', 'string-ty', 'eof']);
+    // ADR-0029: `let` is no longer a keyword — it lexes as an identifier
+    // (the compiler reports the E2017 migration on the declaration
+    // pattern; the Studio lexer mirrors the token stream).
+    const legacy = lex('let x;');
+    expect(legacy.tokens[0].kind).toBe('ident');
+    expect(legacy.tokens[0].text).toBe('let');
   });
 
   it('classifies numbers as int or float', () => {
@@ -16,15 +22,15 @@ describe('studio lexer', () => {
   });
 
   it('keeps comments as tokens (needed by the highlighter)', () => {
-    const { tokens } = lex('// line\nlet x; /* block */');
+    const { tokens } = lex('// line\nfin x; /* block */');
     const comments = tokens.filter((t) => t.kind === 'comment');
     expect(comments.map((c) => c.text)).toEqual(['// line', '/* block */']);
   });
 
   it('tracks line and column positions', () => {
-    const { tokens } = lex('let x;\nlet y;');
-    const secondLet = tokens.find((t) => t.kind === 'let' && t.line === 2);
-    expect(secondLet?.col).toBe(1);
+    const { tokens } = lex('fin x;\nfin y;');
+    const secondFin = tokens.find((t) => t.kind === 'fin' && t.line === 2);
+    expect(secondFin?.col).toBe(1);
   });
 
   it('rejects unterminated strings with E1002', () => {
@@ -38,7 +44,7 @@ describe('studio lexer', () => {
   });
 
   it('rejects invalid characters with E1001', () => {
-    const { errors } = lex('let $x;');
+    const { errors } = lex('fin $x;');
     expect(errors.some((e) => e.code === 'E1001' && e.message.includes('$'))).toBe(true);
   });
 

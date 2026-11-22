@@ -1273,7 +1273,7 @@ fn dump_stmt(s: &mut String, st: &Stmt, depth: usize) {
     let ind = "  ".repeat(depth);
     match st {
         Stmt::VarDecl { mutable, name, ty, init, .. } => {
-            let kw = if *mutable { "var" } else { "let" };
+            let kw = if *mutable { "var" } else { "fin" };
             let ty = ty.as_ref().map(|t| format!(": {}", t.as_str())).unwrap_or_default();
             s.push_str(&format!("{}{} {}{} = {}\n", ind, kw, name, ty, expr_str(init)));
         }

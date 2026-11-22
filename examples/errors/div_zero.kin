@@ -7,7 +7,7 @@
 *mode = S;
 
 func main() {
-    let x = 10;
-    let y = 0;
+    fin x = 10;
+    fin y = 0;
     print(x / y);
 }

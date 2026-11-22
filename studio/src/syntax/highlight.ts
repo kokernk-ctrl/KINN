@@ -13,7 +13,7 @@ export interface Seg {
 }
 
 const CLASS_FOR: Partial<Record<TokKind, string>> = {
-  func: 'kw', let: 'kw', var: 'kw', if: 'kw', else: 'kw', while: 'kw',
+  func: 'kw', fin: 'kw', var: 'kw', if: 'kw', else: 'kw', while: 'kw',
   for: 'kw', in: 'kw', as: 'kw', import: 'kw',
   return: 'kw', break: 'kw', continue: 'kw', and: 'kw', or: 'kw', not: 'kw',
   'int-ty': 'ty', 'float-ty': 'ty', 'bool-ty': 'ty', 'string-ty': 'ty', 'void-ty': 'ty',

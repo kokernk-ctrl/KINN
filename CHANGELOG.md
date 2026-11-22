@@ -11,6 +11,38 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Changed — BREAKING: binding keyword `let` renamed to `fin` (ADR-0029)
+
+- Language: **the immutable local-binding keyword is now `fin`**
+  (a final value); `var` (mutable) and `const` (top-level
+  compile-time constant) are unchanged. Semantics are identical to
+  `let`'s — only the keyword changes. **This is intentionally
+  breaking for `let`-sources: there is no backward compatibility for
+  the `let` keyword** beyond the migration diagnostic below; ADR-0029
+  supersedes the A2 source-compatibility clause for this keyword
+  only (everything else — including 0.3 `website` programs and their
+  byte-identical web dist — keeps compiling unchanged).
+- Migration: the word `let` is no longer a keyword; a
+  statement-position `let x = ...;` produces the new **E2017**,
+  "`let` was renamed to `fin`; use `fin`" — positioned on the `let`,
+  after which the declaration parses as `fin`, so every legacy use
+  reports exactly once with no error cascade. Outside the declaration
+  pattern `let` remains a legal identifier (`fin let = 1;` compiles).
+  Handler bodies are covered (B.6: ordinary statement parser).
+- Surface: `kinn tokens` prints `FIN`; `kinn ast` prints
+  `fin x = 1;`; E3004 now says "(declared with `fin`)"; the B-mode
+  lint N3001 suggests `fin`; the E3022 example shows `fin a: [int]
+  = [];`. Codegen/KIR/VM untouched — the 0.3 web dist and DEB stdout
+  goldens are byte-identical (rebuilt and diffed).
+- E2017 was the first free parser code (E2001–E2015/E2099 = 0.1/0.2,
+  E2016/E2030 = 0.3, E2031–E2039 = app grammar); registered in
+  LANGUAGE_SPEC §C2 + §C1a and frozen by tests.
+- Repo migrated: all `.kin` examples, every compiler test source,
+  Studio web (syntax highlighting, cheat sheet, samples, quick-check
+  tests, real-wasm tests), Studio Android (highlighting keyword table,
+  cheat sheet). Error corpus gains `examples/errors/legacy_let.kin`
+  (`// error: E2017`). Tests: +10 (workspace 370 → 380, all green).
+
 ### Added — S3 slice 2: app page targets resolved, page/component name rules (P-029)
 
 - Language: **app page targets are resolved now**. New checker codes

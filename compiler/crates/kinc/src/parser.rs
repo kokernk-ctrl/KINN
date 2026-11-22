@@ -210,7 +210,7 @@ impl Parser {
                 TokKind::RBrace
                 | TokKind::Func
                 | TokKind::Import
-                | TokKind::Let
+                | TokKind::Fin
                 | TokKind::Var
                 | TokKind::If
                 | TokKind::While
@@ -220,6 +220,13 @@ impl Parser {
                 | TokKind::Continue
                 | TokKind::LBrace => return,
                 _ => {
+                    // A legacy `let x ...` declaration (ADR-0029) is also a
+                    // statement start: stop here so `stmt()` reports the
+                    // E2017 migration diagnostic instead of swallowing the
+                    // declaration during recovery.
+                    if self.at_legacy_let() {
+                        return;
+                    }
                     self.bump();
                 }
             }
@@ -2520,10 +2527,35 @@ impl Parser {
         }
     }
 
+    /// True when the cursor sits on a legacy `let` declaration
+    /// (`let` immediately followed by an identifier) — the pre-0.4
+    /// spelling of `fin` (ADR-0029). The word `let` itself is a plain
+    /// identifier everywhere else.
+    fn at_legacy_let(&self) -> bool {
+        matches!(self.peek(), TokKind::Ident(w) if w == "let")
+            && matches!(self.peek2_kind(), TokKind::Ident(_))
+    }
+
     fn stmt(&mut self) -> PResult<Stmt> {
         let t = self.peek_token().clone();
         match &t.kind {
-            TokKind::Let | TokKind::Var => self.var_decl(),
+            TokKind::Fin | TokKind::Var => self.var_decl(),
+            // Legacy `let x = ...;` — `let` was renamed to `fin`
+            // (ADR-0029). Report the migration diagnostic positioned on
+            // the `let`, then keep parsing the declaration as `fin` so
+            // the rest of the program checks normally (one diagnostic
+            // per legacy use, no error cascade).
+            TokKind::Ident(w) if w == "let" && matches!(self.peek2_kind(), TokKind::Ident(_)) => {
+                let kw = self.bump(); // the `let` identifier
+                self.fail(
+                    "E2017",
+                    "`let` was renamed to `fin`; use `fin`",
+                    kw.line,
+                    kw.col,
+                    3,
+                );
+                self.var_decl_rest(kw.line, kw.col, false)
+            }
             TokKind::If => self.if_stmt(),
             TokKind::While => {
                 self.bump();
@@ -2643,8 +2675,15 @@ impl Parser {
     }
 
     fn var_decl(&mut self) -> PResult<Stmt> {
-        let kw = self.bump(); // Let or Var
+        let kw = self.bump(); // Fin or Var
         let mutable = kw.kind == TokKind::Var;
+        self.var_decl_rest(kw.line, kw.col, mutable)
+    }
+
+    /// The body of a `fin`/`var` declaration after the keyword (and,
+    /// for legacy sources, after the E2017 migration diagnostic consumed
+    /// the `let`).
+    fn var_decl_rest(&mut self, line: u32, col: u32, mutable: bool) -> PResult<Stmt> {
         let name_tok = self.expect_ident()?;
         let name = match name_tok.kind {
             TokKind::Ident(n) => n,
@@ -2664,8 +2703,8 @@ impl Parser {
             name,
             ty,
             init,
-            line: kw.line,
-            col: kw.col,
+            line,
+            col,
         })
     }
 
@@ -3136,13 +3175,13 @@ mod tests {
 
     #[test]
     fn missing_semicolon_is_an_error() {
-        let diags = parse_err("func main() { let x = 1 print(x); }");
+        let diags = parse_err("func main() { fin x = 1 print(x); }");
         assert!(diags.iter().any(|d| d.code == "E2002" && d.message.contains(';')));
     }
 
     #[test]
     fn missing_brace_is_an_error() {
-        let diags = parse_err("func main() { let x = 1;");
+        let diags = parse_err("func main() { fin x = 1;");
         assert!(!diags.is_empty());
     }
 
@@ -3154,13 +3193,88 @@ mod tests {
 
     #[test]
     fn unknown_type_is_rejected() {
-        let diags = parse_err("func main() { let x: number = 1; }");
+        let diags = parse_err("func main() { fin x: number = 1; }");
         assert!(diags.iter().any(|d| d.code == "E2003"));
+    }
+
+    // -- 0.4.0: the let -> fin rename (ADR-0029) -----------------------------
+
+    #[test]
+    fn fin_declares_an_immutable_binding() {
+        // `fin` (final value) is the immutable declaration keyword;
+        // `var` stays mutable. Semantics are unchanged from `let`.
+        let p = parse_ok("func main() { fin x = 1; var y = 2; fin z: float = 0.5; }");
+        match &p.funcs[0].body.stmts[..] {
+            [Stmt::VarDecl { mutable: false, name, ty: None, line, col, .. },
+             Stmt::VarDecl { mutable: true, .. },
+             Stmt::VarDecl { mutable: false, ty: Some(_), .. }] => {
+                assert_eq!(name, "x");
+                assert_eq!((*line, *col), (1, 15));
+            }
+            s => panic!("unexpected stmts: {:?}", s),
+        }
+    }
+
+    #[test]
+    fn legacy_let_yields_the_migration_diagnostic() {
+        let diags = parse_err("func main() {\n    let x = 1;\n    print(x);\n}");
+        assert_eq!(diags.len(), 1, "no error cascade: {:?}", diags);
+        let d = &diags[0];
+        assert_eq!(d.code, "E2017");
+        assert_eq!(d.message, "`let` was renamed to `fin`; use `fin`");
+        assert_eq!((d.line, d.col), (2, 5));
+        assert_eq!(d.len, 3);
+    }
+
+    #[test]
+    fn legacy_let_parses_on_so_every_use_reports_once() {
+        // The declaration is still parsed (as `fin`) after the E2017, so
+        // two legacy declarations produce exactly two migration
+        // diagnostics — not a cascade of follow-up syntax errors.
+        let diags = parse_err("func main() { let a = 1; let b = a + 1; print(b); }");
+        assert_eq!(diags.len(), 2, "{:?}", diags);
+        assert!(diags.iter().all(|d| d.code == "E2017"));
+    }
+
+    #[test]
+    fn let_stays_an_identifier_outside_the_declaration_position() {
+        // ADR-0029: `let` is no longer a keyword. Outside the legacy
+        // declaration pattern (statement-start `let` + identifier) the
+        // word is a plain identifier, mirroring the contextual-word
+        // gates (ADR-0019).
+        let p = parse_ok("func main() { fin let = 1; fin y = let + 1; print(y); print(let); }");
+        assert_eq!(p.funcs[0].body.stmts.len(), 4);
+        parse_ok("func let(let: int) -> int { return let; }\nfunc main() { print(let(2)); }\n");
+        // `let` followed by `=` is an assignment to a variable named
+        // `let`, not the legacy declaration pattern.
+        parse_ok("func main() { fin let = 1; let = 2; print(let); }");
+    }
+
+    #[test]
+    fn legacy_let_in_handler_bodies_reports_the_migration_too() {
+        // Handler bodies are official Kin statements (B.6) parsed by the
+        // ordinary statement parser, so the E2017 gate covers them.
+        let diags = parse_err(
+            "app \"D\" { page Home { button \"B\" { on click { let x = 1; } } } }",
+        );
+        assert_eq!(diags.len(), 1, "{:?}", diags);
+        assert_eq!(diags[0].code, "E2017");
+    }
+
+    #[test]
+    fn legacy_let_with_a_bad_name_is_not_the_migration_pattern() {
+        // `fin 1 = 2;` (a bad declaration name) keeps the generic
+        // expected-identifier error; `let 1 = 2;` never compiled under
+        // any Kin version, so it gets the plain syntax error.
+        let diags = parse_err("func main() { fin 1 = 2; }");
+        assert!(diags.iter().any(|d| d.code == "E2002"));
+        let diags = parse_err("func main() { let 1 = 2; }");
+        assert!(diags.iter().all(|d| d.code != "E2017"), "{:?}", diags);
     }
 
     #[test]
     fn bare_blocks_are_statements() {
-        let p = parse_ok("func main() { let x = 1; { let y = 2; print(y); } print(x); }");
+        let p = parse_ok("func main() { fin x = 1; { fin y = 2; print(y); } print(x); }");
         assert_eq!(p.funcs[0].body.stmts.len(), 3);
         assert!(matches!(&p.funcs[0].body.stmts[1], Stmt::Block { .. }));
     }
@@ -3179,7 +3293,7 @@ mod tests {
 
     #[test]
     fn parses_array_literals_and_indexing() {
-        let p = parse_ok("func main() { let a = [1, 2, 3]; print(a[0] + a[2]); }");
+        let p = parse_ok("func main() { fin a = [1, 2, 3]; print(a[0] + a[2]); }");
         match &p.funcs[0].body.stmts[0] {
             Stmt::VarDecl { init, .. } => {
                 assert!(matches!(&init.kind, ExprKind::ArrayLit(items) if items.len() == 3));
@@ -3199,7 +3313,7 @@ mod tests {
 
     #[test]
     fn parses_empty_array_literal() {
-        let p = parse_ok("func main() { let a: [int] = []; }");
+        let p = parse_ok("func main() { fin a: [int] = []; }");
         match &p.funcs[0].body.stmts[0] {
             Stmt::VarDecl { init, .. } => {
                 assert!(matches!(&init.kind, ExprKind::ArrayLit(items) if items.is_empty()));
@@ -3210,7 +3324,7 @@ mod tests {
 
     #[test]
     fn parses_nested_indexing_and_index_assignment() {
-        let p = parse_ok("func main() { let m = [[1]]; print(m[0][0]); m[0][0] = 5; }");
+        let p = parse_ok("func main() { fin m = [[1]]; print(m[0][0]); m[0][0] = 5; }");
         let stmts = &p.funcs[0].body.stmts;
         match &stmts[2] {
             Stmt::IndexAssign { .. } => {}
@@ -3220,7 +3334,7 @@ mod tests {
 
     #[test]
     fn compound_index_assignment_is_rejected() {
-        let diags = parse_err("func main() { let a = [1]; a[0] += 1; }");
+        let diags = parse_err("func main() { fin a = [1]; a[0] += 1; }");
         assert!(diags.iter().any(|d| d.code == "E2014"));
     }
 
@@ -3250,7 +3364,7 @@ mod tests {
 
     #[test]
     fn parses_for_over_array() {
-        let p = parse_ok("func main() { let xs = [1, 2]; for x in xs { print(x); } }");
+        let p = parse_ok("func main() { fin xs = [1, 2]; for x in xs { print(x); } }");
         match &p.funcs[0].body.stmts[1] {
             Stmt::For { var, iter, .. } => {
                 assert_eq!(var, "x");
@@ -3262,7 +3376,7 @@ mod tests {
 
     #[test]
     fn parses_casts() {
-        let p = parse_ok("func main() { let f = 2 as float; let s = 3 as string; }");
+        let p = parse_ok("func main() { fin f = 2 as float; fin s = 3 as string; }");
         match &p.funcs[0].body.stmts[0] {
             Stmt::VarDecl { init, .. } => {
                 assert!(matches!(&init.kind, ExprKind::Cast { ty: Type::Float, .. }));
@@ -3335,7 +3449,7 @@ mod tests {
     #[test]
     fn multiple_syntax_errors_are_all_reported() {
         let diags = parse_err(
-            "func main() {\n    let x = ;\n    let y = ;\n    let z = ;\n}\n",
+            "func main() {\n    fin x = ;\n    fin y = ;\n    fin z = ;\n}\n",
         );
         let errs = diags.iter().filter(|d| d.is_error()).count();
         assert_eq!(errs, 3, "expected 3 separate diagnostics, got: {:#?}", diags);
@@ -3349,7 +3463,7 @@ mod tests {
         // One broken statement; the rest must parse fine and produce
         // exactly one diagnostic.
         let diags = parse_err(
-            "func main() {\n    let x = ;\n    let y = 2;\n    print(y);\n}\n",
+            "func main() {\n    fin x = ;\n    fin y = 2;\n    print(y);\n}\n",
         );
         assert_eq!(diags.len(), 1, "expected exactly one diagnostic, got: {:#?}", diags);
     }
@@ -3362,7 +3476,7 @@ mod tests {
 
     #[test]
     fn unclosed_block_before_next_func_is_reported_cleanly() {
-        let diags = parse_err("func a() {\n    let x = 1;\nfunc main() { }");
+        let diags = parse_err("func a() {\n    fin x = 1;\nfunc main() { }");
         assert!(diags.iter().any(|d| d.message.contains("}")));
         // The second function header itself is not the error.
         assert!(!diags.iter().any(|d| d.message.contains("expected `func`")));
@@ -3372,7 +3486,7 @@ mod tests {
     fn error_cap_kicks_in() {
         let mut src = String::from("func main() {\n");
         for _ in 0..40 {
-            src.push_str("    let x = ;\n");
+            src.push_str("    fin x = ;\n");
         }
         src.push_str("}\n");
         let diags = parse_err(&src);
@@ -3383,7 +3497,7 @@ mod tests {
     #[test]
     fn semicolon_sync_recovers_within_one_line() {
         // Two errors on different statements; second is still reported.
-        let diags = parse_err("func main() { let 1 = 2; let 3 = 4; }");
+        let diags = parse_err("func main() { fin 1 = 2; fin 3 = 4; }");
         assert!(diags.iter().filter(|d| d.is_error()).count() >= 2);
     }
 
@@ -3425,7 +3539,7 @@ mod tests {
         // Backwards compatibility: `website`/`page`/`button` as ordinary
         // names keep compiling (ADR-0019).
         let p = parse_website(
-            "func main() {\n    let website = 1;\n    let page = website + 1;\n    print(page);\n}\n",
+            "func main() {\n    fin website = 1;\n    fin page = website + 1;\n    print(page);\n}\n",
         );
         assert!(p.websites.is_empty());
         assert_eq!(p.funcs.len(), 1);
@@ -3444,13 +3558,13 @@ mod tests {
         // Backwards compatibility gate: `const` as an ordinary name keeps
         // compiling everywhere except the top-level item position.
         let p = parse_ok(
-            "func main() {\n    let const = 1;\n    let x = const + 1;\n    print(x);\n}\n",
+            "func main() {\n    fin const = 1;\n    fin x = const + 1;\n    print(x);\n}\n",
         );
         assert!(p.consts.is_empty());
         assert_eq!(p.funcs.len(), 1);
         // Even as a parameter name and in assignment position.
         parse_ok("func f(const: int) -> int { return const; }\nfunc main() { print(f(2)); }\n");
-        parse_ok("func main() { let c = 0; const = c + 1; print(const); }\n");
+        parse_ok("func main() { fin c = 0; const = c + 1; print(const); }\n");
     }
 
     #[test]
@@ -3785,7 +3899,7 @@ mod tests {
         );
         assert!(matches!(&a.pages[0].elements[0].kind, ViewElementKind::Each { .. }));
         // plain casts elsewhere still work (regression gate)
-        parse_ok("func main() { let x = 1; print(x as float); }");
+        parse_ok("func main() { fin x = 1; print(x as float); }");
     }
 
     #[test]
@@ -3910,7 +4024,7 @@ mod tests {
 
     #[test]
     fn views_reject_statements_with_guidance() {
-        let diags = parse_err("app \"D\" { page Home { let x = 1; text \"ok\" } }");
+        let diags = parse_err("app \"D\" { page Home { fin x = 1; text \"ok\" } }");
         assert!(
             diags.iter().any(|d| d.message.contains("logic belongs in `on` handlers")),
             "{:?}",
@@ -3992,7 +4106,7 @@ mod tests {
         for w in words {
             // as a variable name and assignment target
             let src = format!(
-                "func main() {{\n    let {} = 1;\n    let y = {} + 1;\n    print(y);\n}}\n",
+                "func main() {{\n    fin {} = 1;\n    fin y = {} + 1;\n    print(y);\n}}\n",
                 w, w
             );
             let p = parse_ok(&src);
@@ -4024,9 +4138,9 @@ mod tests {
         assert!(hint.contains("cast"), "names the cast operator: {}", hint);
         assert!(hint.contains("type keyword"), "says what a cast needs: {}", hint);
         // Contrast: the legal cast spelling right next to it.
-        parse_ok("func main() {\n    let x = 1;\n    let y = x as float;\n    print(y);\n}\n");
+        parse_ok("func main() {\n    fin x = 1;\n    fin y = x as float;\n    print(y);\n}\n");
         // And a non-identifier follower gets the short cast hint.
-        let diags = parse_err("func main() {\n    let x = 1;\n    let y = x as;\n}\n");
+        let diags = parse_err("func main() {\n    fin x = 1;\n    fin y = x as;\n}\n");
         let d = diags.iter().find(|d| d.code == "E2002").expect("E2002");
         let hint = d.hint.as_deref().expect("short cast hint");
         assert!(hint.contains("type keyword"), "{}", hint);

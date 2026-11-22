@@ -11,7 +11,7 @@ pub enum TokKind {
 
     // Keywords
     Func,
-    Let,
+    Fin,
     Var,
     If,
     Else,
@@ -93,7 +93,7 @@ pub fn kind_name(kind: &TokKind) -> &'static str {
         TokKind::Str(_) => "STR",
         TokKind::Ident(_) => "IDENT",
         TokKind::Func => "FUNC",
-        TokKind::Let => "LET",
+        TokKind::Fin => "FIN",
         TokKind::Var => "VAR",
         TokKind::If => "IF",
         TokKind::Else => "ELSE",
@@ -154,7 +154,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Str(_) => "string literal".to_string(),
         TokKind::Ident(n) => format!("identifier `{}`", n),
         TokKind::Func => "keyword `func`".to_string(),
-        TokKind::Let => "keyword `let`".to_string(),
+        TokKind::Fin => "keyword `fin`".to_string(),
         TokKind::Var => "keyword `var`".to_string(),
         TokKind::If => "keyword `if`".to_string(),
         TokKind::Else => "keyword `else`".to_string(),

@@ -11,7 +11,7 @@ shapes every decision in this project.
 ## What KINN is
 
 - **A small, explicit language.** Braces are required, keywords are
-  readable (`func`, `let`, `not`, `and`), semicolons end statements,
+  readable (`func`, `fin`, `not`, `and`), semicolons end statements,
   and the compiler never converts types behind your back. What you read
   is what runs.
 - **Three programming modes.** `*mode = B` for beginners (fewer

@@ -187,18 +187,18 @@ mod tests {
 
     #[test]
     fn renders_error_with_caret_and_location() {
-        let src = "func main() {\n    let x = 1;\n}\n";
+        let src = "func main() {\n    fin x = 1;\n}\n";
         let d = Diagnostic::error("E3004", "cannot reassign `x`", 2, 5, 1);
         let out = render(&[d], src, "t.kin", Mode::S);
         assert!(out.contains("error[E3004]: cannot reassign `x`"));
         assert!(out.contains("--> t.kin:2:5"));
-        assert!(out.contains(" |     let x = 1;"));
+        assert!(out.contains(" |     fin x = 1;"));
         assert!(out.contains("^"));
     }
 
     #[test]
     fn advanced_mode_hides_notes() {
-        let src = "func main() {\n    let x = 1;\n}\n";
+        let src = "func main() {\n    fin x = 1;\n}\n";
         let n = Diagnostic::note("N3002", "`x` declared here", 2, 9, 1);
         assert!(render(&[n.clone()], src, "t.kin", Mode::A).is_empty());
         assert!(!render(&[n], src, "t.kin", Mode::S).is_empty());
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn hints_are_rendered_in_b_and_s_modes() {
-        let src = "func main() {\n    let x = 1;\n}\n";
+        let src = "func main() {\n    fin x = 1;\n}\n";
         let d = Diagnostic::error("E3004", "boom", 2, 5, 1);
         let d = Diagnostic { hint: Some("try `var`".into()), ..d };
         let out = render(&[d], src, "t.kin", Mode::B);
@@ -217,7 +217,7 @@ mod tests {
     fn project_rendering_groups_by_file() {
         let mut sources = HashMap::new();
         sources.insert("main.kin".to_string(), "func main() { }\n".to_string());
-        sources.insert("lib.kin".to_string(), "func f() { let x = ; }\n".to_string());
+        sources.insert("lib.kin".to_string(), "func f() { fin x = ; }\n".to_string());
 
         let d1 = Diagnostic::error("E3001", "in main", 1, 1, 1).in_file("main.kin");
         let d2 = Diagnostic::error("E3001", "in lib", 1, 13, 1).in_file("lib.kin");
@@ -225,7 +225,7 @@ mod tests {
         assert!(out.contains("--> main.kin:1:1"));
         assert!(out.contains("--> lib.kin:1:13"));
         // lib renders its own source line
-        assert!(out.contains("func f() { let x = ; }"));
+        assert!(out.contains("func f() { fin x = ; }"));
         // files sort alphabetically: lib.kin before main.kin
         let lib_pos = out.find("--> lib.kin").unwrap();
         let main_pos = out.find("--> main.kin").unwrap();

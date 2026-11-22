@@ -1,4 +1,4 @@
-// errors/immutable.kin — intentionally broken: reassigning a `let` variable.
+// errors/immutable.kin — intentionally broken: reassigning a `fin` variable.
 // The compiler must reject this with E3004 (plus a B-mode hint).
 
 // error: E3004
@@ -6,7 +6,7 @@
 *mode = B;
 
 func main() {
-    let x = 1;
+    fin x = 1;
     x = 2;
     print(x);
 }

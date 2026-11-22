@@ -1,0 +1,10 @@
+// errors/legacy_let.kin — intentionally outdated: `let` was renamed to
+// `fin` (ADR-0029, 0.4.0). The parser must reject the legacy spelling
+// with the E2017 migration diagnostic, positioned on the `let`.
+
+// error: E2017
+
+func main() {
+    let x = 1;
+    print(x);
+}

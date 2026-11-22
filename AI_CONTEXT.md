@@ -1,9 +1,9 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-22, release 0.3.0 + 0.4.0 S1–S2 + F-016 CI fix +
-S3 slice 1 (develop past 77c3e6d).** Update this file after significant
-milestones. Keep it between 500 and 900 words.
+**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 2 +
+the let→fin rename (ADR-0029, develop past baa7b63).** Update this
+file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
 
@@ -59,9 +59,9 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **357 Rust tests** (245 kinc unit incl. app grammar,
-const, website, app declaration validation, 27 kinrt, 28 pipeline,
-41 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
+Test totals: **380 Rust tests** (265 kinc unit incl. app grammar,
+const, website, app validation, the fin rename; 28 pipeline, 39 CLI
+incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
@@ -144,12 +144,20 @@ assigned from the free E3063–E3069 span, E3066–E3069 reserved;
 pages and components are separate namespaces; registered in B.11 +
 LANGUAGE_SPEC §C2; +12 tests (incl. the P-028 regression), workspace
 370 green, 0.3.0 web dist byte-identical; P-030 registered for the
-remaining unchecked app semantics. Next: **slice 3 = scope
-resolution + handler subset + prop checking (E3040/E3041/E3043–
-E3046 and the B.11 warnings), audit-first on the scope design;
-Playwright-with-S6 proposal APPROVED.** Carry-overs: string
-casts/interpolation decision, native codegen spike, structs/records
-ADR (D2 stays out of 0.4.0).
+remaining unchecked app semantics. **Owner decision 2026-11-23
+(ADR-0029): `let` was renamed to `fin`** (fin = final value;
+`var`/`const` unchanged; codegen identical, 0.3 web dist
+byte-identical). Intentionally breaking, no backward compatibility
+for the keyword: legacy `let x = ...;` gets **E2017** ("`let` was
+renamed to `fin`; use `fin`") then parses as `fin` (one diagnostic
+per use, no cascade); `let` stays a legal identifier otherwise.
+First free parser code (F-019). Repo fully migrated (examples,
+tests, docs, Studio web + Android); workspace 380 green. Next:
+**slice 3 = scope resolution + handler subset + prop checking
+(E3040/E3041/E3043–E3046 + B.11 warnings), audit-first; handler
+locals are fin/var post-rename; Playwright-with-S6 APPROVED.**
+Carry-overs: string casts/interpolation decision, native codegen
+spike, structs/records ADR (D2 stays out of 0.4.0).
 
 ## Standing rules
 

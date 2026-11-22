@@ -45,6 +45,19 @@ fn check_compile_error_exits_one_with_code() {
 }
 
 #[test]
+fn check_legacy_let_reports_the_e2017_migration() {
+    // ADR-0029: `let` was renamed to `fin`; the legacy spelling gets a
+    // positioned migration diagnostic naming the new keyword.
+    let out = kinn(&["check", &format!("{}/errors/legacy_let.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("E2017"));
+    assert!(stderr.contains("`let` was renamed to `fin`; use `fin`"));
+    assert!(stderr.contains("-->"));
+    assert!(stderr.contains("^"));
+}
+
+#[test]
 fn run_runtime_error_exits_three_with_code() {
     let out = kinn(&["run", &format!("{}/errors/div_zero.kin", EXAMPLES)]);
     assert_eq!(out.status.code(), Some(3));

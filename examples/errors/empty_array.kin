@@ -6,6 +6,6 @@
 *mode = S;
 
 func main() {
-    let a = [];
+    fin a = [];
     print(len(a));
 }

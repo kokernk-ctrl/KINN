@@ -5,6 +5,6 @@
 *mode = S;
 
 func main() {
-    let s = "42";
+    fin s = "42";
     print(s as int);
 }

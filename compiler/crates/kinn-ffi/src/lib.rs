@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn check_reports_diagnostics_with_positions() {
-        let json = check_json("main.kin", "func main() { let x = 1; x = 2; }");
+        let json = check_json("main.kin", "func main() { fin x = 1; x = 2; }");
         assert!(json.contains("\"ok\":false"), "{}", json);
         assert!(json.contains("E3004"), "{}", json);
         assert!(json.contains("\"line\""), "{}", json);
@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn run_supports_the_full_0_2_language() {
-        let src = "func main() {\n    let a = [1, 2, 3];\n    for x in a { print(x * 2); }\n    print(len(a) + abs(-4));\n    print(2 as float + 0.5);\n}";
+        let src = "func main() {\n    fin a = [1, 2, 3];\n    for x in a { print(x * 2); }\n    print(len(a) + abs(-4));\n    print(2 as float + 0.5);\n}";
         let json = run_json("main.kin", src);
         assert!(json.contains("\"ok\":true"), "{}", json);
         assert!(json.contains("\"stdout\":\"2\\n4\\n6\\n7\\n2.5\\n\""), "{}", json);
