@@ -38,23 +38,29 @@ export function classFor(kind: TokKind): string {
 /**
  * Compute colored segments per line. Tokens that span lines (block
  * comments) are split across the lines they cover. The `*mode = X;`
- * directive line gets its own class.
+ * directive line gets its own class; every token on that line is
+ * consumed by the covering segment (otherwise the trailing tokens
+ * would be emitted a second time after it).
  */
 export function segmentsForLines(text: string, tokens: Token[]): Seg[][] {
-  const lineCount = text.split('\n').length;
+  const lines = text.split('\n');
+  const lineCount = lines.length;
   const segs: Seg[][] = Array.from({ length: lineCount }, () => []);
+
+  // Directive lines first: one covering segment per `*mode = X;` line.
+  const modeLines = new Set<number>();
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.kind === '*' && tokens[i + 1]?.kind === 'ident' && tokens[i + 1].text === 'mode') {
+      modeLines.add(t.line);
+      const lineText = lines[t.line - 1] ?? '';
+      segs[t.line - 1].push({ start: t.col - 1, end: lineText.length, cls: 'mode' });
+    }
+  }
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-
-    // The whole `*mode = B;` line is highlighted as the mode directive.
-    if (t.kind === '*' && tokens[i + 1]?.kind === 'ident' && tokens[i + 1].text === 'mode') {
-      segs[t.line - 1].push({ start: t.col - 1, end: text.length, cls: 'mode' });
-      continue;
-    }
-    if (t.kind === 'ident' && t.text === 'mode' && tokens[i - 1]?.kind === '*') {
-      continue; // covered by the directive segment above
-    }
+    if (modeLines.has(t.line)) continue; // covered by the directive segment
 
     const cls = classFor(t.kind);
     if (!cls) continue;
