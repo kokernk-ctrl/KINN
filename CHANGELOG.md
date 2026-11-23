@@ -11,6 +11,56 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — Studio NEXT: experimental terminal-first interface (0.4)
+
+- **A second, isolated Studio interface** (`studio/next.html` +
+  `studio/src/next/`, an entirely new module) alongside the unchanged
+  classic Studio (`index.html`, one additive `Next` link in its top
+  bar; both link to each other; both ship in `dist/` via two Vite
+  inputs). Dark developer environment: `#0B0C0E` background, graphite
+  surfaces, thin `#2B3037` borders, discreet `#FF8A32` accent,
+  monospace-first, 3px radii, minimal motion, `prefers-reduced-motion`
+  respected.
+- **Main workspace**: top bar (identity, `project › file` breadcrumb,
+  live build-status pill driven by real command statuses, Run/Build,
+  layout focus switch, palette, settings, classic link), collapsible
+  explorer (real tree of the flat project + rename/delete + project
+  info facts), editor tabs (rendered from workspace state, modified
+  dots), code editor (same overlay technique as classic + current-line
+  highlight, configurable indent, find bar with match count and
+  next/prev), **multi-session terminal** (up to 4 sessions, per-session
+  history/scrollback/status dots), problems panel (cross-file jump),
+  output panel (real build artifacts + .zip/preview/export actions),
+  command palette (Ctrl+K, commands + go-to-file, fuzzy ranked,
+  only-working commands), settings modal (editor/terminal font, indent,
+  auto-check — all applied immediately, persisted, validated), bottom
+  status bar (auto-save state, compiler version, file, Ln/Col, last
+  command status, ONLINE/OFFLINE informational dot).
+- **Terminal-first experience**: the terminal is a first-class surface
+  with layout focus modes (editor / split / terminal, Ctrl+1/2/3),
+  Ctrl+` panel toggle, Ctrl+B explorer toggle, and a dedicated
+  terminal focus shortcut set; the command engine (`termcmd.ts`) is
+  headless and drives the **real compiler/VM/backends** through the
+  wasm bridge: `check`, `run`, `build web`, `build android`, `tokens`,
+  `files`, plus file management and project import/export. Unavailable
+  capabilities state exactly what is missing (kinn.wasm build
+  instructions; Android = Gradle project, not an APK) — nothing is
+  simulated.
+- **Mobile**: single-view layout switched by a bottom navigation
+  (files/editor/terminal/output), 44px touch targets, visual-viewport
+  tracking so the keyboard never covers the terminal input, 16px
+  terminal input font (no zoom-on-focus), condensed top bar/status
+  bar; same visual identity as desktop.
+- Tests: +58 vitest (palette fuzzy matching, settings validation,
+  workspace state, terminal engine fallbacks with a fake sink, and the
+  engine against the **real kinn.wasm** — run stdout/exit codes,
+  compile errors driving PROBLEMS, web/android build artifacts,
+  preview hand-off). The classic Studio suite passes untouched.
+- Docs: `docs/KINN_STUDIO_NEXT.md` (architecture, components,
+  terminal/editor/compiler integration, responsive layout, honest
+  limitations, rollback path); `AI_CONTEXT.md` updated so future
+  agents can work on the Studio without rescanning.
+
 ### Added — S4: AppModel lowering + android rejection (E3070)
 
 - Language/pipeline: **`app` programs lower now**. `lower::app_model`

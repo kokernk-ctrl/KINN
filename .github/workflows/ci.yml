@@ -120,7 +120,7 @@ jobs:
         working-directory: studio
         run: npm run build:wasm
 
-      - name: Test Studio (66 tests incl. 15 against the real compiler and target backends)
+      - name: Test Studio (128 tests incl. 19 against the real compiler and target backends)
         working-directory: studio
         run: npm test
 

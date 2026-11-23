@@ -1,10 +1,10 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S4 complete
+**Last updated: 2026-11-24, release 0.3.0 + 0.4.0 S1–S4 complete
 (all app semantics checked, AppModel lowering landed, E3070 gating
-android).** Update this file after significant milestones. Keep it
-between 500 and 900 words.
+android) + Studio NEXT experimental interface (0.4).** Update this
+file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
 
@@ -51,6 +51,22 @@ backwards compatibility is tested, including contextual keywords).
   terminal commands, preview panel (sandboxed iframe, inlined CSS/JS,
   postMessage navigation, page selector), Download .zip (store-only
   zip, `unzip`-validated), Export Android project zip.
+- **KINN Studio NEXT (0.4, experimental)** — a second, isolated
+  interface (`studio/next.html` + `studio/src/next/`; classic Studio
+  untouched except one additive `Next` link; both entries ship in
+  `dist/`). Terminal-first dark developer environment: top bar with
+  live build pill, collapsible explorer + project info, editor tabs
+  with modified dots, editor with current-line highlight + find bar,
+  **multi-session terminal** (real compiler/VM/backends via the same
+  wasm bridge through the headless `termcmd.ts` engine), problems with
+  cross-file jump, output panel with real build artifacts, command
+  palette (Ctrl+K, only working commands), settings (all applied),
+  status bar; desktop resizable grid (editor/split/terminal modes) and
+  a mobile drawer layout with visual-viewport keyboard handling.
+  Architecture, limitations and rollback path:
+  `docs/KINN_STUDIO_NEXT.md`. Shares `vfs`/`syntax`/`diagnostics`/
+  `wasm`/`storage`/`build` with classic — no second parser/checker,
+  no compiler changes, same .kinnproj + IndexedDB key.
 - **KINN Studio Android 0.3.0**: `build web`/`build android`/
   `preview`/`export android` through JNI; PreviewActivity renders the
   build offline over file:// with in-app navigation; Build Web button.
@@ -63,10 +79,9 @@ backwards compatibility is tested, including contextual keywords).
 Test totals: **457 Rust tests** (329 kinc unit incl. app grammar,
 const, website, the full app semantic surface, the AppModel lowering
 suite; 30
-pipeline, 5 kinn-android, 49 CLI incl. 5 manifest, 17 ffi) and **66 Studio vitest
-
-tests**
-(15 real-wasm incl. build targets). Examples carry `// expect:`
+pipeline, 5 kinn-android, 49 CLI incl. 5 manifest, 17 ffi) and **128 Studio vitest
+tests** (19 real-wasm incl. build targets and the NEXT terminal
+engine; 58 of the 128 belong to Studio NEXT). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
 grammar showcase (parses and checks — the full app semantic surface
@@ -97,8 +112,10 @@ compiler/                  Rust workspace (cargo test = 457 tests)
   crates/kinn-ffi/         C-ABI bridge: check/run/build_web/build_android
   crates/kinn-android/     JNI glue for the app (only crate with a dep)
 android/                   KINN Studio app (Kotlin, AGP 8.5.2, minSdk 26)
-studio/                    KINN Studio web shell (npm test = 66 tests)
+studio/                    KINN Studio web shell (npm test = 128 tests)
   src/build/               preview builder + store-only zip writer
+  src/next/                Studio NEXT (experimental interface module)
+  next.html                Studio NEXT entry (index.html stays classic)
 examples/web/              declarative website example
 .github/workflows/         ci, android (studio-app + backend-apk), windows, linux
 docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
@@ -222,6 +239,15 @@ E3070 gates the android target in the backend, CLI and FFI — no
 AppModel path reaches android generation; static website builds
 untouched. +18 tests (13 appmodel + 2 pipeline + 2 CLI + 1 FFI),
 workspace 457 green, 0.3.0 web dist byte-identical.**
+**Studio NEXT landed (2026-11-24, experimental): the terminal-first
+interface redesign as an isolated module — `studio/next.html` +
+`studio/src/next/` (state/settings/termcmd/palette/layout + 11 UI
+components, own next.css); classic Studio unchanged except one
+additive `Next` link; both Vite entries ship in dist/. The terminal
+engine drives the real wasm compiler/VM/backends; new tests cover the
+headless engine (fake sink) and the engine against real kinn.wasm;
+compiler untouched, 0.3.0 web dist byte-identical, same project
+format.**
 Next: **S5 — KIR→JS codegen with the differential harness;
 Playwright-with-S6 APPROVED.**
 Carry-overs: string casts/interpolation decision, native codegen

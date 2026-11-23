@@ -7,6 +7,12 @@ any browser, compiler included via WebAssembly) and the **Android app**
 document describes what exists today (0.2.0, verified) and what is
 planned, component by component.
 
+> **0.4 note:** the experimental **Studio NEXT** redesign lives in
+> `studio/next.html` + `studio/src/next/` and is documented separately
+> in `docs/KINN_STUDIO_NEXT.md` (architecture, components, honest
+> limitations, rollback). The classic web shell described here stays
+> unchanged and remains reachable from NEXT.
+
 ## Design system
 
 | Token | Value | Use |
