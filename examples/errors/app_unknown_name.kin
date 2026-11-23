@@ -1,0 +1,28 @@
+// errors/app_unknown_name.kin — a dynamic app whose view reads a name
+// that nothing declares. Names resolve since S3 slice 3: binding
+// expressions and handler bodies type-check against the app scope
+// (state, computed, props, `each` loop variables, consts, functions
+// and the registered app builtins). Here `text count` reads `count`,
+// which is not a state field, computed value, prop, const or function
+// of this app — the declared state field is `n` — so `kinn check`
+// reports E3066 (the app-scoped sibling of the website-era E3001,
+// which stays frozen for ordinary function bodies), with a hint
+// listing what the app scope actually declares.
+
+// error: E3066
+
+*mode = S;
+
+app "Counter" {
+    state {
+        n: int = 0
+    }
+
+    page Home {
+        heading "Counter"
+        text count
+        button "Reset" {
+            on click { n = 0; }
+        }
+    }
+}

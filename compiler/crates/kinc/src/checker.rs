@@ -45,6 +45,7 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         loop_depth: 0,
         assigned: HashSet::new(),
         var_decls: Vec::new(),
+        app: None,
     };
 
     // Pass 0: website declarations (0.3.0). Only the entry file may
@@ -326,6 +327,25 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         }
     }
 
+    // Pass 1c: app semantics (0.4.0 S3 slice 3) — scope resolution,
+    // binding typing, the app builtin table and E3058/E3066/E3043/W3041
+    // for the app registered in pass 0b. Runs after pass 1, because
+    // binding expressions and handler bodies resolve against the entry
+    // file's functions, consts and imports through the ordinary checker
+    // (B.6: handler bodies are official statements), and before pass 2
+    // so app diagnostics keep preceding function-body diagnostics.
+    if let Some(a) = entry_app {
+        c.cur_file = 0;
+        c.file = project.files[0].path.clone();
+        c.mode = project.files[0].program.mode;
+        c.imports = project.files[0]
+            .imports
+            .iter()
+            .map(|r| (r.alias.clone(), r.file))
+            .collect();
+        check_app_semantics(&mut c, a);
+    }
+
     // Pass 2: bodies, file by file.
     for i in 0..project.files.len() {
         c.cur_file = i;
@@ -367,7 +387,7 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
                 }
                 scope.insert(
                     prm.name.clone(),
-                    VarInfo { ty: prm.ty.clone(), mutable: false, line: prm.line, col: prm.col },
+                    VarInfo { ty: prm.ty.clone(), mutable: false, line: prm.line, col: prm.col, app_kind: None },
                 );
             }
             c.scopes.push(scope);
@@ -936,6 +956,420 @@ fn collect_open_targets<'a>(
     }
 }
 
+// ---------------------------------------------------------------------------
+// S3 slice 3: app scope resolution and binding typing (0.4.0).
+// ---------------------------------------------------------------------------
+
+/// Scope resolution, binding typing and the app builtins for a
+/// registered app (the pass-0b rules and the slice-1/2 rules already
+/// ran: presence, declaration validation, page targets).
+///
+/// Names resolve through the ordinary checker scopes: the app layer
+/// (state fields + computed values) is the outermost scope, each
+/// component pushes its props/state layer on top, `each` loop variables
+/// are scoped to their body, and handler locals sit above the event
+/// builtins. Reads that resolve nowhere report **E3066** (the
+/// app-scoped sibling of E3001); assignment rules are B.4's —
+/// **E3043** for props/computed values/event builtins, E3004 unchanged
+/// for `fin` locals and consts; `param("…")` must name a declared route
+/// parameter (**E3058**); a handler local shadowing a state field warns
+/// **W3041**. Binding expressions type through the ordinary checker:
+/// text/heading/label/placeholder expressions must be strings, `when`
+/// conditions bool, `each` iterables arrays (E3003/E3011, no implicit
+/// conversions — B.5).
+///
+/// NOT checked here, honestly (P-030, narrowed by this slice):
+/// component names and prop signatures at instantiation sites
+/// (E3040/E3041), handler subset enforcement (E3045/E3046, W3040),
+/// computed cycles (E3044), store/field/animation semantics
+/// (E3047–E3061), W3042–W3044 and N3040. E3067–E3069 stay reserved.
+fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
+    // `:name` parameters of valid routes; malformed paths are not
+    // further checked (the established E3062/E3055 pattern).
+    let mut route_params: Vec<String> = Vec::new();
+    for r in &a.routes {
+        if route_path_error(&r.path).is_none() {
+            for seg in r.path.split('/') {
+                if let Some(name) = seg.strip_prefix(':') {
+                    route_params.push(name.to_string());
+                }
+            }
+        }
+    }
+    let hint = app_scope_hint(a, None);
+    c.app = Some(AppScope { route_params, hint });
+
+    // App layer. E3042 already rejected duplicates in this scope; a
+    // duplicate insert keeps the first declaration (its error is
+    // reported and the name still resolves to the first).
+    let mut layer: HashMap<String, VarInfo> = HashMap::new();
+    for f in &a.state {
+        layer.entry(f.name.clone()).or_insert(VarInfo {
+            ty: f.ty.clone(),
+            mutable: true,
+            line: f.line,
+            col: f.col,
+            app_kind: Some(AppVarKind::State),
+        });
+    }
+    for cd in &a.computed {
+        layer.entry(cd.name.clone()).or_insert(VarInfo {
+            ty: Type::Error, // published below, in source order
+            mutable: false,
+            line: cd.line,
+            col: cd.col,
+            app_kind: Some(AppVarKind::Computed),
+        });
+    }
+
+    // State initializers are binding expressions over the full app
+    // layer (consts, functions and imports resolve as anywhere else).
+    // An empty array literal is checkable against the declared type,
+    // exactly like `fin a: [int] = [];`.
+    for f in &a.state {
+        let init_ty = match (&f.ty, &f.init.kind) {
+            (Type::Array(_), ExprKind::ArrayLit(items)) if items.is_empty() => f.ty.clone(),
+            _ => c.check_expr(&f.init),
+        };
+        if init_ty != Type::Error && init_ty != f.ty {
+            c.mismatch(&f.ty, &init_ty, f.init.line, f.init.col, 1);
+        }
+    }
+
+    // Computed expressions. Each computed publishes its type in source
+    // order; references to later computed values poison silently until
+    // the E3044 (cycles) slice — names always resolve, cycles do not
+    // cascade as unknowns.
+    c.scopes.push(layer);
+    for cd in &a.computed {
+        let t = c.check_expr(&cd.expr);
+        if let Some(v) = c.scopes.last_mut().unwrap().get_mut(&cd.name) {
+            if v.app_kind == Some(AppVarKind::Computed) && v.ty == Type::Error {
+                v.ty = t;
+            }
+        }
+    }
+
+    // Pages: views and handlers against the app layer.
+    for p in &a.pages {
+        c.app.as_mut().unwrap().hint = app_scope_hint(a, None);
+        check_app_elements(c, &p.elements);
+    }
+
+    // Components: the props/state layer shadows the app layer (legal —
+    // the E3042 ruling; a handler local shadowing it warns W3041).
+    for comp in &a.components {
+        c.app.as_mut().unwrap().hint = app_scope_hint(a, Some(comp));
+        let mut cl: HashMap<String, VarInfo> = HashMap::new();
+        for p in &comp.props {
+            cl.entry(p.name.clone()).or_insert(VarInfo {
+                ty: p.ty.clone(),
+                mutable: false,
+                line: p.line,
+                col: p.col,
+                app_kind: Some(AppVarKind::Prop),
+            });
+        }
+        for f in &comp.state {
+            cl.entry(f.name.clone()).or_insert(VarInfo {
+                ty: f.ty.clone(),
+                mutable: true,
+                line: f.line,
+                col: f.col,
+                app_kind: Some(AppVarKind::ComponentState),
+            });
+        }
+        c.scopes.push(cl);
+        // Prop defaults and component state initializers, like the app
+        // state initializers above.
+        for p in &comp.props {
+            if let Some(d) = &p.default {
+                let t = c.check_expr(d);
+                if t != Type::Error && t != p.ty {
+                    c.mismatch(&p.ty, &t, d.line, d.col, 1);
+                }
+            }
+        }
+        for f in &comp.state {
+            let init_ty = match (&f.ty, &f.init.kind) {
+                (Type::Array(_), ExprKind::ArrayLit(items)) if items.is_empty() => f.ty.clone(),
+                _ => c.check_expr(&f.init),
+            };
+            if init_ty != Type::Error && init_ty != f.ty {
+                c.mismatch(&f.ty, &init_ty, f.init.line, f.init.col, 1);
+            }
+        }
+        check_app_elements(c, &comp.view);
+        c.scopes.pop();
+    }
+
+    c.scopes.pop();
+    c.app = None;
+}
+
+/// The E3066 hint: what the scope being checked makes visible, in
+/// source order, so the unknown-name diagnostic teaches the names that
+/// exist. Component contexts list their props/state first.
+fn app_scope_hint(a: &AppDecl, comp: Option<&ComponentDecl>) -> String {
+    let names = |xs: &[String]| xs.join(", ");
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(comp) = comp {
+        if !comp.props.is_empty() {
+            parts.push(format!("props: {}", names(&comp.props.iter().map(|p| p.name.clone()).collect::<Vec<_>>())));
+        }
+        if !comp.state.is_empty() {
+            parts.push(format!(
+                "component state: {}",
+                names(&comp.state.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+            ));
+        }
+    }
+    if !a.state.is_empty() {
+        parts.push(format!(
+            "app state: {}",
+            names(&a.state.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+        ));
+    }
+    if !a.computed.is_empty() {
+        parts.push(format!(
+            "computed: {}",
+            names(&a.computed.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+        ));
+    }
+    if parts.is_empty() {
+        "this app declares no state fields, computed values or props".to_string()
+    } else {
+        format!("declared here: {}", parts.join("; "))
+    }
+}
+
+/// Views (B.5): binding expressions type through the ordinary checker
+/// with the app/component layers open. `each` loop variables are
+/// read-only and scoped to the body (mirroring `for`). Handlers are
+/// official statement bodies (B.6) checked by the existing checker with
+/// the event builtins in scope. Component names and prop signatures at
+/// instantiation sites stay unchecked in this slice (E3040/E3041,
+/// P-030) — the argument *expressions* are still checked.
+fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
+    let expect = |c: &mut Checker, e: &Expr, want: &Type| {
+        let t = c.check_expr(e);
+        if t != Type::Error && t != *want {
+            c.mismatch(want, &t, e.line, e.col, 1);
+        }
+    };
+    for e in elements {
+        match &e.kind {
+            ViewElementKind::Title { value, .. }
+            | ViewElementKind::Heading { value, .. }
+            | ViewElementKind::Text { value, .. } => expect(c, value, &Type::Str),
+            ViewElementKind::Button { label, handlers, .. }
+            | ViewElementKind::Link { label, handlers, .. } => {
+                expect(c, label, &Type::Str);
+                check_app_handlers(c, handlers);
+            }
+            ViewElementKind::Image { src, alt, handlers, .. } => {
+                expect(c, src, &Type::Str);
+                expect(c, alt, &Type::Str);
+                check_app_handlers(c, handlers);
+            }
+            ViewElementKind::Divider { .. } => {}
+            ViewElementKind::Input { bind, handlers, .. } => {
+                check_bind_target(c, bind, "input");
+                check_app_handlers(c, handlers);
+            }
+            ViewElementKind::When { cond, then_branch, else_branch, .. } => {
+                let t = c.check_expr(cond);
+                if t != Type::Bool && t != Type::Error {
+                    c.error(
+                        "E3003",
+                        format!("`when` condition must be bool, found {}", t.as_str()),
+                        cond.line,
+                        cond.col,
+                        4,
+                    );
+                }
+                check_app_elements(c, then_branch);
+                if let Some(els) = else_branch {
+                    check_app_elements(c, els);
+                }
+            }
+            ViewElementKind::Each { iter, var, key, body } => {
+                let t = c.check_expr(iter);
+                let elem_ty = match t {
+                    Type::Array(el) => *el,
+                    Type::Error => Type::Error,
+                    other => {
+                        c.error(
+                            "E3003",
+                            format!("`each` iterable must be an array, found {}", other.as_str()),
+                            iter.line,
+                            iter.col,
+                            4,
+                        );
+                        Type::Error
+                    }
+                };
+                let mut scope = HashMap::new();
+                scope.insert(
+                    var.clone(),
+                    VarInfo { ty: elem_ty, mutable: false, line: e.line, col: e.col, app_kind: None },
+                );
+                c.scopes.push(scope);
+                // The key expression sits inside the `each` construct:
+                // it sees the loop variable (`key item` is the
+                // canonical stable key — B.5).
+                if let Some(k) = key {
+                    c.check_expr(k);
+                }
+                check_app_elements(c, body);
+                c.scopes.pop();
+            }
+            ViewElementKind::Component { args, handlers, .. } => {
+                // E3040/E3041 (component names, prop signatures) are
+                // the instantiation-site slice (P-030); the argument
+                // expressions themselves resolve here.
+                for arg in args {
+                    c.check_expr(&arg.value);
+                }
+                check_app_handlers(c, handlers);
+            }
+            ViewElementKind::Form { legend, body, handlers } => {
+                expect(c, legend, &Type::Str);
+                check_app_elements(c, body);
+                check_app_handlers(c, handlers);
+            }
+            ViewElementKind::Field { bind, attrs, handlers, .. } => {
+                check_bind_target(c, bind, "field");
+                for attr in attrs {
+                    match attr {
+                        FieldAttr::Label(v)
+                        | FieldAttr::Placeholder(v)
+                        | FieldAttr::Pattern(v) => expect(c, v, &Type::Str),
+                        FieldAttr::MinLength(v)
+                        | FieldAttr::MaxLength(v)
+                        | FieldAttr::MinValue(v)
+                        | FieldAttr::MaxValue(v) => expect(c, v, &Type::Int),
+                        FieldAttr::Required => {}
+                    }
+                }
+                check_app_handlers(c, handlers);
+            }
+        }
+    }
+}
+
+/// `input bind x` / `field x kind …` targets are **state keys** (the
+/// slice-2 §C2 ruling): shared state in pages, component state in
+/// components. Two-way binding writes, so a computed value or prop in
+/// that position is E3043 (an invalid assignment target — B.4), and a
+/// name that resolves nowhere is E3066.
+fn check_bind_target(c: &mut Checker, t: &OpenTarget, element: &str) {
+    if let Some(v) = c.lookup(&t.page) {
+        match v.app_kind {
+            Some(AppVarKind::State) | Some(AppVarKind::ComponentState) => {}
+            Some(kind) => {
+                let mut d = Diagnostic::error(
+                    "E3043",
+                    format!(
+                        "the `{element}` binds `{}`, a {} — two-way binding writes, so only state fields are legal",
+                        t.page,
+                        kind.as_str()
+                    ),
+                    t.line,
+                    t.col,
+                    t.page.chars().count() as u32,
+                );
+                d.hint =
+                    Some("bind a state field (declare it in `state { … }`)".to_string());
+                c.diags.push(d.in_file(c.file.clone()));
+            }
+            None => {
+                let mut d = Diagnostic::error(
+                    "E3043",
+                    format!(
+                        "the `{element}` binds `{}`, which is not a state field — two-way binding writes, so only state fields are legal",
+                        t.page
+                    ),
+                    t.line,
+                    t.col,
+                    t.page.chars().count() as u32,
+                );
+                d.hint =
+                    Some("bind a state field (declare it in `state { … }`)".to_string());
+                c.diags.push(d.in_file(c.file.clone()));
+            }
+        }
+    } else if c.consts[c.cur_file].contains_key(&t.page) {
+        let mut d = Diagnostic::error(
+            "E3043",
+            format!(
+                "the `{element}` binds the const `{}` — consts are compile-time values; bind a state field",
+                t.page
+            ),
+            t.line,
+            t.col,
+            t.page.chars().count() as u32,
+        );
+        d.hint = Some("bind a state field (declare it in `state { … }`)".to_string());
+        c.diags.push(d.in_file(c.file.clone()));
+    } else {
+        let hint = c.app.as_ref().map(|a| a.hint.clone()).unwrap_or_default();
+        let mut d = Diagnostic::error(
+            "E3066",
+            format!(
+                "the `{element}` binds `{}`, which is not a declared state key",
+                t.page
+            ),
+            t.line,
+            t.col,
+            t.page.chars().count() as u32,
+        );
+        d.hint = Some(hint);
+        c.diags.push(d.in_file(c.file.clone()));
+    }
+}
+
+/// Handler bodies are official Kin statements (B.6) checked by the
+/// existing checker, with the event builtins in scope below the
+/// locals. This slice registers their **names and types only** — which
+/// builtin belongs to which event context is enforced at S6 (the
+/// approved A2 ruling), and the handler subset itself (E3045 `return`,
+/// E3046 duplicate handlers, W3040 `while`) is a later slice (P-030):
+/// `return;` is accepted here exactly like in any void body until then.
+fn check_app_handlers(c: &mut Checker, handlers: &[OnEvent]) {
+    for on in handlers {
+        let mut scope: HashMap<String, VarInfo> = HashMap::new();
+        for (name, ty) in [
+            ("event_value", Type::Str),
+            ("event_key", Type::Str),
+            ("event_x", Type::Int),
+            ("event_y", Type::Int),
+            ("form_valid", Type::Bool),
+            ("field_errors", Type::Array(Box::new(Type::Str))),
+        ] {
+            scope.insert(
+                name.to_string(),
+                VarInfo {
+                    ty,
+                    mutable: false,
+                    line: on.line,
+                    col: on.col,
+                    app_kind: Some(AppVarKind::EventBuiltin),
+                },
+            );
+        }
+        c.scopes.push(scope);
+        let saved_ret = c.ret.clone();
+        c.ret = Type::Void;
+        c.loop_depth = 0;
+        c.assigned.clear();
+        c.var_decls.clear();
+        c.check_block(&on.body);
+        c.ret = saved_ret;
+        c.scopes.pop();
+    }
+}
+
 /// Why a route path is malformed (E3055); `None` = valid. See
 /// [`check_app`] for the full rule.
 fn route_path_error(path: &str) -> Option<String> {
@@ -1028,12 +1462,53 @@ struct FnSig {
     col: u32,
 }
 
+/// What a name in an app scope layer is (0.4.0 S3 slice 3).
+/// Assignment rules (B.4): state fields are the only app bindings
+/// handlers may assign to; props, computed values and event builtins
+/// are read-only (E3043). `fin` locals and `const`s keep E3004.
+#[derive(Clone, Copy, PartialEq)]
+enum AppVarKind {
+    State,
+    ComponentState,
+    Computed,
+    Prop,
+    EventBuiltin,
+}
+
+impl AppVarKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            AppVarKind::State => "app state field",
+            AppVarKind::ComponentState => "component state field",
+            AppVarKind::Computed => "computed value",
+            AppVarKind::Prop => "prop",
+            AppVarKind::EventBuiltin => "event builtin",
+        }
+    }
+}
+
+/// State carried while the app semantic pass walks a registered app
+/// (S3 slice 3). Present only inside that pass: it switches unknown-name
+/// diagnostics to the app-scoped E3066 (the sibling of E3001, the way
+/// E3063 siblings E3032 — frozen meanings are never reused,
+/// ADR-0011), carries the `:param` names valid routes declare (E3058)
+/// and holds the hint naming what the scope being checked makes
+/// visible.
+struct AppScope {
+    route_params: Vec<String>,
+    hint: String,
+}
+
 #[derive(Clone)]
 struct VarInfo {
     ty: Type,
     mutable: bool,
     line: u32,
     col: u32,
+    /// What this binding is inside an app scope (S3 slice 3); `None`
+    /// for ordinary locals and params. Drives E3043 (read-only app
+    /// bindings) and the W3041 shadow warning.
+    app_kind: Option<AppVarKind>,
 }
 
 /// A checked top-level `const` declaration (0.4.0 S1): declared type and
@@ -1065,6 +1540,9 @@ struct Checker {
     assigned: HashSet<String>,
     /// `var` declarations of the current function (for the B-mode lint).
     var_decls: Vec<(String, u32, u32)>,
+    /// App semantic pass state (0.4.0 S3 slice 3); `Some` only while a
+    /// registered app is being walked (see [`check_app_semantics`]).
+    app: Option<AppScope>,
 }
 
 impl Checker {
@@ -1159,16 +1637,48 @@ impl Checker {
                 if *mutable {
                     self.var_decls.push((name.clone(), *line, *col));
                 }
+                // 0.4.0 S3 slice 3: a handler local shadowing a state
+                // field warns (B.4) so beginners see the shadow
+                // immediately. Shadowing anything else (computed
+                // values, props, consts) stays silent, matching the
+                // ordinary rule that locals shadow consts.
+                if self.app.is_some() {
+                    if let Some(existing) = self.lookup(name) {
+                        if matches!(
+                            existing.app_kind,
+                            Some(AppVarKind::State) | Some(AppVarKind::ComponentState)
+                        ) {
+                            let mut d = Diagnostic::warning(
+                                "W3041",
+                                format!(
+                                    "local `{}` shadows the {} `{}` declared at line {}",
+                                    name,
+                                    existing.app_kind.map(|k| k.as_str()).unwrap_or(""),
+                                    name,
+                                    existing.line
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            d.hint = Some(
+                                "the shadow is legal — rename the local if you meant the state field"
+                                    .to_string(),
+                            );
+                            self.diags.push(d.in_file(self.file.clone()));
+                        }
+                    }
+                }
                 self.declare(
                     name,
-                    VarInfo { ty: declared, mutable: *mutable, line: *line, col: *col },
+                    VarInfo { ty: declared, mutable: *mutable, line: *line, col: *col, app_kind: None },
                     *line,
                     *col,
                 );
             }
             Stmt::Assign { name, op, value, line, col } => {
-                let (vty, vmutable, vline, vcol) = match self.lookup(name) {
-                    Some(v) => (v.ty, v.mutable, v.line, v.col),
+                let (vty, vmutable, vline, vcol, vkind) = match self.lookup(name) {
+                    Some(v) => (v.ty, v.mutable, v.line, v.col, v.app_kind),
                     None => {
                         if self.consts[self.cur_file].contains_key(name) {
                             self.error(
@@ -1181,6 +1691,22 @@ impl Checker {
                                 *col,
                                 name.len() as u32,
                             );
+                        } else if self.app.is_some() {
+                            // S3 slice 3: the app-scoped sibling of
+                            // E3001 (frozen for ordinary function
+                            // bodies — ADR-0011).
+                            let mut d = Diagnostic::error(
+                                "E3066",
+                                format!(
+                                    "assignment target `{}` is not declared in the app scope",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            d.hint = Some(self.app.as_ref().unwrap().hint.clone());
+                            self.diags.push(d.in_file(self.file.clone()));
                         } else {
                             self.error(
                                 "E3001",
@@ -1195,23 +1721,82 @@ impl Checker {
                     }
                 };
                 if !vmutable {
-                    self.error(
-                        "E3004",
-                        format!("cannot reassign immutable variable `{}` (declared with `fin`)", name),
-                        *line,
-                        *col,
-                        name.len() as u32,
-                    );
-                    self.diags.push(
-                        Diagnostic::note(
-                            "N3002",
-                            format!("`{}` declared here", name),
-                            vline,
-                            vcol,
-                            name.len() as u32,
-                        )
-                        .in_file(self.file.clone()),
-                    );
+                    match vkind {
+                        // S3 slice 3 (B.4): props, computed values and
+                        // event builtins are read-only app bindings —
+                        // E3043. `fin` locals and consts keep E3004
+                        // (frozen meanings, ADR-0011).
+                        Some(AppVarKind::Prop) => {
+                            let mut d = Diagnostic::error(
+                                "E3043",
+                                format!(
+                                    "cannot assign to the prop `{}` — props are component inputs and read-only in handlers",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            d.hint = Some(
+                                "declare a `state` field in the component and assign to that instead"
+                                    .to_string(),
+                            );
+                            self.diags.push(d.in_file(self.file.clone()));
+                        }
+                        Some(AppVarKind::Computed) => {
+                            let mut d = Diagnostic::error(
+                                "E3043",
+                                format!(
+                                    "cannot assign to the computed value `{}` — computed values are derived from state",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            d.hint = Some(
+                                "assign to a state field the computed value reads — it recomputes automatically"
+                                    .to_string(),
+                            );
+                            self.diags.push(d.in_file(self.file.clone()));
+                        }
+                        Some(AppVarKind::EventBuiltin) => {
+                            let mut d = Diagnostic::error(
+                                "E3043",
+                                format!("cannot assign to the event builtin `{}`", name),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            d.hint = Some(
+                                "event builtins (`event_value`, `form_valid`, …) are read-only in handlers"
+                                    .to_string(),
+                            );
+                            self.diags.push(d.in_file(self.file.clone()));
+                        }
+                        _ => {
+                            self.error(
+                                "E3004",
+                                format!(
+                                    "cannot reassign immutable variable `{}` (declared with `fin`)",
+                                    name
+                                ),
+                                *line,
+                                *col,
+                                name.len() as u32,
+                            );
+                            self.diags.push(
+                                Diagnostic::note(
+                                    "N3002",
+                                    format!("`{}` declared here", name),
+                                    vline,
+                                    vcol,
+                                    name.len() as u32,
+                                )
+                                .in_file(self.file.clone()),
+                            );
+                        }
+                    }
                 }
                 let vt = self.check_expr(value);
                 if vt != Type::Error && vty != Type::Error {
@@ -1224,13 +1809,29 @@ impl Checker {
                         AssignOp::Add | AssignOp::Sub => {
                             let symbol = if *op == AssignOp::Add { "+=" } else { "-=" };
                             if !matches!(vty, Type::Int | Type::Float) {
-                                self.error(
-                                    "E3003",
-                                    format!("`{}` requires a numeric variable, found {}", symbol, vty.as_str()),
-                                    *line,
-                                    *col,
-                                    2,
-                                );
+                                // S3 slice 3 (B.4/B.7): `state_field +=
+                                // [item]` appends when the field is a
+                                // same-typed array — app expressions
+                                // only; execution arrives with S5.
+                                if *op == AssignOp::Add
+                                    && self.app.is_some()
+                                    && matches!(vty, Type::Array(_))
+                                    && vt == vty
+                                {
+                                    // same-typed array append, app scope only
+                                } else {
+                                    self.error(
+                                        "E3003",
+                                        format!(
+                                            "`{}` requires a numeric variable, found {}",
+                                            symbol,
+                                            vty.as_str()
+                                        ),
+                                        *line,
+                                        *col,
+                                        2,
+                                    );
+                                }
                             } else if vt != vty {
                                 self.mismatch(&vty, &vt, *line, *col, 2);
                             }
@@ -1350,7 +1951,7 @@ impl Checker {
                 self.scopes.push(HashMap::new());
                 self.scopes.last_mut().unwrap().insert(
                     var.clone(),
-                    VarInfo { ty: var_ty, mutable: false, line: *line, col: *col },
+                    VarInfo { ty: var_ty, mutable: false, line: *line, col: *col, app_kind: None },
                 );
                 self.loop_depth += 1;
                 self.check_block(body);
@@ -1423,6 +2024,27 @@ impl Checker {
                                 );
                                 break;
                             }
+                        }
+                        // S3 slice 3: inside the app semantic pass the
+                        // app-scoped sibling E3066 fires instead of E3001
+                        // (frozen for ordinary function bodies,
+                        // ADR-0011) — the same sibling pattern as
+                        // E3063/E3032. A module-const hint, when one
+                        // applies, is more specific than the scope
+                        // list and wins.
+                        if self.app.is_some() {
+                            let scope_hint = self.app.as_ref().unwrap().hint.clone();
+                            let mut d = Diagnostic::error(
+                                "E3066",
+                                format!("unknown name `{}` in the app scope", name),
+                                e.line,
+                                e.col,
+                                name.len() as u32,
+                            );
+                            d.hint =
+                                Some(if hint.is_empty() { scope_hint } else { hint });
+                            self.diags.push(d.in_file(self.file.clone()));
+                            return Type::Error;
                         }
                         self.error(
                             "E3001",
@@ -1591,6 +2213,18 @@ impl Checker {
                         (Type::Int, Type::Int) => Type::Int,
                         (Type::Float, Type::Float) => Type::Float,
                         (Type::Str, Type::Str) => Type::Str,
+                        // S3 slice 3 (B.7's normative example:
+                        // `items = items + [draft]`): same-typed array
+                        // concatenation is legal inside app expressions.
+                        // Execution lands with S5 (KIR/JS); console
+                        // programs keep the 0.2 rule, so this arm is
+                        // app-only (`self.app` is `Some` only inside
+                        // the app semantic pass).
+                        (Type::Array(a), Type::Array(b))
+                            if a == b && self.app.is_some() =>
+                        {
+                            Type::Array(a.clone())
+                        }
                         _ => {
                             self.bin_mismatch(*op, &lt, &rt, e.line, e.col);
                             Type::Error
@@ -1722,6 +2356,30 @@ impl Checker {
         let sig = match self.sigs[self.cur_file].get(name) {
             Some(s) => (s.params.clone(), s.ret.clone()),
             None => {
+                // S3 slice 3: app builtin functions resolve only inside
+                // the app semantic pass, after user functions and the
+                // global natives — user code shadows builtins and no
+                // redefinition guard exists (the builtin is a
+                // fallback, not a reserved word).
+                if self.app.is_some() {
+                    if let Some(t) = self.check_app_fn(name, args, line, col) {
+                        return t;
+                    }
+                    let scope_hint = self.app.as_ref().unwrap().hint.clone();
+                    let mut d = Diagnostic::error(
+                        "E3066",
+                        format!("unknown function `{}` in the app scope", name),
+                        line,
+                        col,
+                        name.len() as u32,
+                    );
+                    d.hint = Some(scope_hint);
+                    self.diags.push(d.in_file(self.file.clone()));
+                    for a in args {
+                        self.check_expr(a);
+                    }
+                    return Type::Error;
+                }
                 self.error(
                     "E3001",
                     format!("undefined function `{}`", name),
@@ -1738,6 +2396,103 @@ impl Checker {
         let (params, ret) = sig;
         self.check_args(name, &params, args, line, col);
         ret
+    }
+
+    /// App builtin functions (0.4.0 S3 slice 3, A2 ruling): `param`,
+    /// the store/JSON trio and the B.10 string helpers, registered by
+    /// name and type so binding expressions type-check. Known limit,
+    /// recorded in LANGUAGE_SPEC §C3 and P-030: **param/store names are
+    /// recognized; context-restricted invocation (view-only `param`,
+    /// handler-only stores) is enforced at S6**, and the helpers' VM/JS
+    /// natives arrive with S5 — app programs cannot build or run
+    /// before S4+ anyway, so nothing silently executes. Returns `None`
+    /// when `name` is not an app builtin.
+    fn check_app_fn(&mut self, name: &str, args: &[Expr], line: u32, col: u32) -> Option<Type> {
+        let (params, ret): (Vec<Type>, Type) = match name {
+            // `str(expr)` mirrors the `as string` cast surface: any
+            // scalar renders; arrays do not.
+            "str" => {
+                if args.len() != 1 {
+                    self.error(
+                        "E3007",
+                        format!("`str` expects 1 argument, found {}", args.len()),
+                        line,
+                        col,
+                        3,
+                    );
+                    for a in args {
+                        self.check_expr(a);
+                    }
+                    return Some(Type::Error);
+                }
+                let t = self.check_expr(&args[0]);
+                return Some(match t {
+                    Type::Int | Type::Float | Type::Bool | Type::Str => Type::Str,
+                    Type::Error => Type::Error,
+                    other => {
+                        self.error(
+                            "E3003",
+                            format!(
+                                "`str` expects a number, bool or string, found {}",
+                                other.as_str()
+                            ),
+                            args[0].line,
+                            args[0].col,
+                            3,
+                        );
+                        Type::Error
+                    }
+                });
+            }
+            // `param("name")` — E3058: a literal argument must name a
+            // parameter some valid route declares (malformed paths are
+            // not further checked — the established E3055 pattern).
+            // Non-literal arguments pass; they are runtime data.
+            "param" => {
+                self.check_args(name, &[Type::Str], args, line, col);
+                let (empty, list) = match &self.app {
+                    Some(app) => (app.route_params.is_empty(), app.route_params.join(", ")),
+                    None => (true, String::new()),
+                };
+                if let Some(ExprKind::StrLit(pname)) = args.first().map(|a| &a.kind) {
+                    if let Some(app) = &self.app {
+                        if !app.route_params.iter().any(|p| p == pname) {
+                            let mut d = Diagnostic::error(
+                                "E3058",
+                                format!(
+                                    "`param(\"{}\")` reads a route parameter this app does not declare",
+                                    pname
+                                ),
+                                args[0].line,
+                                args[0].col,
+                                pname.chars().count() as u32 + 2,
+                            );
+                            d.hint = Some(if empty {
+                                "no route declares a parameter yet — add a `:name` segment to a route path"
+                                    .to_string()
+                            } else {
+                                format!("declared route parameters: {}", list)
+                            });
+                            self.diags.push(d.in_file(self.file.clone()));
+                        }
+                    }
+                }
+                return Some(Type::Str);
+            }
+            "store_save" | "store_load" | "store_clear" => (vec![Type::Str], Type::Void),
+            "json_of" => (vec![Type::Str], Type::Str),
+            "save_json" => (vec![Type::Str, Type::Str], Type::Bool),
+            "upper" | "lower" | "trim" => (vec![Type::Str], Type::Str),
+            "contains" => (vec![Type::Str, Type::Str], Type::Bool),
+            "split" => (vec![Type::Str, Type::Str], Type::Array(Box::new(Type::Str))),
+            "join" => (
+                vec![Type::Array(Box::new(Type::Str)), Type::Str],
+                Type::Str,
+            ),
+            _ => return None,
+        };
+        self.check_args(name, &params, args, line, col);
+        Some(ret)
     }
 
     /// Native builtins: `len`, `abs`, `min`, `max`. Returns `None` when
@@ -3268,5 +4023,527 @@ mod tests {
         );
         let d = diags.iter().find(|d| d.code == "E3001").expect("E3001");
         assert!(d.message.contains("l.LIMIT"), "{}", d.message);
+    }
+
+    // -- S3 slice 3: app scope resolution and binding typing ---------------
+
+    /// The slice-3 feature surface in one app: state, computed, props,
+    /// component state, `each` with a stable key, `input bind` and
+    /// `field` on declared state keys, `param` for a declared route
+    /// parameter, store/event builtins, `str`, and B.7's array append.
+    const MINI_APP: &str = concat!(
+        "*mode = B;\n",
+        "const CAP: int = 3;\n",
+        "func double(x: int) -> int { return x + x; }\n",
+        "app \"Mini\" {\n",
+        "    navigation spa\n",
+        "    not_found Home\n",
+        "    route \"item/:id\" -> Detail\n",
+        "    state {\n",
+        "        items: [string] = []\n",
+        "        n: int = 0\n",
+        "        draft: string = \"\"\n",
+        "    }\n",
+        "    computed label = str(double(n)) + \" left\"\n",
+        "    store \"s\" { items }\n",
+        "    component Row {\n",
+        "        prop label: string\n",
+        "        state open: bool = false\n",
+        "        view {\n",
+        "            text label\n",
+        "            button \"Toggle\" {\n",
+        "                on click { open = not open; }\n",
+        "            }\n",
+        "        }\n",
+        "    }\n",
+        "    page Home {\n",
+        "        heading label\n",
+        "        each items as item key item {\n",
+        "            Row(label: item)\n",
+        "        }\n",
+        "        input bind n\n",
+        "        when n == 0 {\n",
+        "            text \"empty\"\n",
+        "        } otherwise {\n",
+        "            text label\n",
+        "        }\n",
+        "        form \"Add\" {\n",
+        "            field draft kind text {\n",
+        "                on input { draft = event_value; }\n",
+        "            }\n",
+        "            button \"Add\" {\n",
+        "                on submit {\n",
+        "                    if form_valid {\n",
+        "                        items = items + [draft];\n",
+        "                        n += 1;\n",
+        "                        store_save(\"s\");\n",
+        "                    }\n",
+        "                }\n",
+        "            }\n",
+        "        }\n",
+        "        link \"Detail\" open Detail\n",
+        "    }\n",
+        "    page Detail {\n",
+        "        text param(\"id\")\n",
+        "        link \"Back\" open Home\n",
+        "    }\n",
+        "}\n",
+    );
+
+    #[test]
+    fn slice3_feature_surface_checks_clean() {
+        // Positive master: every slice-3 feature type-checks with zero
+        // diagnostics (warnings included — none are expected here).
+        clean(MINI_APP);
+    }
+
+    #[test]
+    fn unknown_names_in_views_computed_and_handlers_report_e3066() {
+        // View binding expression.
+        let src = "app \"A\" {\n    state { n: int = 1 }\n    page Home {\n        text m\n    }\n}\n";
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3066").expect("E3066 in view");
+        assert_eq!((d.line, d.col, d.len), (4, 14, 1), "anchored on the identifier");
+        assert!(d.hint.as_deref().unwrap().contains("app state: n"), "{:?}", d.hint);
+        // Computed expression.
+        assert!(has(
+            "E3066",
+            "app \"A\" { state { n: int = 1 } computed c = m page Home { text \"x\" } }"
+        ));
+        // Handler statement (read) and call.
+        assert!(has(
+            "E3066",
+            "app \"A\" { page Home { button \"B\" { on click { nope(1); } } } }"
+        ));
+        assert!(has(
+            "E3066",
+            "app \"A\" { page Home { button \"B\" { on click { fin x = m; } } } }"
+        ));
+        // Assignment target that names nothing.
+        let diags = check_src("app \"A\" { page Home { button \"B\" { on click { ghost = 1; } } } }");
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3066")
+            .expect("E3066 for assignment target");
+        assert!(
+            d.message.contains("assignment target `ghost`"),
+            "{}",
+            d.message
+        );
+        // E3001 stays frozen for ordinary function bodies.
+        assert!(has("E3001", "func main() { print(x); }"));
+        assert!(!has("E3066", "func main() { print(x); }"));
+    }
+
+    #[test]
+    fn unknown_bind_targets_report_e3066() {
+        let src = "app \"A\" {\n    state { n: int = 1 }\n    page Home {\n        field due kind text { }\n        input bind nope\n    }\n}\n";
+        let diags = check_src(src);
+        let field_d = diags
+            .iter()
+            .find(|d| d.code == "E3066" && d.message.contains("`field` binds"))
+            .expect("E3066 for the field target");
+        assert!(field_d.message.contains("`due`"), "{}", field_d.message);
+        assert!(field_d.hint.as_deref().unwrap().contains("app state: n"), "{:?}", field_d.hint);
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "E3066" && d.message.contains("`input` binds `nope`")));
+        // Negative: binding a declared state key is clean (MINI_APP's
+        // `input bind n` and `field draft` both resolve).
+        clean("app \"A\" { state { n: int = 1 } page Home { input bind n field n kind number { } } }");
+    }
+
+    #[test]
+    fn e3066_hint_lists_component_scope_first() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 1 }\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        state open: bool = false\n",
+            "        view {\n",
+            "            text nope\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3066").expect("E3066");
+        let hint = d.hint.as_deref().unwrap();
+        assert!(hint.contains("props: label"), "{:?}", hint);
+        assert!(hint.contains("component state: open"), "{:?}", hint);
+        assert!(hint.contains("app state: n"), "{:?}", hint);
+        assert!(hint.starts_with("declared here: props"), "{:?}", hint);
+    }
+
+    #[test]
+    fn props_computed_and_event_builtins_are_e3043_in_handlers() {
+        // Prop assignment.
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { button \"B\" { on click { label = \"x\"; } } }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3043").expect("E3043 for prop");
+        assert!(d.message.contains("prop `label`"), "{}", d.message);
+        assert!(
+            d.hint.as_deref().unwrap().contains("in the component and assign"),
+            "{:?}",
+            d.hint
+        );
+        // Computed assignment.
+        let src = concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 1 }\n",
+            "    computed c = n\n",
+            "    page Home { button \"B\" { on click { c = 2; } } }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3043").expect("E3043 for computed");
+        assert!(d.message.contains("computed value `c`"), "{}", d.message);
+        assert!(
+            d.hint.as_deref().unwrap().contains("recomputes automatically"),
+            "{:?}",
+            d.hint
+        );
+        // Event builtin assignment.
+        assert!(has(
+            "E3043",
+            "app \"A\" { page Home { button \"B\" { on click { event_value = \"x\"; } } } }"
+        ));
+    }
+
+    #[test]
+    fn state_assignment_is_legal_and_e3004_stays_for_fin_and_consts() {
+        // Negative: assigning to state (shared or component) is legal.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 1 }\n",
+            "    page Home {\n",
+            "        button \"B\" { on click { n = 2; } }\n",
+            "        button \"C\" { on click { n += 1; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        clean(concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        state open: bool = false\n",
+            "        view { button \"B\" { on click { open = true; } } }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        // `fin` locals and consts keep E3004 (frozen meanings — the
+        // B.4 erratum): assigning to them in a handler is the ordinary
+        // immutable-assignment error, never E3043.
+        let diags = check_src(concat!(
+            "const K: int = 1;\n",
+            "app \"A\" {\n",
+            "    state { n: int = 1 }\n",
+            "    page Home {\n",
+            "        button \"B\" { on click { fin x = 1; x = 2; K = 3; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        let e3004s: Vec<_> = diags.iter().filter(|d| d.code == "E3004").collect();
+        assert_eq!(e3004s.len(), 2, "{:#?}", diags);
+        assert!(diags.iter().all(|d| d.code != "E3043"), "{:#?}", diags);
+        // State array element assignment is legal (B.4).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { xs: [int] = [1] }\n",
+            "    page Home { button \"B\" { on click { xs[0] = 9; } } }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn bind_targets_naming_computed_props_or_consts_are_e3043() {
+        let diags = check_src(concat!(
+            "const K: int = 1;\n",
+            "app \"A\" {\n",
+            "    state { n: int = 1 }\n",
+            "    computed c = n\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { input bind label }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        field c kind text { }\n",
+            "        input bind K\n",
+            "    }\n",
+            "}\n",
+        ));
+        let e3043s: Vec<_> = diags.iter().filter(|d| d.code == "E3043").collect();
+        assert_eq!(e3043s.len(), 3, "{:#?}", diags);
+        assert!(e3043s.iter().any(|d| d.message.contains("a prop")), "{:#?}", e3043s);
+        assert!(e3043s.iter().any(|d| d.message.contains("a computed value")), "{:#?}", e3043s);
+        assert!(e3043s.iter().any(|d| d.message.contains("the const `K`")), "{:#?}", e3043s);
+    }
+
+    #[test]
+    fn param_of_undeclared_route_parameter_is_e3058() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    route \"items/:id\" -> Home\n",
+            "    page Home {\n",
+            "        text param(\"nope\")\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3058").expect("E3058");
+        assert_eq!((d.line, d.col), (4, 20), "anchored on the quoted argument");
+        assert_eq!(d.len, 6, "the quoted \"nope\"");
+        assert!(
+            d.hint.as_deref().unwrap().contains("declared route parameters: id"),
+            "{:?}",
+            d.hint
+        );
+        // Negative: the declared parameter resolves (MINI_APP uses
+        // param(\"id\") with route \"item/:id\"), and a non-literal
+        // argument is runtime data, not checkable statically.
+        clean("app \"A\" { state { s: string = \"id\" } route \"x/:id\" -> Home page Home { text param(s) } }");
+        // No routes at all: the hint says how to declare one.
+        let diags = check_src("app \"A\" { page Home { text param(\"id\") } }");
+        let d = diags.iter().find(|d| d.code == "E3058").expect("E3058");
+        assert!(
+            d.hint.as_deref().unwrap().contains("no route declares a parameter yet"),
+            "{:?}",
+            d.hint
+        );
+    }
+
+    #[test]
+    fn handler_local_shadowing_state_warns_w3041() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    page Home {\n",
+            "        button \"B\" {\n",
+            "            on click { fin n = 1; }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "W3041")
+            .expect("W3041 for the shadowing local");
+        assert_eq!(d.line, 5, "positioned on the local declaration");
+        assert!(
+            d.message.contains("local `n` shadows the app state field `n` declared at line 2"),
+            "{}",
+            d.message
+        );
+        assert!(d.hint.is_some());
+        // Component state shadows warn the same way.
+        assert!(has(
+            "W3041",
+            "app \"A\" { component Row { state open: bool = false view { button \"B\" { on click { fin open = true; } } } } page Home { text \"x\" } }"
+        ));
+        // Negative: a distinct local name is clean; shadowing a
+        // computed value or a const stays silent (B.4 names state).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    computed c = n\n",
+            "    page Home {\n",
+            "        button \"B\" { on click { fin m = 1; fin c2 = 2; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        assert!(has(
+            "W3041",
+            "app \"A\" { state { n: int = 0 } computed c = n page Home { button \"B\" { on click { fin c = 1; } } } }"
+        ) == false);
+    }
+
+    #[test]
+    fn binding_typing_uses_the_ordinary_mismatch_codes() {
+        // text/heading expressions must be strings.
+        let diags = check_src("app \"A\" { state { n: int = 1 } page Home { text n } }");
+        let d = diags.iter().find(|d| d.code == "E3003").expect("E3003 for text");
+        assert!(d.message.contains("expected string, found int"), "{}", d.message);
+        // `when` conditions must be bool (E3003 — `when` is not `if`
+        // and never borrows E3005's frozen message).
+        assert!(has("E3003", "app \"A\" { state { n: int = 1 } page Home { when n { text \"x\" } } }"));
+        // `each` iterables must be arrays.
+        let diags = check_src("app \"A\" { state { n: int = 1 } page Home { each n as x { text \"x\" } } }");
+        let d = diags.iter().find(|d| d.code == "E3003").expect("E3003 for each");
+        assert!(d.message.contains("`each` iterable must be an array"), "{}", d.message);
+        // No implicit int/float conversion in bindings (E3011 — the
+        // int↔float pair keeps its dedicated message in app scope too).
+        assert!(has(
+            "E3011",
+            "app \"A\" { state { n: int = 1 } page Home { button \"B\" { on click { n = 1.5; } } } }"
+        ));
+        // A float bound as text is the ordinary E3003 mismatch.
+        assert!(has(
+            "E3003",
+            "app \"A\" { state { f: float = 1.5 } page Home { text f } }"
+        ));
+        // Field attributes type-check.
+        assert!(has(
+            "E3003",
+            "app \"A\" { state { n: int = 1 } page Home { field n kind number { max_length \"x\" } } }"
+        ));
+        // Int/float mixing in a field attribute keeps the E3011
+        // dedicated message (no implicit conversions anywhere).
+        assert!(has(
+            "E3011",
+            "app \"A\" { state { n: int = 1 } page Home { field n kind number { max_value 1.5 } } }"
+        ));
+        // `when` conditions in components, and labels, use the same rule.
+        assert!(has(
+            "E3003",
+            "app \"A\" { component Row { view { button 5 { } } } page Home { text \"x\" } }"
+        ));
+    }
+
+    #[test]
+    fn state_and_prop_initializers_type_check() {
+        let diags = check_src("app \"A\" { state { n: int = \"x\" } page Home { text \"x\" } }");
+        assert!(diags.iter().any(|d| d.code == "E3003"), "{:#?}", diags);
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string = 5\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3003"), "{:#?}", diags);
+        // Negative: typed initializers and empty array literals against
+        // a declared array type are clean (exactly like `fin a: [int] = [];`).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { xs: [int] = [] n: int = 1 }\n",
+            "    component Row {\n",
+            "        prop label: string = \"x\"\n",
+            "        state open: bool = false\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn app_builtin_signatures_are_enforced() {
+        // `str` renders scalars, not arrays.
+        let diags = check_src(
+            "app \"A\" { state { xs: [int] = [1] } page Home { text str(xs) } }",
+        );
+        let d = diags.iter().find(|d| d.code == "E3003").expect("E3003 from str");
+        assert!(d.message.contains("`str` expects a number, bool or string"), "{}", d.message);
+        // Arity is the ordinary E3007.
+        assert!(has(
+            "E3007",
+            "app \"A\" { state { s: string = \"x\" } page Home { button \"B\" { on click { store_save(); } } } }"
+        ));
+        // Types are the ordinary mismatches.
+        assert!(has(
+            "E3003",
+            "app \"A\" { state { s: string = \"x\" } page Home { text upper(5) } }"
+        ));
+        // split returns [string]: using it as a text value is a mismatch.
+        assert!(has(
+            "E3003",
+            "app \"A\" { state { s: string = \"x\" } page Home { text split(s, \",\") } }"
+        ));
+        // Negative: the helpers type-check where used correctly
+        // (contains(...) is a bool condition; join(...) is a string).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { s: string = \"a,b\" }\n",
+            "    page Home {\n",
+            "        when contains(s, \"a\") {\n",
+            "            text join(split(s, \",\"), \"-\")\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        // The param/store names are recognized in views AND handlers
+        // (context-restricted invocation is enforced at S6, not here).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    route \"x/:id\" -> Home\n",
+            "    state { s: string = \"\" }\n",
+            "    page Home {\n",
+            "        button \"B\" {\n",
+            "            on click {\n",
+            "                s = param(\"id\");\n",
+            "                store_save(\"s\");\n",
+            "                store_load(\"s\");\n",
+            "                store_clear(\"s\");\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn user_definitions_shadow_app_builtins() {
+        // A user function with a builtin's name wins over the fallback
+        // table (no redefinition guard exists for app builtins).
+        clean(concat!(
+            "func upper(s: string) -> string { return s; }\n",
+            "app \"A\" {\n",
+            "    state { name: string = \"kinn\" }\n",
+            "    page Home { text upper(name) }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn array_concat_types_only_inside_app_scope() {
+        // In apps: same-typed array concat is legal in handlers and in
+        // binding expressions (B.7's normative example) — MINI_APP's
+        // `items = items + [draft];` covers the handler case.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { xs: [int] = [1] ys: [int] = [2] }\n",
+            "    computed zs = xs + ys\n",
+            "    page Home { button \"B\" { on click { xs += [3]; } } }\n",
+            "}\n",
+        ));
+        // Different element types never concatenate.
+        assert!(has(
+            "E3003",
+            "app \"A\" { state { xs: [int] = [1] ss: [string] = [\"x\"] } page Home { button \"B\" { on click { fin u = xs + ss; } } } }"
+        ));
+        // Console programs keep the 0.2 rule (E3003), so the extension
+        // is honestly app-only until the runtime lands with S5.
+        assert!(has(
+            "E3003",
+            "func main() { fin a: [int] = [1]; fin b: [int] = a + [2]; print(len(b)); }"
+        ));
+    }
+
+    #[test]
+    fn component_scope_shadows_the_app_layer_for_reads() {
+        // A prop or component state field named like app state shadows
+        // it for reads (E3042 only rejects duplicates *within* one
+        // scope — the slice-1 ruling).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { label: string = \"app\" n: int = 1 }\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home { text label Row(label: \"row\") }\n",
+            "}\n",
+        ));
     }
 }

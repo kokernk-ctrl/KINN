@@ -11,6 +11,82 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S3 slice 3: app scope resolution, binding typing, param/store builtins (P-030 narrowed)
+
+- Language: **names resolve inside apps now**. New checker code
+  **E3066** (assigned from the reserved E3066–E3069 span —
+  **E3067–E3069 stay reserved**): an unknown name in the app scope —
+  a read in a binding expression or handler statement, a call
+  target, an assignment target naming nothing, or an `input bind`/
+  `field` target naming nothing — reports the **app-scoped sibling
+  of E3001** (which stays frozen for ordinary function bodies,
+  ADR-0011), anchored on the identifier, with a hint listing what the
+  current scope declares (app state, computed values; props and
+  component state first inside components).
+- Resolution order, innermost first: handler local → event builtins →
+  `each` loop variable (views) → component props/state (components) →
+  shared state → computed values → consts → functions and natives →
+  **registered app builtins**. User definitions shadow builtins (a
+  fallback table consulted last — no redefinition guard); a component
+  prop/state legally shadows app state (E3042 rejects duplicates only
+  within one scope).
+- **E3043 fires for the first time**: assigning to a prop, computed
+  value or event builtin in a handler, and `field`/`input bind`
+  targets that are not state fields (two-way binding writes —
+  computed values, props and consts rejected). **B.4 erratum**:
+  assigning to `fin` locals and `const`s keeps the frozen **E3004**;
+  `+=` on a same-typed array state field appends (app scope only,
+  per B.7's example — execution lands with S5).
+- **E3058** (implemented): `param("…")` with a literal argument must
+  name a `:param` of a valid route; the diagnostic anchors on the
+  quoted argument and the hint lists the declared parameters.
+  Non-literals are runtime data and pass.
+- **W3041**: a handler local shadowing an app state field or
+  component state field warns (legal, but visible).
+- Binding typing: text/heading/title/labels/alt/legends must be
+  strings, `when` conditions bool, `each` iterables arrays, field
+  attributes typed (`label`/`placeholder`/`pattern`: string;
+  `min_length`/`max_length`/`min_value`/`max_value`: int) — the
+  ordinary **E3003/E3011** mismatch codes (E3011 keeps its int↔float
+  message; `when` never borrows E3005). State-field and prop
+  initializers type-check, empty array literals against a declared
+  array type included.
+- **A2 ruling (param/store builtins)**: `param(string) -> string`,
+  `store_save`/`store_load`/`store_clear` `(string) -> void`,
+  `json_of(string) -> string`, `save_json(string, string) -> bool`,
+  the B.10 helpers (`str` — mirrors the `as string` cast surface —
+  `upper`, `lower`, `trim`, `contains`, `split`, `join`) and the
+  handler event variables (`event_value`, `event_key`,
+  `event_x`/`event_y`, `form_valid`, `field_errors`) are
+  **registered by name and type so the showcase compiles**.
+  **Known limit: param/store names recognized; context-restricted
+  invocation enforced at S6** — and the B.10 helpers' VM/JS natives
+  arrive with S5 (app programs cannot build or run before S4+).
+- Example: `examples/errors/app_unknown_name.kin` (`// error: E3066`)
+  joins the error corpus; `examples/web/tasks_app.kin` declares the
+  missing `due: string` state key (its date field binds it — the
+  audit's showcase fix) and its status comment now states the
+  checked/unchecked boundary exactly.
+- Docs: **B.3/B.4/B.5/B.6/B.10 errata** in
+  DYNAMIC_WEB_ARCHITECTURE.md — the B.3 example toggled a **prop**
+  while B.4 forbids it (it now toggles the component state);
+  B.4's capitalized types and its "consts are E3043" claim (E3004 is
+  frozen); the full resolution order; B.6's `while`-in-handler
+  warning is **W3040**, not W3044, per B.11's table; B.6/B.10
+  builtin types are the real lowercase ones; B.10's `str()` is
+  checker-registered in app scope (VM/JS at S5); stale store
+  cross-references in B.2/B.7 now point at B.7. B.11's E3066 row is
+  assigned. LANGUAGE_SPEC §C2 gains E3066/E3058/E3043/W3041 and the
+  full slice-3 rulings; §C3 states the new checked/unchecked
+  boundary.
+- Registry: **P-030 narrowed** to the still-unchecked semantics
+  (handler subset, prop signatures at instantiation sites, computed
+  cycles, stores/fields/animations).
+- Tests: **+17** (15 checker + 2 CLI; workspace 380 → 397, all
+  green); every new code has a positive and a negative test with
+  position and hint asserted; `examples/web/tasks_app.kin` checks
+  clean end-to-end (0 diagnostics).
+
 ### Changed — BREAKING: binding keyword `let` renamed to `fin` (ADR-0029)
 
 - Language: **the immutable local-binding keyword is now `fin`**

@@ -478,6 +478,10 @@ byte-identical across the rename.
 | E3063 | checker | unknown app page target — any page-target position (`route "x" -> Missing`, `not_found Missing`, `open <Page>` on buttons/links in page and component views, nested views included); app-scoped sibling of E3032, never reuses it |
 | E3064 | checker | duplicate page name inside an app — case-insensitive (mirrors E3031) |
 | E3065 | checker | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names) |
+| E3066 | checker | unknown name in the app scope — a binding expression, handler statement, call or `input bind`/`field` target that resolves to no local, `each` loop variable, component prop/state, shared state, computed value, const, function or registered app builtin; app-scoped sibling of E3001, never reuses it (assigned in slice 3) |
+| E3058 | checker | `param("…")` reads a route parameter no valid route declares (literal arguments only — non-literals are runtime data); anchored on the quoted argument, the hint lists the declared parameters (implemented in slice 3) |
+| E3043 | checker | invalid assignment target inside an app: assigning to a prop, computed value or event builtin in a handler (`fin` locals and `const`s keep the frozen E3004), and `field`/`input bind` targets that are not state fields (live since slice 3) |
+| W3041 | warning | a handler local (`fin`/`var`) shadows an app state field or component state field of the same name — legal, but called out so beginners see the shadow (live since slice 3) |
 
 E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
 presence rules and E3042/E3055–E3057/E3062 the declaration-validation
@@ -549,9 +553,83 @@ S3 slice 2 rulings (P-029 code assignment, architect ruling
   matching function names). Both diagnostics anchor on the section
   keyword of the later declaration (`page` → width 4, `component` →
   width 9) and name the first definition's line.
-- **E3066–E3069 stay reserved** for the remaining S3 slices (scope
-  resolution, handler subset, prop checking, stores, fields,
-  animations — see B.11 and ROADMAP).
+- **E3066 is assigned (slice 3); E3067–E3069 stay reserved** for the
+  remaining S3 slices (handler subset, prop instantiation, computed
+  cycles, stores, fields, animations — see B.11 and ROADMAP).
+
+S3 slice 3 rulings (scope resolution and binding typing, audit
+approved 2026-11-23; codes and meanings frozen, tests pin the
+wording):
+
+- **E3066 siblings E3001, never reuses it**: inside the app semantic
+  pass, an unknown name — a read in a binding expression or handler
+  statement, a call target, an assignment target naming nothing, or
+  an `input bind`/`field` target naming nothing — reports E3066 with
+  a hint listing what the current scope declares (app state,
+  computed values; props and component state first inside
+  components). Ordinary function bodies keep E3001 (frozen,
+  ADR-0011).
+- **Resolution order, innermost first**: handler local → event
+  builtins → `each` loop variable (in views) → component props/state
+  (in components) → shared state → computed values → top-level consts
+  → functions and natives → registered app builtins. **User
+  definitions shadow app builtins** (the builtin table is a fallback
+  consulted after user functions and the global natives; no
+  redefinition guard exists), and a component prop or state field
+  legally shadows app state (E3042 rejects duplicates only within
+  one scope — the slice-1 ruling).
+- **E3043 vs E3004 (the B.4 erratum)**: assigning to a prop, computed
+  value or event builtin in a handler is E3043; `fin` locals and
+  `const`s keep the frozen E3004. `field`/`input bind` targets must
+  be state keys (shared state in pages, component state in
+  components) — a computed value, prop or const in that position is
+  E3043 (two-way binding writes); an unknown name is E3066.
+- **E3058**: `param("…")` with a **literal** argument must name a
+  `:param` segment of some valid route (malformed paths contribute
+  nothing — the established E3055 pattern); non-literal arguments are
+  runtime data and pass.
+- **W3041**: a handler local shadowing an app state field or component
+  state field warns (B.4); shadowing computed values, props or consts
+  stays silent (locals shadow consts, the ordinary rule).
+- **Binding typing reuses the ordinary codes**: element text
+  (`text`/`heading`/`title`, labels, `alt`, form legends, field
+  `label`/`placeholder`/`pattern`) must be `string`; `when`
+  conditions `bool`; `each` iterables arrays; field
+  `min_length`/`max_length`/`min_value`/`max_value` must be `int` —
+  mismatches are the frozen E3003/E3011 diagnostics (E3011 keeps its
+  int↔float message), and `when` never borrows E3005. State-field and
+  prop initializers type against their declared types, empty array
+  literals against a declared array type included.
+- **App builtins (the A2 ruling), names and types only**:
+  `param(string) -> string`; `store_save`/`store_load`/`store_clear`
+  `(string) -> void` (commands); `json_of(string) -> string`;
+  `save_json(string, string) -> bool` (B.7); `str(int|float|bool|
+  string) -> string` (mirrors the `as string` cast surface; arrays
+  are rejected); `upper`/`lower`/`trim(string) -> string`;
+  `contains(string, string) -> bool`; `split(string, string) ->
+  [string]`; `join([string], string) -> string` (B.10); and the
+  handler event variables `event_value: string`, `event_key:
+  string`, `event_x`/`event_y: int`, `form_valid: bool`,
+  `field_errors: [string]` (B.6), registered for every handler.
+  **Known limit: param/store names recognized; context-restricted
+  invocation enforced at S6.** The B.10 helpers' VM/JS natives arrive
+  with S5 — app programs cannot build or run before S4+ anyway, so
+  nothing silently executes.
+- **Array `+`/`+=` inside app expressions only (the B.7 example
+  ruling)**: `items + [draft]` and `xs += [x]` (same element type)
+  type-check inside the app semantic pass — B.7's normative example
+  appends with `+`. Execution lands with S5; console programs keep
+  the 0.2 rule (array `+` stays E3003 outside apps).
+- **Computed values publish their type in source order**; references
+  to later computed values resolve by name but poison silently until
+  the E3044 (cycles) slice — names always resolve, cycles never
+  cascade as unknowns.
+- **Not in this slice (P-030, narrowed)**: component names and prop
+  signatures at instantiation sites (E3040/E3041 — the argument
+  expressions themselves do resolve), the handler subset (E3045/
+  E3046, W3040 — `return;` is accepted like in any void body until
+  then), computed cycles (E3044), stores/fields/animations
+  (E3047–E3061), W3042–W3044, N3040; E3067–E3069 stay reserved.
 
 ## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
 
@@ -563,14 +641,26 @@ resolves app page targets** — E3063 (unknown page target at every
 page-target position: routes, `not_found`, `open` on buttons/links in
 page and component views) and the page/component name rules E3064
 (case-insensitive) / E3065 (case-sensitive); pages and components are
-separate namespaces. An app program parses, `kinn ast` shows its tree,
-the presence rules (E3051/E3052, no `main` required), the slice 1
-declaration rules and **page-target resolution** hold. **Still
-unchecked, honestly**: scope resolution, handler subset enforcement,
-prop checking at instantiation sites, computed cycles, and
-store/field/animation semantics (slice 3+ — E3066–E3069 stay
-reserved). Every other command says honestly that dynamic builds are
-not implemented yet. Lowering arrives with S4.
+separate namespaces. **Slice 3 resolves names**: binding expressions,
+handler bodies, computed values and state/prop initializers
+type-check against the app scope (locals, `each` loop variables,
+component props/state, shared state, computed values, consts,
+functions and the registered param/store/B.10 builtins — the §C2
+slice-3 rulings), unknown names report E3066, `field`/`input bind`
+targets must be state keys, `param("…")` must name a declared route
+parameter (E3058), props/computed values/event builtins are
+read-only in handlers (E3043), a handler local shadowing state warns
+W3041, and binding typing reuses the ordinary E3003/E3011 mismatch
+codes. An app program parses, `kinn ast` shows its tree, the presence
+rules (E3051/E3052, no `main` required) and the slice 1–3 rules
+hold. **Still unchecked, honestly**: component names and prop
+signatures at instantiation sites (E3040/E3041), handler subset
+enforcement (E3045/E3046, W3040), computed cycles (E3044), and
+store/field/animation semantics (E3047–E3061, W3042–W3044, slice 4+
+— E3067–E3069 stay reserved; **param/store names recognized;
+context-restricted invocation enforced at S6**). Every other command
+says honestly that dynamic builds are not implemented yet. Lowering
+arrives with S4.
 
 ```
 app_decl      := "app" STRING "{" app_section* "}"            ; E2016 when the name is not a string

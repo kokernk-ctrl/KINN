@@ -1,18 +1,26 @@
 // examples/web/tasks_app.kin — the 0.4.0 dynamic app target shape
 // (grammar showcase; docs/DYNAMIC_WEB_ARCHITECTURE.md B.2–B.9).
 //
-// STATUS (0.4.0 S3 slice 2): this file parses, `kinn ast` shows its
+// STATUS (0.4.0 S3 slice 3): this file parses, `kinn ast` shows its
 // tree, and `kinn check` validates the app declaration — name, route
 // paths, duplicate route/state/computed/prop names, the
 // navigation/not_found pairing, page-target resolution (routes,
 // not_found, open on buttons/links) and page/component name
-// uniqueness (separate namespaces). Scope resolution, handlers, props,
-// stores, fields and animations are not checked yet, and building
-// dynamic apps (runtime, routing, forms, persistence) arrives with the
-// later 0.4.0 steps — run `kinn build` on it today and it says so
-// honestly instead of pretending. (Since S3 slice 2, unknown page
-// targets are caught too — E3063 — so every route/not_found/open here
-// names a declared page.)
+// uniqueness (separate namespaces). Since slice 3, names also
+// RESOLVE: binding expressions and handler bodies type-check against
+// the app scope (state, computed, props, `each` loop variables,
+// consts and functions), `field`/`input bind` targets must be state
+// keys, `param("id")` must match a declared route parameter (E3058),
+// unknown names report E3066, props/computed values are read-only in
+// handlers (E3043), and the param/store builtins are registered by
+// name and type (param/store names recognized; context-restricted
+// invocation enforced at S6). Prop signatures at instantiation sites
+// (E3040/E3041), the handler subset (E3045/E3046, W3040), computed
+// cycles (E3044), stores/fields/animations (E3047–E3061) and
+// W3042–W3044 are not checked yet, and building dynamic apps
+// (runtime, routing, forms, persistence) arrives with the later
+// 0.4.0 steps — run `kinn build` on it today and it says so honestly
+// instead of pretending.
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin
@@ -59,6 +67,7 @@ app "TaskTrack" {
         filter: string = "all"
         draft: string = ""
         qty: int = 1
+        due: string = ""
         open_form: bool = true
     }
 

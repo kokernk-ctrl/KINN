@@ -309,7 +309,7 @@ app "TaskTrack" {
     state { … }                 // B.4
     computed { … }              // B.4
     animation { … }             // B.8
-    store "tasks" { … }         // B.10
+    store "tasks" { … }         // B.7
     page …  route …  component …// B.3, B.5, B.9
 }
 ```
@@ -344,7 +344,7 @@ component TaskRow {
             text "done" exit "fade"
         }
         button "Toggle" {
-            on click { done = not done; }
+            on click { expanded = not expanded; }
         }
     }
 }
@@ -376,8 +376,8 @@ component TaskRow {
 
 ```
 state {
-    items: [Str] = []
-    filter: Str = "all"
+    items: [string] = []
+    filter: string = "all"
 }
 
 computed remaining = len(items) - done_count      // a binding expression
@@ -388,22 +388,31 @@ computed remaining = len(items) - done_count      // a binding expression
   inside the component (`state expanded: bool = false`) — one
   declaration per line, exactly like `prop` (B.3); only the app-level
   `state` is a `{ ... }` block. Both are mutable only from event
-  handlers (B.6); view
-  code only reads. Names are resolved in strict order — handler local
-  (`fin/var`) → component state → shared state → otherwise E3043 — and a
-  handler local shadowing a state name triggers W3041 so beginners see the
-  shadow immediately.
+  handlers (B.6); view code only reads. Names resolve innermost-first
+  (S3 slice 3): handler local (`fin`/`var`) → event builtins → the
+  `each` loop variable (in views) → component props and component
+  state (in components) → shared state → computed values → top-level
+  `const`s → functions and natives → the registered app builtins
+  (B.7/B.10). A name resolving nowhere is E3066 (the app-scoped
+  sibling of E3001, which stays frozen for ordinary function bodies),
+  and a handler local shadowing a state name triggers W3041 so
+  beginners see the shadow immediately.
 - **`computed`** declares a derived value: a pure binding expression over
   state, other computed values, component props/locals (in components),
   and functions. Recomputation is automatic on dependency change
   (dependency set computed **statically at compile time** — C.5). Cycles
   between computed values are E3044.
 - Assignment rules: `state_field = expr`, `state_field[i] = expr`, and
-  compound `+=`/`-=` are legal in handlers; assigning to anything else
-  (props, loop variables, `const`s) is E3043 with a hint naming the
-  nearest legal target.
+  compound `+=`/`-=` are legal in handlers (and, since S3 slice 3, `+=`
+  on a same-typed array state field appends — execution lands with
+  S5). Assigning to a **prop**, a **computed value** or an event
+  builtin is **E3043** with a hint naming the nearest legal target;
+  assigning to `fin` locals and `const`s keeps the frozen **E3004**
+  (their meanings predate apps and never change — erratum, S3 slice
+  3). Views contain no assignments at all, so `each` loop variables
+  are read-only by grammar, mirroring `for` variables by runtime rule.
 - Type constraints: state fields are scalars or arrays of scalars
-  (`Int/Float/Bool/Str` and one array dimension). The 0.4.0 state model
+  (`int`/`float`/`bool`/`string` and one array dimension). The 0.4.0 state model
   deliberately does **not** invent records/maps — that decision stays with
   the structs/records ADR (Part E, D2).
 
@@ -436,15 +445,19 @@ page Home {
 - **Dynamic arguments**: everywhere a 0.3 element takes a string literal,
   an app view may instead take a binding expression (same expression
   grammar as the language). `text`/`heading`/`label`/`placeholder`
-  expressions must type as `Str` (`str()` cast applied explicitly —
-  E3011-style diagnostics keep the no-implicit-conversion rule);
-  conditions must be `Bool`; `each` iterables must be arrays.
+  expressions must type as `string` (`str()` applied explicitly —
+  E3011-style diagnostics keep the no-implicit-conversion rule, and
+  int↔float mixing keeps its dedicated E3011 message);
+  `when` conditions must be `bool` (E3003 — `when` is not `if` and
+  never borrows E3005's frozen message); `each` iterables must be
+  arrays (E3003).
 - **`when <cond> { … } otherwise { … }`** is conditional rendering
   (element presence), not control flow — it removes/mounts DOM subtrees
   and participates in enter/exit animations (B.8). `if` remains a
   statement inside handlers; views use `when` so the two never blur.
 - **`each <array-expr> as <name> [key <expr>] { … }`** renders lists. The
-  loop variable is read-only (assignment E3043, mirroring `for`). `key`
+  loop variable is read-only (views contain no assignments; the
+  runtime treats it as immutable, mirroring `for`). `key`
   supplies the reconciliation key expression; omitted keys fall back to
   index-based reuse with W3042 ("reorderings will reuse DOM by position —
   add a stable key"). Duplicate keys within one `each` are W3043.
@@ -482,13 +495,18 @@ form "Add task" {
   is corrected in this document), parsed by the existing statement
   parser and type-checked by the existing checker, with three
   app-specific rules: assignment targets resolve per B.4; handler-only
-  builtins are in scope (`event_value: Str` on input/change, `event_key:
-  Str` on keydown/keyup, `event_x/event_y: Int` on pointer events,
-  `form_valid: Bool` inside `on submit`); and `return` is illegal in
-  handlers (E3045).
-- `while` is allowed in handlers but always triggers W3044 ("a long loop
+  builtins are in scope (`event_value: string` on input/change,
+  `event_key: string` on keydown/keyup, `event_x/event_y: int` on
+  pointer events, `form_valid: bool` and `field_errors: [string]`
+  inside `on submit`); and `return` is illegal in
+  handlers (E3045). Since S3 slice 3 the builtins are registered by
+  name and type (B.11, LANGUAGE_SPEC §C2); which builtin belongs to
+  which event context is enforced at S6.
+- `while` is allowed in handlers but always triggers W3040 ("a long loop
   in an event handler freezes the page; prefer `for` over a range") —
-  honest guidance, not a prohibition.
+  honest guidance, not a prohibition. (W3044 is "state field written
+  but never read" per the B.11 table — the earlier W3044 here was an
+  erratum, corrected with S3 slice 3.)
 - Handlers are lowered to KIR functions (same lowering as any Kin
   function) and compiled to JS (C.3). They may call any function of the
   program, including imported module functions — R1's "modules and
@@ -499,9 +517,9 @@ form "Add task" {
 ### B.7 Forms, validation, persistence, JSON (R8)
 
 ```
-store "tasks" { items, filter }        // persisted state keys (B.10)
+store "tasks" { items, filter }        // persisted state keys (B.7)
 
-state { draft: Str = "" }
+state { draft: string = "" }
 
 form "Add task" {
     field draft kind text {
@@ -637,10 +655,12 @@ app "Shop" {
 
 ### B.10 `str()` and small string helpers (enabling bindings)
 
-Bindings need strings: `str(expr)` (cast — exists), `upper(s)`,
-`lower(s)`, `trim(s)`, `contains(s, sub)`, `split(s, sep) -> [Str]`,
-`join(arr, sep) -> Str` are added as natives (checker table + VM natives +
-JS equivalents, all differentially tested — C.3). This is the minimum set
+Bindings need strings: `str(expr)` (registered by the checker in S3
+slice 3, app scope — it mirrors the `as string` cast surface for
+scalars), `upper(s)`, `lower(s)`, `trim(s)`, `contains(s, sub)`,
+`split(s, sep) -> [string]`, `join(arr, sep) -> string` are added as
+natives (checker registration: S3 slice 3; VM + JS equivalents with
+their differential tests: S5 — C.3). This is the minimum set
 bindings realistically need; anything richer waits for interpolation
 (P-004).
 
@@ -681,8 +701,8 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E3063 | unknown app page target — any page-target position (`route "x" -> Missing`, `not_found Missing`, `open <Page>` on buttons/links in page and component views, nested views included). App-scoped sibling of E3032 (website-scoped, frozen) — never reused. Hint lists declared pages; a target that names a component says "'X' is a component; routes target pages" (assigned in slice 2 — P-029) |
 | E3064 | duplicate page name inside an app — case-insensitive (mirrors E3031: page slugs are lowercased; assigned in slice 2 — P-029) |
 | E3065 | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names; assigned in slice 2 — P-029) |
-| E3066 | (reserved — remaining S3 slices: scope/handler/prop/store/field/animation semantics) |
-| E3067 | (reserved) |
+| E3066 | unknown name in the app scope — a binding expression, handler statement, call or bind target that resolves to no local, `each` loop variable, component prop/state, shared state, computed value, const, function or registered app builtin. App-scoped sibling of E3001 (frozen for ordinary function bodies); the hint lists what the current scope declares (assigned in slice 3) |
+| E3067 | (reserved — remaining S3 slices: handler subset, prop instantiation, computed cycles, stores/fields/animations) |
 | E3068 | (reserved) |
 | E3069 | (reserved) |
 | E3070 | target does not support `app` (android) |

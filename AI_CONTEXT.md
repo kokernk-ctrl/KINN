@@ -1,8 +1,8 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 2 +
-the let→fin rename (ADR-0029, develop past baa7b63).** Update this
+**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 3 +
+the let→fin rename (ADR-0029, develop past the slice-3 push).** Update this
 file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
@@ -59,29 +59,34 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **380 Rust tests** (265 kinc unit incl. app grammar,
-const, website, app validation, the fin rename; 28 pipeline, 39 CLI
-incl. 5 manifest, 16 ffi) and **66 Studio vitest tests**
+Test totals: **397 Rust tests** (280 kinc unit incl. app grammar,
+const, website, app validation, scope resolution, the fin rename; 28
+pipeline, 41 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
+tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
-grammar showcase (parses; build guards say what is not implemented
+grammar showcase (parses and checks — scope resolution since slice 3;
+build guards say what is not implemented
 yet); `examples/modules/` demonstrates multi-file projects with const
 exports (0.4.0 S1).
 
-Planned, not implemented (do not pretend otherwise): app semantics
-E3040–E3070/W3040–W3044 (0.4.0 S3, next), app lowering/AppModel (S4),
-KIR→JS + runtime (S5–S6), routing/forms/persistence (S7–S9), package
-manager/registry (spec in MODULE_SYSTEM.md), native codegen for
-console programs (0.4+), string interpolation (ADR-0013), graphics
-(0.5), Android `tokens` command, on-device backend-APK install
-(P-019), Studio desktop shell. The `app` grammar (S2) parses and
-dumps but does not yet check or build — the CLI says so.
+Planned, not implemented (do not pretend otherwise): the remaining
+app semantics — prop signatures at instantiation sites (E3040/E3041),
+handler subset (E3045/E3046, W3040), computed cycles (E3044),
+stores/fields/animations (E3047–E3061, W3042–W3044) (0.4.0 S3 slice
+4+, P-030 narrowed) — app lowering/AppModel (S4), KIR→JS + runtime
+(S5–S6), routing/forms/persistence (S7–S9), package manager/registry
+(spec in MODULE_SYSTEM.md), native codegen for console programs
+(0.4+), string interpolation (ADR-0013), graphics (0.5), Android
+`tokens` command, on-device backend-APK install (P-019), Studio
+desktop shell. An `app` program parses and checks (names, targets,
+scope resolution since slice 3) but does not build — the CLI says so.
 
 ## Repository structure
 
 ```
-compiler/                  Rust workspace (cargo test = 250 tests)
+compiler/                  Rust workspace (cargo test = 397 tests)
   crates/kinrt/            KIR instruction set, stack VM, disassembler
   crates/kinc/             lexer, parser, project, checker, lower,
                            site (SiteModel), backend/{web,android}
@@ -109,9 +114,12 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
 - P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
-- P-030 app scope/handler/prop/store/field/animation semantics still
-  unchecked (slice 3+); page targets and page/component name rules
-  ARE resolved since S3 slice 2 (P-028/P-029 closed as F-017/F-018).
+- P-030 narrowed 2026-11-23: app scope resolution IS checked (slice 3
+  — E3066/E3043/E3058/W3041, binding typing, param/store builtins by
+  name and type); still unchecked: handler subset, prop signatures at
+  instantiation sites, computed cycles, stores/fields/animations
+  (slice 4+). Page targets resolved since slice 2 (P-028/P-029 closed
+  as F-017/F-018). Param/store context restriction enforced at S6.
 
 ## Current task and next milestone
 
@@ -152,10 +160,21 @@ for the keyword: legacy `let x = ...;` gets **E2017** ("`let` was
 renamed to `fin`; use `fin`") then parses as `fin` (one diagnostic
 per use, no cascade); `let` stays a legal identifier otherwise.
 First free parser code (F-019). Repo fully migrated (examples,
-tests, docs, Studio web + Android); workspace 380 green. Next:
-**slice 3 = scope resolution + handler subset + prop checking
-(E3040/E3041/E3043–E3046 + B.11 warnings), audit-first; handler
-locals are fin/var post-rename; Playwright-with-S6 APPROVED.**
+tests, docs, Studio web + Android); workspace 380 green. **S3 slice
+3 landed (audit approved 2026-11-23): scope resolution + binding
+typing — E3066 (unknown name in the app scope, the E3001 sibling),
+E3043 live (props/computed/event builtins read-only in handlers;
+E3004 stays for `fin`/consts), E3058 (`param("…")` must name a
+declared route parameter), W3041 (handler local shadows state),
+`field`/`input bind` targets must be state keys, param/store/B.10
+builtins registered by name and type (known limit: param/store names
+recognized; context-restricted invocation enforced at S6), array
+`+`/`+=` app-scope-only (B.7); B.3/B.4/B.5/B.6/B.10 errata; the
+showcase's `due` state key added; +17 tests, workspace 397 green,
+0.3.0 web dist byte-identical; P-030 narrowed.** Next:
+**slice 4 = handler subset (E3045/E3046, W3040) + prop checking at
+instantiation sites (E3040/E3041); E3067–E3069 stay reserved;
+Playwright-with-S6 APPROVED.**
 Carry-overs: string casts/interpolation decision, native codegen
 spike, structs/records ADR (D2 stays out of 0.4.0).
 

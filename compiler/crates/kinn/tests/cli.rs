@@ -509,6 +509,71 @@ fn duplicate_app_page_and_component_names_are_e3064_e3065_at_the_cli() {
 }
 
 #[test]
+fn unknown_app_names_are_e3066_at_the_cli() {
+    // S3 slice 3: names resolve now — binding expressions type-check
+    // against the app scope, and an unknown name reports E3066 with
+    // the caret on the identifier and the scope hint.
+    let dir = tempdir("e3066");
+    let path = dir.join("unknown.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"Counter\" {\n",
+            "    state { n: int = 0 }\n",
+            "    page Home {\n",
+            "        text count\n",
+            "        button \"Reset\" {\n",
+            "            on click { n = 0; }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3066"));
+    assert!(stderr.contains("unknown name `count` in the app scope"));
+    assert!(stderr.contains("declared here: app state: n"));
+    assert!(stderr.contains("-->"));
+    assert!(stderr.contains("^"));
+}
+
+#[test]
+fn undeclared_route_params_are_e3058_and_the_showcase_stays_clean() {
+    // S3 slice 3: `param("…")` must name a declared route parameter
+    // (E3058, anchored on the quoted argument, hint lists the params)…
+    let dir = tempdir("e3058");
+    let path = dir.join("param.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"Shop\" {\n",
+            "    route \"item/:id\" -> Detail\n",
+            "    page Home { text \"x\" }\n",
+            "    page Detail {\n",
+            "        text param(\"nope\")\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3058"));
+    assert!(stderr.contains("route parameter this app does not declare"));
+    assert!(stderr.contains("declared route parameters: id"));
+    // …and the showcase passes the whole slice-3 surface with zero
+    // problems (state key `due` declared for the date field).
+    let out = kinn(&["check", &format!("{}/web/tasks_app.kin", EXAMPLES)]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("OK"), "{}", stdout);
+}
+
+#[test]
 fn targets_command_lists_both_targets() {
     let out = kinn(&["targets"]);
     assert_eq!(out.status.code(), Some(0));

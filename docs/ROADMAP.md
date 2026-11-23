@@ -109,12 +109,23 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       component views), E3064 (duplicate app page name,
       case-insensitive), E3065 (duplicate app component name,
       case-sensitive); pages and components are separate namespaces;
-      E3066–E3069 reserved; P-028 fixed (website diagnostics name the
-      entry file in multi-file programs); remaining unchecked
-      semantics tracked as P-030.** Remaining slices: scope
-      resolution, handler subset, prop checking (E3040/E3041),
-      computed cycles (E3044), stores/fields/animations (E3047–E3061),
-      W3040–W3044 (P-030)
+      E3067–E3069 stay reserved; P-028 fixed (website diagnostics
+      name the entry file in multi-file programs). Slice 3 landed
+      (scope resolution, P-030 narrowed 2026-11-23): E3066 (unknown
+      name in the app scope — views, handlers, calls, bind targets),
+      E3043 live (props/computed/event builtins read-only in
+      handlers; E3004 stays frozen for `fin`/consts), E3058
+      (`param("…")` must name a declared route parameter), W3041
+      (handler local shadows state), binding typing over the app
+      scope, `field`/`input bind` targets must be state keys, and the
+      param/store/B.10 builtins registered by name and type (known
+      limit: param/store names recognized; context-restricted
+      invocation enforced at S6); B.3/B.4/B.5/B.6/B.10 errata; +17
+      tests (15 checker + 2 CLI), workspace 397 green, 0.3.0 web dist
+      byte-identical, Studio 66/66 on fresh wasm.** Remaining
+      slices: handler subset (E3045/E3046, W3040), prop checking at
+      instantiation sites (E3040/E3041), computed cycles (E3044),
+      stores/fields/animations (E3047–E3061), W3042–W3044 (P-030)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
