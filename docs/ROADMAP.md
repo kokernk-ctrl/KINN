@@ -146,9 +146,23 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       but never read) and N3040 (beginner-mode note); E3060 registered
       with no firing condition in the 0.4.0 state model, E3067–E3069
       stay reserved; +28 tests (25 checker + 3 CLI), workspace 439
-      green, 0.3.0 web dist byte-identical.** S3 is done. Remaining:
-      S4 AppModel lowering + E3070 (P-030)
-- [ ] S4 AppModel lowering + honest static-target rejection (E3070)
+      green, 0.3.0 web dist byte-identical.** S3 is done; S4 is next.
+- [x] S4 AppModel lowering + honest static-target rejection (E3070)
+      (landed 2026-11-23: `lower::app_model` → the position-free
+      AppModel in `crates/kinc/src/appmodel.rs`; `Compiled.app`
+      carries the lowered model — component templates with validated
+      prop signatures, the binding graph with exact static dependency
+      sets, handler KIR function names with association/ordering and
+      position-free bodies, route table with `:param` lists, animation
+      table with concrete values, store keys; determinism tested;
+      E3070 gates the android target in the backend, CLI and FFI —
+      no AppModel path reaches android generation; static website
+      builds untouched; +18 tests (13 appmodel lowering + 2 pipeline
+      + 2 CLI + 1 FFI), workspace 457 green, 0.3.0 web dist
+      byte-identical. Honest boundary: handler/computed `FuncDef`
+      emission waits for the runtime ABI — the manifest contract is
+      S6's (C.2); the AppModel carries the KIR names, association,
+      ordering and bodies)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
       lifecycle) — dependency-free, ≤ 16 KB, no frameworks. Playwright

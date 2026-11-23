@@ -20,7 +20,7 @@ use crate::project::{dirname, qualified_name, Project};
 use crate::site::{Element, PageModel, SiteModel};
 use kinrt::kir::{CastTarget, NativeId};
 use kinrt::{FuncDef, Instr, Module, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Lower a checked single-file program to a KIR module.
 pub fn lower(p: &Program) -> Module {
@@ -804,5 +804,706 @@ fn native_id(name: &str) -> Option<NativeId> {
         "min" => Some(NativeId::Min),
         "max" => Some(NativeId::Max),
         _ => None,
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// S4: AppModel lowering (0.4.0) — the position-free, target-independent
+// model for `app` programs (docs/DYNAMIC_WEB_ARCHITECTURE.md C.9, Part D
+// S4). Runs only on programs the checker accepted, so E3040–E3061 and
+// W3040–W3044 already hold; no semantic rule is re-implemented here.
+// ---------------------------------------------------------------------------
+
+/// Lower a checked `app` declaration into the [`AppModel`]
+/// (`kinc::appmodel`).
+///
+/// Determinism is the contract: tables keep source order, handlers and
+/// bindings are enumerated in one documented walk (pages then
+/// components, elements in view order, per element: its binding
+/// expressions, then its handlers, then nested bodies), dependency sets
+/// are sorted, and re-lowering the same program yields an identical
+/// model (tested).
+///
+/// The binding graph's dependency sets are **state field names**,
+/// transitively resolved through the computed graph (E3044 guarantees
+/// acyclicity). Component-scope reads (props, component state) and
+/// `each` loop variables shadow the app layer exactly as the resolution
+/// order does, so they are never shared-state dependencies.
+pub fn app_model(a: &AppDecl) -> crate::appmodel::AppModel {
+    // Names the dependency extraction classifies against.
+    let state_names: Vec<String> = a.state.iter().map(|f| f.name.clone()).collect();
+    let computed_names: Vec<String> = a.computed.iter().map(|c| c.name.clone()).collect();
+
+    // Transitive state-field dependencies per computed value: direct
+    // state reads plus the fixpoint through other computed values. The
+    // graph is acyclic (E3044), so the iteration terminates.
+    let mut computed_transitive: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for cd in &a.computed {
+            let mut deps = BTreeSet::new();
+            collect_state_deps(
+                &cd.expr,
+                &state_names,
+                &computed_names,
+                &computed_transitive,
+                &mut deps,
+            );
+            let entry = computed_transitive.entry(cd.name.clone()).or_default();
+            if *entry != deps {
+                *entry = deps;
+                changed = true;
+            }
+        }
+    }
+
+    // One deterministic walk for handlers and bindings, per container.
+    let mut handlers: Vec<crate::appmodel::HandlerModel> = Vec::new();
+    let mut bindings: Vec<crate::appmodel::BindingSite> = Vec::new();
+
+    let mut pages = Vec::with_capacity(a.pages.len());
+    for p in &a.pages {
+        let shadow: Vec<String> = Vec::new();
+        let elements = lower_view(
+            &p.name,
+            &p.elements,
+            &shadow,
+            &state_names,
+            &computed_names,
+            &computed_transitive,
+            &mut Vec::new(),
+            &mut handlers,
+            &mut bindings,
+        );
+        pages.push(crate::appmodel::AppPageModel { name: p.name.clone(), elements });
+    }
+
+    let mut components = Vec::new();
+    let mut seen_components: HashSet<&str> = HashSet::new();
+    for comp in &a.components {
+        if !seen_components.insert(comp.name.as_str()) {
+            continue; // E3065 duplicates never reach lowering (first wins)
+        }
+        let shadow: Vec<String> = comp
+            .props
+            .iter()
+            .map(|p| p.name.clone())
+            .chain(comp.state.iter().map(|f| f.name.clone()))
+            .collect();
+        let view = lower_view(
+            &comp.name,
+            &comp.view,
+            &shadow,
+            &state_names,
+            &computed_names,
+            &computed_transitive,
+            &mut Vec::new(),
+            &mut handlers,
+            &mut bindings,
+        );
+        components.push(crate::appmodel::ComponentModel {
+            name: comp.name.clone(),
+            props: comp
+                .props
+                .iter()
+                .map(|p| crate::appmodel::PropModel {
+                    name: p.name.clone(),
+                    ty: p.ty.clone(),
+                    default: p.default.as_ref().map(lower_expr),
+                })
+                .collect(),
+            state: comp
+                .state
+                .iter()
+                .map(|f| crate::appmodel::AppStateField {
+                    name: f.name.clone(),
+                    ty: f.ty.clone(),
+                    init: lower_expr(&f.init),
+                })
+                .collect(),
+            view,
+        });
+    }
+
+    let computed = a
+        .computed
+        .iter()
+        .map(|cd| crate::appmodel::ComputedModel {
+            name: cd.name.clone(),
+            deps: computed_transitive.get(&cd.name).cloned().unwrap_or_default(),
+            kir: format!("app:computed:{}", cd.name),
+            expr: lower_expr(&cd.expr),
+        })
+        .collect();
+
+    let routes = a
+        .routes
+        .iter()
+        .map(|r| crate::appmodel::RouteModel {
+            path: r.path.clone(),
+            target: r.target.page.clone(),
+            params: r
+                .path
+                .split('/')
+                .filter_map(|seg| seg.strip_prefix(':').map(|name| name.to_string()))
+                .collect(),
+        })
+        .collect();
+
+    let stores = a
+        .stores
+        .iter()
+        .map(|s| crate::appmodel::StoreModel {
+            name: s.name.clone(),
+            keys: s.keys.iter().map(|k| k.name.clone()).collect(),
+        })
+        .collect();
+
+    let animation = a.animation.as_ref().map(|anim| crate::appmodel::AnimationTable {
+        keyframes: anim
+            .keyframes
+            .iter()
+            .map(|k| crate::appmodel::KeyframesModel {
+                name: k.name.clone(),
+                steps: k
+                    .steps
+                    .iter()
+                    .map(|st| crate::appmodel::KeyframeStepModel {
+                        at: match &st.at {
+                            StepAt::From => crate::appmodel::StepAtModel::From,
+                            StepAt::To => crate::appmodel::StepAtModel::To,
+                            StepAt::Step(e) => crate::appmodel::StepAtModel::Step(lower_expr(e)),
+                        },
+                        props: st
+                            .props
+                            .iter()
+                            .map(|p| (p.name.clone(), lower_expr(&p.value)))
+                            .collect(),
+                    })
+                    .collect(),
+                duration: k.duration.as_ref().and_then(int_literal),
+                delay: k.delay.as_ref().and_then(int_literal),
+                easing: k.easing.as_ref().and_then(lower_easing),
+            })
+            .collect(),
+        transitions: anim
+            .transitions
+            .iter()
+            .map(|t| crate::appmodel::TransitionModel {
+                name: t.name.clone(),
+                duration: t.duration.as_ref().and_then(int_literal),
+                delay: t.delay.as_ref().and_then(int_literal),
+                easing: t.easing.as_ref().and_then(lower_easing),
+            })
+            .collect(),
+    });
+
+    crate::appmodel::AppModel {
+        name: a.name.clone(),
+        navigation: a.navigation.unwrap_or(NavigationMode::Mpa),
+        not_found: a.not_found.as_ref().map(|nf| nf.page.clone()),
+        theme: a.theme.iter().map(|t| (t.token.clone(), t.value.clone())).collect(),
+        state: a
+            .state
+            .iter()
+            .map(|f| crate::appmodel::AppStateField {
+                name: f.name.clone(),
+                ty: f.ty.clone(),
+                init: lower_expr(&f.init),
+            })
+            .collect(),
+        computed,
+        animation,
+        transition: a.transition.as_ref().map(|t| t.name.clone()),
+        routes,
+        stores,
+        pages,
+        components,
+        handlers,
+        bindings,
+    }
+}
+
+/// The integer literal of an animation option (E3050 guarantees int
+/// literals; a negated literal keeps its sign).
+fn int_literal(e: &Expr) -> Option<i64> {
+    match &e.kind {
+        ExprKind::IntLit(v) => Some(*v),
+        ExprKind::Unary { op: UnOp::Neg, expr } => match &expr.kind {
+            ExprKind::IntLit(v) => Some(-v),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The validated easing expression as its concrete shape (E3049 ran).
+fn lower_easing(e: &Expr) -> Option<crate::appmodel::Easing> {
+    use crate::appmodel::Easing;
+    match &e.kind {
+        ExprKind::Ident(word) => match word.as_str() {
+            "linear" => Some(Easing::Linear),
+            "ease" => Some(Easing::Ease),
+            "ease_in" => Some(Easing::EaseIn),
+            "ease_out" => Some(Easing::EaseOut),
+            "ease_in_out" => Some(Easing::EaseInOut),
+            _ => None,
+        },
+        ExprKind::Call { name, args } if name == "cubic" && args.len() == 4 => {
+            let mut vals = [0.0; 4];
+            for (i, a) in args.iter().enumerate() {
+                vals[i] = match &a.kind {
+                    ExprKind::IntLit(v) => *v as f64,
+                    ExprKind::FloatLit(v) => *v,
+                    ExprKind::Unary { op: UnOp::Neg, expr } => match &expr.kind {
+                        ExprKind::IntLit(v) => -(*v as f64),
+                        ExprKind::FloatLit(v) => -*v,
+                        _ => return None,
+                    },
+                    _ => return None,
+                };
+            }
+            Some(Easing::Cubic(vals))
+        }
+        _ => None,
+    }
+}
+
+/// AST expression → position-free [`crate::appmodel::AppExpr`] (columns
+/// dropped, the source line kept for C.7 error mapping).
+fn lower_expr(e: &Expr) -> crate::appmodel::AppExpr {
+    use crate::appmodel::{AppExpr, AppExprKind};
+    let line = e.line;
+    let kind = match &e.kind {
+        ExprKind::IntLit(v) => AppExprKind::Int(*v),
+        ExprKind::FloatLit(v) => AppExprKind::Float(*v),
+        ExprKind::BoolLit(v) => AppExprKind::Bool(*v),
+        ExprKind::StrLit(v) => AppExprKind::Str(v.clone()),
+        ExprKind::Ident(name) => AppExprKind::Local(name.clone()),
+        ExprKind::ArrayLit(items) => AppExprKind::Array(items.iter().map(lower_expr).collect()),
+        ExprKind::Index { base, index } => {
+            AppExprKind::Index(Box::new(lower_expr(base)), Box::new(lower_expr(index)))
+        }
+        ExprKind::Cast { expr, ty } => {
+            AppExprKind::Cast { expr: Box::new(lower_expr(expr)), ty: ty.clone() }
+        }
+        ExprKind::Unary { op, expr } => match op {
+            UnOp::Neg => AppExprKind::Neg(Box::new(lower_expr(expr))),
+            UnOp::Not => AppExprKind::Not(Box::new(lower_expr(expr))),
+        },
+        ExprKind::Binary { op, lhs, rhs } => {
+            AppExprKind::Binary(*op, Box::new(lower_expr(lhs)), Box::new(lower_expr(rhs)))
+        }
+        ExprKind::Call { name, args } => AppExprKind::Call {
+            name: name.clone(),
+            args: args.iter().map(lower_expr).collect(),
+        },
+        ExprKind::ModCall { module, name, args } => AppExprKind::ModCall {
+            module: module.clone(),
+            name: name.clone(),
+            args: args.iter().map(lower_expr).collect(),
+        },
+        ExprKind::ModConst { module, name } => {
+            AppExprKind::ModConst { module: module.clone(), name: name.clone() }
+        }
+    };
+    AppExpr { kind, line }
+}
+
+/// AST statements → position-free statements.
+fn lower_stmts(b: &Block) -> Vec<crate::appmodel::AppStmt> {
+    b.stmts.iter().map(lower_stmt).collect()
+}
+
+/// One statement → its position-free form.
+fn lower_stmt(s: &Stmt) -> crate::appmodel::AppStmt {
+    use crate::appmodel::{AppStmt, AppStmtKind, ForIterModel};
+    let line = s.line();
+    let kind = match s {
+        Stmt::VarDecl { mutable, name, ty, init, .. } => AppStmtKind::VarDecl {
+            mutable: *mutable,
+            name: name.clone(),
+            ty: ty.clone(),
+            init: lower_expr(init),
+        },
+        Stmt::Assign { name, op, value, .. } => AppStmtKind::Assign {
+            name: name.clone(),
+            op: *op,
+            value: lower_expr(value),
+        },
+        Stmt::IndexAssign { base, index, value, .. } => AppStmtKind::IndexAssign {
+            base: lower_expr(base),
+            index: lower_expr(index),
+            value: lower_expr(value),
+        },
+        Stmt::If { cond, then_branch, else_branch, .. } => AppStmtKind::If {
+            cond: lower_expr(cond),
+            then_branch: lower_stmts(then_branch),
+            else_branch: else_branch.as_ref().map(|st| lower_stmt_boxed(st)),
+        },
+        Stmt::While { cond, body, .. } => {
+            AppStmtKind::While { cond: lower_expr(cond), body: lower_stmts(body) }
+        }
+        Stmt::For { var, iter, body, .. } => AppStmtKind::For {
+            var: var.clone(),
+            iter: match iter {
+                ForIter::Range { start, end, inclusive } => ForIterModel::Range {
+                    start: lower_expr(start),
+                    end: lower_expr(end),
+                    inclusive: *inclusive,
+                },
+                ForIter::Expr(e) => ForIterModel::Expr(lower_expr(e)),
+            },
+            body: lower_stmts(body),
+        },
+        Stmt::Return { value, .. } => AppStmtKind::Return { value: value.as_ref().map(lower_expr) },
+        Stmt::Break { .. } => AppStmtKind::Break,
+        Stmt::Continue { .. } => AppStmtKind::Continue,
+        Stmt::Expr { expr, .. } => AppStmtKind::Expr(lower_expr(expr)),
+        Stmt::Block { block, .. } => AppStmtKind::Block(lower_stmts(block)),
+    };
+    AppStmt { kind, line }
+}
+
+/// One nested `else if` statement (the boxed branch of an `If`).
+fn lower_stmt_boxed(s: &Stmt) -> Box<crate::appmodel::AppStmt> {
+    Box::new(lower_stmt(s))
+}
+
+/// The state fields one expression reads, given the shadow set (each
+/// variables, component props/state — names that resolve to something
+/// other than shared state) and the computed graph's transitive sets.
+/// Computed references contribute their transitive state dependencies;
+/// consts, functions and builtins contribute nothing.
+fn collect_state_deps(
+    e: &Expr,
+    state_names: &[String],
+    computed_names: &[String],
+    computed_transitive: &HashMap<String, BTreeSet<String>>,
+    out: &mut BTreeSet<String>,
+) {
+    match &e.kind {
+        ExprKind::Ident(name) => {
+            if computed_names.iter().any(|n| n == name) {
+                if let Some(deps) = computed_transitive.get(name) {
+                    out.extend(deps.iter().cloned());
+                }
+            } else if state_names.iter().any(|n| n == name) {
+                out.insert(name.clone());
+            }
+        }
+        ExprKind::ArrayLit(items) => {
+            for it in items {
+                collect_state_deps(it, state_names, computed_names, computed_transitive, out);
+            }
+        }
+        ExprKind::Index { base, index } => {
+            collect_state_deps(base, state_names, computed_names, computed_transitive, out);
+            collect_state_deps(index, state_names, computed_names, computed_transitive, out);
+        }
+        ExprKind::Cast { expr, .. } | ExprKind::Unary { expr, .. } => {
+            collect_state_deps(expr, state_names, computed_names, computed_transitive, out);
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_state_deps(lhs, state_names, computed_names, computed_transitive, out);
+            collect_state_deps(rhs, state_names, computed_names, computed_transitive, out);
+        }
+        ExprKind::Call { args, .. } | ExprKind::ModCall { args, .. } => {
+            for a in args {
+                collect_state_deps(a, state_names, computed_names, computed_transitive, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The deterministic view walk: converts the element tree, records
+/// every dynamic binding site (owner + element path + role + static
+/// dependency set) and every handler (owner + element path + event +
+/// KIR name + body) in the shared, ordered sinks. `path` is the index
+/// chain from the container root; `shadow` holds names that resolve to
+/// component-scope or loop-local bindings inside this container.
+#[allow(clippy::too_many_arguments)]
+fn lower_view(
+    owner: &str,
+    elements: &[ViewElement],
+    shadow: &[String],
+    state_names: &[String],
+    computed_names: &[String],
+    computed_transitive: &HashMap<String, BTreeSet<String>>,
+    path: &mut Vec<u32>,
+    handlers: &mut Vec<crate::appmodel::HandlerModel>,
+    bindings: &mut Vec<crate::appmodel::BindingSite>,
+) -> Vec<crate::appmodel::AppElement> {
+    use crate::appmodel::{AppElement, BindingSite, FieldAttrModel};
+    use ast_to_model::anim_attrs;
+
+    // Local helpers binding the shared context.
+    fn record_binding(
+        owner: &str,
+        path: &[u32],
+        role: &str,
+        e: &Expr,
+        shadow: &[String],
+        state_names: &[String],
+        computed_names: &[String],
+        computed_transitive: &HashMap<String, BTreeSet<String>>,
+        bindings: &mut Vec<BindingSite>,
+    ) {
+        if is_literal(e) {
+            return; // static content is inlined into templates (C.6)
+        }
+        let mut deps = BTreeSet::new();
+        if !shadow.iter().any(|s| expr_mentions(e, s)) {
+            collect_state_deps(e, state_names, computed_names, computed_transitive, &mut deps);
+        }
+        bindings.push(BindingSite {
+            owner: owner.to_string(),
+            path: path.to_vec(),
+            role: role.to_string(),
+            deps,
+        });
+    }
+
+    elements
+        .iter()
+        .enumerate()
+        .map(|(idx, e)| {
+            path.push(idx as u32);
+            let element = match &e.kind {
+                ViewElementKind::Title { value, anim } => {
+                    record_binding(owner, path, "title", value, shadow, state_names, computed_names, computed_transitive, bindings);
+                    AppElement::Title { value: lower_expr(value), anim: anim_attrs(anim) }
+                }
+                ViewElementKind::Heading { value, anim } => {
+                    record_binding(owner, path, "heading", value, shadow, state_names, computed_names, computed_transitive, bindings);
+                    AppElement::Heading { value: lower_expr(value), anim: anim_attrs(anim) }
+                }
+                ViewElementKind::Text { value, anim } => {
+                    record_binding(owner, path, "text", value, shadow, state_names, computed_names, computed_transitive, bindings);
+                    AppElement::Text { value: lower_expr(value), anim: anim_attrs(anim) }
+                }
+                ViewElementKind::Button { label, open, anim, handlers: hs } => {
+                    record_binding(owner, path, "button label", label, shadow, state_names, computed_names, computed_transitive, bindings);
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Button {
+                        label: lower_expr(label),
+                        open: open.as_ref().map(|t| t.page.clone()),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::Link { label, open, anim, handlers: hs } => {
+                    record_binding(owner, path, "link label", label, shadow, state_names, computed_names, computed_transitive, bindings);
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Link {
+                        label: lower_expr(label),
+                        open: open.as_ref().map(|t| t.page.clone()),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::Image { src, alt, anim, handlers: hs } => {
+                    record_binding(owner, path, "image src", src, shadow, state_names, computed_names, computed_transitive, bindings);
+                    record_binding(owner, path, "image alt", alt, shadow, state_names, computed_names, computed_transitive, bindings);
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Image {
+                        src: lower_expr(src),
+                        alt: lower_expr(alt),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::Divider { anim } => AppElement::Divider { anim: anim_attrs(anim) },
+                ViewElementKind::Input { bind, anim, handlers: hs } => {
+                    // A two-way bind renders the field's value: a
+                    // dependency on itself.
+                    let mut deps = BTreeSet::new();
+                    deps.insert(bind.page.clone());
+                    bindings.push(BindingSite {
+                        owner: owner.to_string(),
+                        path: path.to_vec(),
+                        role: "input bind".to_string(),
+                        deps,
+                    });
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Input {
+                        bind: bind.page.clone(),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::When { cond, then_branch, else_branch } => {
+                    record_binding(owner, path, "when cond", cond, shadow, state_names, computed_names, computed_transitive, bindings);
+                    let then_view = lower_view(owner, then_branch, shadow, state_names, computed_names, computed_transitive, path, handlers, bindings);
+                    let otherwise = else_branch
+                        .as_ref()
+                        .map(|els| lower_view(owner, els, shadow, state_names, computed_names, computed_transitive, path, handlers, bindings));
+                    AppElement::When {
+                        cond: lower_expr(cond),
+                        then_branch: then_view,
+                        otherwise,
+                    }
+                }
+                ViewElementKind::Each { iter, var, key, body } => {
+                    record_binding(owner, path, "each iter", iter, shadow, state_names, computed_names, computed_transitive, bindings);
+                    if let Some(k) = key {
+                        record_binding(owner, path, "each key", k, shadow, state_names, computed_names, computed_transitive, bindings);
+                    }
+                    // The loop variable shadows the app layer inside the body.
+                    let mut body_shadow = shadow.to_vec();
+                    body_shadow.push(var.clone());
+                    let body_view = lower_view(owner, body, &body_shadow, state_names, computed_names, computed_transitive, path, handlers, bindings);
+                    AppElement::Each {
+                        iter: lower_expr(iter),
+                        var: var.clone(),
+                        key: key.as_ref().map(lower_expr),
+                        body: body_view,
+                    }
+                }
+                ViewElementKind::Component { module, name, args, anim, handlers: hs } => {
+                    for arg in args {
+                        record_binding(owner, path, &format!("prop {}", arg.name), &arg.value, shadow, state_names, computed_names, computed_transitive, bindings);
+                    }
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Component {
+                        module: module.clone(),
+                        name: name.clone(),
+                        args: args.iter().map(|a| (a.name.clone(), lower_expr(&a.value))).collect(),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::Form { legend, body, handlers: hs } => {
+                    record_binding(owner, path, "form legend", legend, shadow, state_names, computed_names, computed_transitive, bindings);
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    let body_view = lower_view(owner, body, shadow, state_names, computed_names, computed_transitive, path, handlers, bindings);
+                    AppElement::Form {
+                        legend: lower_expr(legend),
+                        body: body_view,
+                        handlers: hidx,
+                    }
+                }
+                ViewElementKind::Field { bind, kind, attrs, anim, handlers: hs, .. } => {
+                    let mut deps = BTreeSet::new();
+                    deps.insert(bind.page.clone());
+                    bindings.push(BindingSite {
+                        owner: owner.to_string(),
+                        path: path.to_vec(),
+                        role: "field bind".to_string(),
+                        deps,
+                    });
+                    let attr_role = |w: &str| format!("field {}", w);
+                    for attr in attrs {
+                        match attr {
+                            FieldAttr::Label(v) => record_binding(owner, path, &attr_role("label"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::Placeholder(v) => record_binding(owner, path, &attr_role("placeholder"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::Pattern(v) => record_binding(owner, path, &attr_role("pattern"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::MinLength(v) => record_binding(owner, path, &attr_role("min_length"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::MaxLength(v) => record_binding(owner, path, &attr_role("max_length"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::MinValue(v) => record_binding(owner, path, &attr_role("min_value"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::MaxValue(v) => record_binding(owner, path, &attr_role("max_value"), v, shadow, state_names, computed_names, computed_transitive, bindings),
+                            FieldAttr::Required => {}
+                        }
+                    }
+                    let hidx = lower_handlers(owner, path, hs, handlers);
+                    AppElement::Field {
+                        bind: bind.page.clone(),
+                        kind: *kind,
+                        attrs: attrs
+                            .iter()
+                            .map(|a| match a {
+                                FieldAttr::Label(v) => FieldAttrModel::Label(lower_expr(v)),
+                                FieldAttr::Placeholder(v) => FieldAttrModel::Placeholder(lower_expr(v)),
+                                FieldAttr::Required => FieldAttrModel::Required,
+                                FieldAttr::MinLength(v) => FieldAttrModel::MinLength(lower_expr(v)),
+                                FieldAttr::MaxLength(v) => FieldAttrModel::MaxLength(lower_expr(v)),
+                                FieldAttr::MinValue(v) => FieldAttrModel::MinValue(lower_expr(v)),
+                                FieldAttr::MaxValue(v) => FieldAttrModel::MaxValue(lower_expr(v)),
+                                FieldAttr::Pattern(v) => FieldAttrModel::Pattern(lower_expr(v)),
+                            })
+                            .collect(),
+                        anim: anim_attrs(anim),
+                        handlers: hidx,
+                    }
+                }
+            };
+            path.pop();
+            element
+        })
+        .collect()
+}
+
+/// Lower one element's handlers into the shared sink; returns their
+/// indices in [`AppModel::handlers`]. KIR names are deterministic:
+/// `app:<owner>:<event>:<n>` with `n` a per-(owner, event) ordinal in
+/// walk order.
+fn lower_handlers(
+    owner: &str,
+    path: &[u32],
+    hs: &[OnEvent],
+    sink: &mut Vec<crate::appmodel::HandlerModel>,
+) -> Vec<usize> {
+    // Per-(owner, event) ordinals derive from what is already in the
+    // sink (the walk is sequential, so counting there is the walk
+    // order).
+    let mut indices = Vec::with_capacity(hs.len());
+    for (i, on) in hs.iter().enumerate() {
+        let ordinal = sink
+            .iter()
+            .filter(|h| h.owner == owner && h.event == on.event.as_str())
+            .count() as u32;
+        sink.push(crate::appmodel::HandlerModel {
+            kir: format!("app:{}:{}:{}", owner, on.event.as_str(), ordinal),
+            owner: owner.to_string(),
+            path: path.to_vec(),
+            event: on.event.as_str().to_string(),
+            key_filter: on.key_filter.clone(),
+            index: i as u32,
+            body: lower_stmts(&on.body),
+        });
+        indices.push(sink.len() - 1);
+    }
+    indices
+}
+
+/// Whether an expression is a plain literal (static content is inlined
+/// into templates — C.6); everything else is a dynamic binding site.
+fn is_literal(e: &Expr) -> bool {
+    matches!(
+        e.kind,
+        ExprKind::IntLit(_) | ExprKind::FloatLit(_) | ExprKind::BoolLit(_) | ExprKind::StrLit(_)
+    )
+}
+
+/// Whether an expression mentions the given identifier anywhere (the
+/// shadow test for the dependency walk).
+fn expr_mentions(e: &Expr, name: &str) -> bool {
+    match &e.kind {
+        ExprKind::Ident(n) => n == name,
+        ExprKind::ArrayLit(items) => items.iter().any(|i| expr_mentions(i, name)),
+        ExprKind::Index { base, index } => expr_mentions(base, name) || expr_mentions(index, name),
+        ExprKind::Cast { expr, .. } | ExprKind::Unary { expr, .. } => expr_mentions(expr, name),
+        ExprKind::Binary { lhs, rhs, .. } => expr_mentions(lhs, name) || expr_mentions(rhs, name),
+        ExprKind::Call { args, .. } | ExprKind::ModCall { args, .. } => {
+            args.iter().any(|a| expr_mentions(a, name))
+        }
+        _ => false,
+    }
+}
+
+/// AST→model conversion helpers that carry no walk state.
+mod ast_to_model {
+    /// Element animation attributes, position free.
+    pub fn anim_attrs(a: &crate::ast::ElementAnim) -> crate::appmodel::AnimAttrs {
+        crate::appmodel::AnimAttrs {
+            enter: a.enter.as_ref().map(|r| r.name.clone()),
+            exit: a.exit.as_ref().map(|r| r.name.clone()),
+            hover: a.hover.as_ref().map(|r| r.name.clone()),
+            press: a.press.as_ref().map(|r| r.name.clone()),
+            scroll: a.scroll.as_ref().map(|r| r.name.clone()),
+        }
     }
 }

@@ -2,10 +2,13 @@
 //!
 //! Pipeline: [`lexer`] → [`parser`] → [`project`] (multi-file loading) →
 //! [`checker`] → [`lower`], driven by [`driver`]. Diagnostics are produced
-//! by [`diagnostics`]. The declarative `website` module additionally
-//! lowers to a target-independent [`site::SiteModel`], which the
-//! [`backend`] generators turn into real artifacts (web, android).
+//! by [`diagnostics`]. The declarative `website` module lowers to a
+//! target-independent [`site::SiteModel`]; the dynamic `app` module
+//! lowers to the position-free [`appmodel::AppModel`] (the S4 lowering
+//! product). Backend generators turn models into real artifacts (web,
+//! android).
 
+pub mod appmodel;
 pub mod ast;
 pub mod backend;
 pub mod checker;

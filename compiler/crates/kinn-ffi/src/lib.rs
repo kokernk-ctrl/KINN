@@ -456,7 +456,12 @@ pub unsafe extern "C" fn kinn_build_android(src_ptr: *const u8, src_len: usize, 
                 }
                 None => {
                     let mut ds = diags.clone();
-                    ds.push(no_site_diagnostic());
+                    // E3070 (C.9): an app program never reaches android
+                    // generation; console programs keep E3038.
+                    match kinc::backend::android_gate(None, c.app.as_ref()) {
+                        Err(d) => ds.push(d),
+                        Ok(()) => ds.push(no_site_diagnostic()),
+                    }
                     build_result_json(false, None, &[], &ds, &sources, mode)
                 }
             },
@@ -689,6 +694,23 @@ website "MyWebsite" {
         assert!(json.contains("\"ok\":false"), "{}", json);
         assert!(json.contains("E3038"), "{}", json);
         assert!(json.contains("\"pages\":0"), "{}", json);
+    }
+
+    const APP_SRC: &str = r#"app "A" {
+    state { n: int = 0 }
+    page Home {
+        text str(n)
+        button "B" { on click { n = 1; } }
+    }
+}"#;
+
+    #[test]
+    fn build_android_rejects_app_programs_with_e3070() {
+        // C.9: no AppModel path reaches android generation.
+        let json = build_android_json("app.kin", APP_SRC);
+        assert!(json.contains("\"ok\":false"), "{}", json);
+        assert!(json.contains("E3070"), "{}", json);
+        assert!(!json.contains("MainActivity.kt"), "{}", json);
     }
 
     #[test]

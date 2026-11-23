@@ -1,10 +1,10 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 complete
-(all five slices; app semantics fully checked, P-030 closed to S4).**
-Update this file after significant milestones. Keep it between 500
-and 900 words.
+**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S4 complete
+(all app semantics checked, AppModel lowering landed, E3070 gating
+android).** Update this file after significant milestones. Keep it
+between 500 and 900 words.
 
 ## What KINN is
 
@@ -60,11 +60,10 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **439 Rust tests** (316 kinc unit incl. app grammar,
-const, website, app validation, scope resolution, the fin rename,
-instantiation + handler rules, computed cycles, recursion/depth,
-store/field/animation rules; 28
-pipeline, 5 kinn-android, 47 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
+Test totals: **457 Rust tests** (329 kinc unit incl. app grammar,
+const, website, the full app semantic surface, the AppModel lowering
+suite; 30
+pipeline, 5 kinn-android, 49 CLI incl. 5 manifest, 17 ffi) and **66 Studio vitest
 
 tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
@@ -75,22 +74,25 @@ is checked since S3 slice 5; build guards say what is not
 implemented yet); `examples/modules/` demonstrates multi-file
 projects with const exports (0.4.0 S1).
 
-Planned, not implemented (do not pretend otherwise): app
-lowering/AppModel (S4) — the last app-stage item, with E3070 —
-KIR→JS + runtime (S5–S6), routing/forms/persistence (S7–S9),
+Planned, not implemented (do not pretend otherwise): KIR→JS + web
+runtime (S5–S6 — handler/computed `FuncDef` emission waits for the
+S6 manifest ABI; the AppModel carries names, association, ordering
+and bodies), routing/forms/persistence (S7–S9),
 package manager/registry (spec in MODULE_SYSTEM.md), native codegen
 for console programs (0.4+), string interpolation (ADR-0013),
 graphics (0.5), Android `tokens` command, on-device backend-APK
-install (P-019), Studio desktop shell. An `app` program parses and
-checks (all of S3) but does not build — the CLI says so.
+install (P-019), Studio desktop shell. An `app` program parses,
+checks (all of S3) and lowers to `Compiled.app` (S4) but does not
+build — the CLI says so (web: honest guard; android: E3070).
 
 ## Repository structure
 
 ```
-compiler/                  Rust workspace (cargo test = 439 tests)
+compiler/                  Rust workspace (cargo test = 457 tests)
   crates/kinrt/            KIR instruction set, stack VM, disassembler
   crates/kinc/             lexer, parser, project, checker, lower,
-                           site (SiteModel), backend/{web,android}
+                           site (SiteModel), appmodel (AppModel),
+                           backend/{web,android}
   crates/kinn/             CLI binary (kinn) + kinn.toml manifest
   crates/kinn-ffi/         C-ABI bridge: check/run/build_web/build_android
   crates/kinn-android/     JNI glue for the app (only crate with a dep)
@@ -115,18 +117,19 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
 - P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
-- P-030 closed to S4 work only (narrowed 2026-11-23, slice 5): the
-  whole B.11 app semantic surface IS checked — scope resolution,
-  binding typing, `field`/`input bind` targets, `param()`/assignment
-  rules, the param/store/B.10 builtins, component instantiation
-  validation (E3040/E3041), the handler subset (E3045/E3046, W3040),
-  computed cycles (E3044, dependency-order typing), component
-  recursion/depth (E3053/E3054), stores/fields/animations
-  (E3059/E3061, E3047–E3050, W3042–W3044, N3040). E3060 registered
-  with no firing condition in the 0.4.0 state model (see the §C2
-  slice-5 rulings). Page targets resolved since slice 2 (P-028/P-029
-  closed as F-017/F-018). Param/store context restriction enforced
-  at S6.
+- P-030 closed (2026-11-23, S3 complete + S4 landed): the whole
+  B.11 app semantic surface IS checked — scope resolution, binding
+  typing, `field`/`input bind` targets, `param()`/assignment rules,
+  the param/store/B.10 builtins, component instantiation validation
+  (E3040/E3041), the handler subset (E3045/E3046, W3040), computed
+  cycles (E3044, dependency-order typing), component recursion/depth
+  (E3053/E3054), stores/fields/animations (E3059/E3061,
+  E3047–E3050, W3042–W3044, N3040) — and `app` programs lower to
+  `Compiled.app` (S4 AppModel, determinism tested); android rejects
+  apps with E3070. E3060 registered with no firing condition in the
+  0.4.0 state model (see the §C2 slice-5 rulings). Page targets
+  resolved since slice 2 (P-028/P-029 closed as F-017/F-018).
+  Param/store context restriction enforced at S6.
 
 ## Current task and next milestone
 
@@ -204,7 +207,22 @@ bases are writes), N3040 (beginner note, mode B); E3060 registered
 with no firing condition in the 0.4.0 state model; +28 tests (25
 checker + 3 CLI), workspace 439 green, 0.3.0 web dist
 byte-identical; P-030 closed to S4 work.**
-Next: **S4 — AppModel lowering + E3070 (android rejects apps);
+**S4 landed (2026-11-23): AppModel lowering + E3070 — `lower::app_model`
+lowers the checked app into the position-free AppModel
+(`crates/kinc/src/appmodel.rs`; `Compiled.app` carries it, raw AST
+exposure gone): component templates with validated prop signatures,
+the binding graph with exact static dependency sets (computed refs
+resolved transitively, each-vars/component scopes shadow), handler
+KIR function names `app:<owner>:<event>:<n>` with association,
+ordering and position-free bodies (source lines retained for C.7),
+route table with `:param` lists, animation table with concrete
+durations/easings, store keys; determinism tested. Honest boundary:
+handler/computed `FuncDef` emission waits for the S6 manifest ABI.
+E3070 gates the android target in the backend, CLI and FFI — no
+AppModel path reaches android generation; static website builds
+untouched. +18 tests (13 appmodel + 2 pipeline + 2 CLI + 1 FFI),
+workspace 457 green, 0.3.0 web dist byte-identical.**
+Next: **S5 — KIR→JS codegen with the differential harness;
 Playwright-with-S6 APPROVED.**
 Carry-overs: string casts/interpolation decision, native codegen
 spike, structs/records ADR (D2 stays out of 0.4.0).

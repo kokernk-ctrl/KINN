@@ -11,6 +11,66 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S4: AppModel lowering + android rejection (E3070)
+
+- Language/pipeline: **`app` programs lower now**. `lower::app_model`
+  turns the checked `app` declaration into the **AppModel**
+  (`crates/kinc/src/appmodel.rs`) — the position-free,
+  target-independent sibling of the site model (C.9), exposed as
+  `Compiled.app` (the raw-AST exposure is gone; no AST crosses the
+  pipeline boundary). The model carries:
+  - **Component templates** with validated prop signatures (names,
+    types, optional position-free defaults) and component state —
+    templates, never runtime values; first declaration wins after
+    E3065.
+  - **The binding graph**: every dynamic view binding (owner page or
+    component, element path, role) with its **static dependency set** —
+    exact state-field names, computed-value references resolved
+    transitively through the acyclic graph E3044 guarantees, `each`
+    loop variables and component props/state shadowing respected
+    (they are per-instance, not shared-state dependencies). Static
+    literals are inlined into templates, not binding sites (C.6).
+  - **Handler KIR function names** — deterministic
+    `app:<owner>:<event>:<n>` (per-(owner, event) ordinal in the walk
+    order) — with event association, key filters, source ordering and
+    the validated bodies as position-free statements. Computed values
+    likewise carry `app:computed:<name>`.
+  - **Route table** (validated paths, targets, `:param` name lists),
+    **animation table** (concrete integer milliseconds and easing
+    shapes — E3050/E3049 ran; `cubic` keeps its four numbers),
+    **store keys**, theme tokens, navigation mode, `not_found` and the
+    app-level page transition.
+  - Determinism is part of the contract and tested: `AppModel` derives
+    `PartialEq`, re-lowering the same program yields an identical
+    model (pipeline test included).
+  - **Honest boundary:** handler/computed `FuncDef` emission waits for
+    the runtime ABI — the manifest contract is S6's (C.2). The
+    AppModel carries the KIR names, association, ordering and bodies;
+    S5 lowers them into `FuncDef`s for the KIR→JS translation.
+    Source lines are retained in the lowered bodies (the same data
+    `FuncDef.lines` carries) because C.7 maps runtime errors back to
+    `.kin` lines; columns and lengths are gone.
+- Backend honesty: **E3070** — the android target rejects `app`
+  programs ("the android target does not support `app` programs —
+  dynamic applications are web-only in 0.4.0") before any generation
+  runs. The gate lives in the backend (`backend::android_gate`, C.9:
+  no model is fed to a backend that did not declare support) and is
+  enforced by the CLI (`kinn build --target android` on an app exits 1
+  with E3070 and generates nothing) and the FFI
+  (`kinn_build_android`). Static `website` android builds are
+  untouched (tested). The web target's honest "dynamic apps are not
+  implemented yet" guard stays (S5+ lands the dist); console programs
+  keep E3038.
+- E3070 registered in LANGUAGE_SPEC §C2; the S4 shape and boundary are
+  recorded in §C3 and DYNAMIC_WEB_ARCHITECTURE (Part D S4 + C.9).
+- Tests: +18 (13 AppModel lowering tests — tables, exact dependency
+  sets for direct/indirect/independent bindings, loop-variable and
+  component-scope shadowing, handler association/ordering/naming,
+  line-carrying bodies, animation values, component templates,
+  determinism, the E3070 gate, cycles-never-reach-lowering; 2
+  pipeline; 2 CLI; 1 FFI). Workspace **457 green**. The 0.3.0 web
+  dist is byte-identical (rebuilt and diffed).
+
 ### Added — S3 slice 5: app semantics complete (P-030 closed to S4 work only)
 
 - Language: **the remaining app semantic rules are implemented** —

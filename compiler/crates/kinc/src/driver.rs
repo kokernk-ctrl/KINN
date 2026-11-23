@@ -5,6 +5,7 @@
 //! to source text (a filesystem read in the CLI, a virtual filesystem in
 //! KINN Studio and the Android app — import semantics stay identical).
 
+use crate::appmodel::AppModel;
 use crate::ast::Mode;
 use crate::checker;
 use crate::diagnostics::{has_errors, Diagnostic};
@@ -17,7 +18,7 @@ use std::collections::HashMap;
 /// A successfully compiled program: the linked KIR module, the entry
 /// mode, the source of every file that took part (for rendering
 /// diagnostics later), the site model when the program declares a
-/// `website`, and the raw `app` declaration when it declares an `app`
+/// `website`, and the lowered AppModel when it declares an `app`
 /// (consumed by the build backends; `None` for console programs).
 #[derive(Debug)]
 pub struct Compiled {
@@ -27,10 +28,12 @@ pub struct Compiled {
     pub sources: HashMap<String, String>,
     /// Lowered `website` declaration, when the entry file has one.
     pub site: Option<SiteModel>,
-    /// The parsed `app` declaration, when the entry file has one
-    /// (0.4.0 S2: grammar only — checking is partial, lowering to an
-    /// `AppModel` arrives with S4, so this is the raw AST for now).
-    pub app: Option<crate::ast::AppDecl>,
+    /// Lowered `app` declaration — the position-free, target-independent
+    /// AppModel (0.4.0 S4; the dynamic sibling of the site model, C.9).
+    /// Consumed by the web dynamic path from S5 on; the android backend
+    /// rejects it with E3070 before any generation runs. `None` for
+    /// website and console programs.
+    pub app: Option<AppModel>,
 }
 
 /// Compile a project starting at `entry_path` / `entry_src`. The loader
@@ -56,7 +59,7 @@ pub fn compile_project(
         .websites
         .first()
         .map(lower::site_model);
-    let app = proj.files[0].program.apps.first().cloned();
+    let app = proj.files[0].program.apps.first().map(lower::app_model);
     (Some(Compiled { module, mode, sources: proj.sources, site, app }), diags)
 }
 

@@ -367,12 +367,24 @@ fn build_command(args: &[String]) -> ExitCode {
         Some(s) => s,
         None => {
             if let Some(app) = &compiled.app {
+                // E3070 (C.9): the android target consumes a SiteModel —
+                // an app program never silently passes through it as if
+                // dynamic application support existed.
+                if target == "android" {
+                    let err = kinc::backend::android_gate(compiled.site.as_ref(), Some(app))
+                        .expect_err("an app program is always rejected for android");
+                    eprintln!("error[{}]: {}", err.code, err.message);
+                    if let Some(h) = &err.hint {
+                        eprintln!("hint: {}", h);
+                    }
+                    return ExitCode::from(1);
+                }
                 eprintln!(
                     "error: `{}` declares an app (\"{}\"), but building dynamic apps is not implemented yet",
                     file, app.name
                 );
                 eprintln!(
-                    "  the 0.4.0 dynamic pipeline is under construction (grammar is in, checking/lowering/runtime arrive next);"
+                    "  the 0.4.0 dynamic pipeline is under construction (S4 lowering is in; KIR→JS/runtime arrive next);"
                 );
                 eprintln!("  the {} target currently builds `website` declarations — see docs/BACKEND_WEB.md", target);
                 return ExitCode::from(1);

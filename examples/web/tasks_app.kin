@@ -15,9 +15,13 @@
 // key guidance (W3042/W3043), unused-state-field analysis (W3044) and
 // the beginner-mode note N3040 — this file is `*mode = B`, so `kinn
 // check` shows it once. The only diagnostics here are that note.
-// Building dynamic apps (runtime, routing, forms, persistence) arrives
-// with the later 0.4.0 steps — run `kinn build` on it today and it
-// says so honestly instead of pretending.
+// Since S4 the app also LOWERS: `Compiled.app` carries the
+// position-free AppModel (component templates, the binding graph with
+// exact static dependency sets, handler KIR function names, routes,
+// animations, store keys). Building dynamic apps (runtime, routing,
+// forms, persistence) arrives with the later 0.4.0 steps — run
+// `kinn build` on it today and it says so honestly (web: the honest
+// guard; android: E3070) instead of pretending.
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin

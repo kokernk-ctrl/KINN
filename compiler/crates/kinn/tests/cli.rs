@@ -785,3 +785,49 @@ fn component_recursion_reports_e3053_at_the_cli() {
     assert!(stderr.contains("E3053"), "{}", stderr);
     assert!(stderr.contains("instantiates itself"), "{}", stderr);
 }
+
+#[test]
+fn android_target_rejects_app_programs_with_e3070() {
+    // C.9 / S4: the android backend consumes a SiteModel — an app
+    // program must never silently pass through it. The CLI gates on
+    // E3070 before any generation runs.
+    let dir = tempdir("e3070");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/tasks_app.kin", EXAMPLES),
+        "--target",
+        "android",
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3070"), "{}", stderr);
+    assert!(stderr.contains("android"), "{}", stderr);
+    assert!(!dir.join("settings.gradle.kts").exists(), "no Gradle project may be generated");
+}
+
+#[test]
+fn android_target_still_builds_website_programs() {
+    // The gate is app-specific: static website android behavior is
+    // preserved (the toolless export path degrades honestly, so only
+    // the file set is asserted here).
+    let dir = tempdir("e3070-site");
+    let out = Command::new(env!("CARGO_BIN_EXE_kinn"))
+        .args([
+            "build",
+            &format!("{}/web/site.kin", EXAMPLES),
+            "--target",
+            "android",
+            "--out",
+            dir.to_str().unwrap(),
+        ])
+        .env("PATH", "/definitely/not/here")
+        .env_remove("ANDROID_HOME")
+        .env_remove("ANDROID_SDK_ROOT")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(dir.join("settings.gradle.kts").exists());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("E3070"));
+}

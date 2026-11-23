@@ -930,7 +930,11 @@ the web dynamic path. `backend/android.rs` keeps consuming `SiteModel`
 exactly as today and rejects app programs with E3070. `backend/web.rs`
 static generation keeps consuming `SiteModel` for `website` programs —
 byte-identical output. No model is ever fed to a backend that did not
-declare support for it.
+declare support for it. **S4 landed:** `lower::app_model` produces the
+AppModel (`Compiled.app: Option<AppModel>` — no raw AST crosses the
+pipeline boundary); the E3070 gate runs in the backend
+(`backend::android_gate`), the CLI and the FFI before any android
+generation, and static website builds are untouched.
 
 ---
 
@@ -988,6 +992,25 @@ Estimates are ordering and dependency statements, not dates.
   map is data — assert exact sets).
 - **Acceptance:** `Compiled.app` fully position-free; no AppModel path
   reaches android; site model byte-identical for 0.3 programs.
+- **LANDED (2026-11-23):** `crates/kinc/src/appmodel.rs` +
+  `lower::app_model`; `Compiled.app: Option<AppModel>` (the raw AST
+  exposure is gone). The AppModel carries component templates with
+  validated prop signatures, the binding graph (per-binding static
+  dependency sets over shared state, computed references resolved
+  transitively, `each` variables and component props/state shadowing
+  respected), handler KIR function names (`app:<owner>:<event>:<n>` —
+  association, ordering and position-free bodies with source lines
+  retained for C.7 mapping), the route table (with `:param` lists),
+  the animation table (concrete durations/easings — E3050/E3049 ran),
+  store keys, theme, navigation/not_found and the app transition.
+  Determinism is tested (`AppModel: PartialEq`; re-lowering is
+  identical). **Honest S4 boundary:** handler/computed `FuncDef`
+  emission waits for the runtime ABI — the manifest contract is S6's
+  (C.2); nothing invents runtime behavior. E3070 gates the android
+  target in the backend (`backend::android_gate`), the CLI and the
+  FFI; static website android builds are untouched. Workspace 457
+  green; 0.3.0 web dist byte-identical.
+
 
 ### S5 — KIR → JS codegen + differential harness
 

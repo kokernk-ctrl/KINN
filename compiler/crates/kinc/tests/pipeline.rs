@@ -378,3 +378,49 @@ fn website_program_with_consts_keeps_site_model_untouched() {
     assert_eq!(c.module.consts.len(), 1);
     assert_eq!(c.module.consts[0].0, "TITLE");
 }
+
+// -- 0.4.0 S4: Compiled.app carries the lowered AppModel -------------------
+
+#[test]
+fn compiles_app_to_an_appmodel_not_the_raw_ast() {
+    let src = r#"app "T" {
+    state { n: int = 0 }
+    computed doubled = n * 2
+    page Home {
+        text "N: " + str(doubled)
+        button "B" { on click { n = n + 1; } }
+    }
+}
+"#;
+    let (compiled, diags) = driver::compile_full(src);
+    let c = compiled.expect("app compiles");
+    assert!(diags.iter().all(|d| d.code == "N3040"), "only the beginner note: {:#?}", diags);
+    let app = c.app.as_ref().expect("the AppModel is exposed");
+    assert_eq!(app.name, "T");
+    assert_eq!(app.state.len(), 1);
+    assert_eq!(app.computed[0].name, "doubled");
+    assert_eq!(app.computed[0].kir, "app:computed:doubled");
+    let deps: Vec<_> = app.computed[0].deps.iter().map(|s| s.as_str()).collect();
+    assert_eq!(deps, vec!["n"]);
+    assert_eq!(app.handlers.len(), 1);
+    assert_eq!(app.handlers[0].kir, "app:Home:click:0");
+    assert_eq!(app.bindings.len(), 1);
+    assert_eq!(app.bindings[0].role, "text");
+    // Determinism through the whole pipeline.
+    let (again, _) = driver::compile_full(src);
+    assert_eq!(c.app, again.unwrap().app);
+}
+
+#[test]
+fn android_gate_rejects_app_compilations_e3070() {
+    let src = "app \"A\" { page Home { text \"x\" } }\n";
+    let (compiled, _) = driver::compile_full(src);
+    let c = compiled.expect("compiles");
+    let err = kinc::backend::android_gate(c.site.as_ref(), c.app.as_ref())
+        .expect_err("an app program is rejected for android");
+    assert_eq!(err.code, "E3070");
+    // A website compilation passes the same gate untouched.
+    let (site_c, _) = driver::compile_full("website \"S\" { page Home { text \"x\" } }");
+    let sc = site_c.unwrap();
+    assert!(kinc::backend::android_gate(sc.site.as_ref(), sc.app.as_ref()).is_ok());
+}

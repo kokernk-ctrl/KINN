@@ -498,6 +498,7 @@ byte-identical across the rename.
 | W3043 | warning | duplicate `each` key values — statically detectable when the key expression never references the loop variable (every row gets the same key by construction) (live since slice 5) |
 | W3044 | warning | state field written but never read — no view binding, `computed` expression, handler read or two-way bind consumes it, so nothing renders or derives from it; never-written fields are not its subject (live since slice 5) |
 | N3040 | note | beginner hint: event handlers run in the browser, state is local to the device — once per handler-bearing app in mode B (mode A hides notes, mode S assumes the reader knows) (live since slice 5) |
+| E3070 | checker/backend | the target does not support `app` programs (android): a dynamic app is rejected with E3070 before any android generation runs — the backend gate (`backend::android_gate`), the CLI (`kinn build --target android`) and the FFI all enforce it; static `website` android builds are untouched (live since S4) |
 
 E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
 presence rules and E3042/E3055–E3057/E3062 the declaration-validation
@@ -834,7 +835,19 @@ with no firing condition in the 0.4.0 state model (§C2 slice-5
 rulings); E3067–E3069 stay reserved; **param/store names
 recognized; context-restricted invocation enforced at S6**. Every
 other command says honestly that dynamic builds are not implemented
-yet. Lowering arrives with S4.
+yet. **S4 landed (lowering):** `lower::app_model` lowers the checked
+app into the position-free `AppModel` (`crates/kinc/src/appmodel.rs`) —
+component templates with validated prop signatures, the binding graph
+with exact static dependency sets, handler KIR function names
+(`app:<owner>:<event>:<n>`) with association, ordering and
+position-free bodies (source lines retained for C.7 error mapping),
+route table, animation table and store keys — exposed as
+`Compiled.app`. Determinism is part of the contract (tested):
+re-lowering the same program yields an identical model. Handler and
+computed `FuncDef` emission waits for the runtime ABI — the manifest
+contract is S6's (C.2). The android target rejects app programs with
+**E3070** (backend gate, CLI, FFI) — no AppModel path reaches android
+generation.
 
 ```
 app_decl      := "app" STRING "{" app_section* "}"            ; E2016 when the name is not a string
