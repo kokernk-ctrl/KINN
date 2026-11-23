@@ -1,30 +1,23 @@
 // examples/web/tasks_app.kin — the 0.4.0 dynamic app target shape
 // (grammar showcase; docs/DYNAMIC_WEB_ARCHITECTURE.md B.2–B.9).
 //
-// STATUS (0.4.0 S3 slice 4): this file parses, `kinn ast` shows its
-// tree, and `kinn check` validates the app declaration — name, route
-// paths, duplicate route/state/computed/prop names, the
-// navigation/not_found pairing, page-target resolution (routes,
-// not_found, open on buttons/links) and page/component name
-// uniqueness (separate namespaces). Names RESOLVE (slice 3): binding
-// expressions and handler bodies type-check against the app scope
-// (state, computed, props, `each` loop variables, consts and
-// functions), `field`/`input bind` targets must be state keys,
-// `param("id")` must match a declared route parameter (E3058),
-// unknown names report E3066, props/computed values are read-only in
-// handlers (E3043), and the param/store builtins are registered by
-// name and type (param/store names recognized; context-restricted
-// invocation enforced at S6). Since slice 4, component instantiation
-// sites validate (E3040 unknown component, E3041 prop signature —
-// unknown/missing/duplicate/mistyped props) and the handler subset
-// is enforced: `return` inside a handler is E3045, duplicate handlers
-// for one event name on an element are E3046, and `while` inside a
-// handler warns W3040 (stays legal). Computed cycles (E3044),
-// component recursion/depth caps (E3053/E3054) and
-// stores/fields/animations (E3047–E3061, W3042–W3044) are not checked
-// yet, and building dynamic apps (runtime, routing, forms,
-// persistence) arrives with the later 0.4.0 steps — run `kinn build`
-// on it today and it says so honestly instead of pretending.
+// STATUS (0.4.0 S3 slice 5 — app semantics complete): this file parses,
+// `kinn ast` shows its tree, and `kinn check` validates the full app
+// semantic surface — declaration rules (name, route paths, duplicates,
+// navigation/not_found pairing, page targets, namespaces), scope
+// resolution and binding typing (E3066/E3043/E3058/W3041, the
+// param/store/B.10 builtins), instantiation sites (E3040/E3041), the
+// handler subset (E3045/E3046/W3040), computed dependency cycles
+// (E3044; computed values type in dependency order), component
+// recursion and the 32-level composition cap (E3053/E3054), store keys
+// (E3059), field kind/state type matching (E3061), animation
+// declarations, references and restrictions (E3047–E3050), `each`
+// key guidance (W3042/W3043), unused-state-field analysis (W3044) and
+// the beginner-mode note N3040 — this file is `*mode = B`, so `kinn
+// check` shows it once. The only diagnostics here are that note.
+// Building dynamic apps (runtime, routing, forms, persistence) arrives
+// with the later 0.4.0 steps — run `kinn build` on it today and it
+// says so honestly instead of pretending.
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin

@@ -734,3 +734,54 @@ fn android_export_without_a_toolchain_reports_exported() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("status: project exported"), "{}", stdout);
 }
+
+// -- S3 slice 5: the remaining app semantic rules at the CLI -----------------
+
+#[test]
+fn computed_cycle_reports_e3044_at_the_cli() {
+    // E3044: `b` closes the a → b → a cycle.
+    let dir = tempdir("e3044");
+    let path = dir.join("cycle.kin");
+    std::fs::write(
+        &path,
+        "app \"A\" {\n    computed a = b + 1\n    computed b = a + 1\n    page Home { text \"x\" }\n}\n",
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3044"), "{}", stderr);
+    assert!(stderr.contains("computed cycle: a → b → a"), "{}", stderr);
+}
+
+#[test]
+fn store_key_mismatch_reports_e3059_at_the_cli() {
+    let dir = tempdir("e3059");
+    let path = dir.join("store.kin");
+    std::fs::write(
+        &path,
+        "app \"A\" {\n    state { items: [string] = [] }\n    store \"tasks\" { items, missing }\n    page Home { text \"x\" }\n}\n",
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3059"), "{}", stderr);
+    assert!(stderr.contains("missing"), "{}", stderr);
+}
+
+#[test]
+fn component_recursion_reports_e3053_at_the_cli() {
+    let dir = tempdir("e3053");
+    let path = dir.join("recur.kin");
+    std::fs::write(
+        &path,
+        "app \"A\" {\n    component Loop { view { Loop() } }\n    page Home { Loop() }\n}\n",
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E3053"), "{}", stderr);
+    assert!(stderr.contains("instantiates itself"), "{}", stderr);
+}

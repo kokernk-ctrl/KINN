@@ -1346,7 +1346,7 @@ impl Parser {
             match self.expect_ident() {
                 Ok(t) => {
                     if let TokKind::Ident(k) = t.kind {
-                        keys.push(k);
+                        keys.push(StoreKey { name: k, line: t.line, col: t.col });
                     }
                 }
                 Err(()) => {
@@ -1809,10 +1809,11 @@ impl Parser {
                     _ => unreachable!("expect_ident guarantees an identifier"),
                 };
                 let kind_tok = self.peek_token().clone();
-                let kind = match &kind_tok.kind {
+                let (kind, kind_val_line, kind_val_col) = match &kind_tok.kind {
                     TokKind::Ident(w) if w == "kind" => {
                         self.bump();
                         let k = self.peek_token().clone();
+                        let (kl, kc) = (k.line, k.col);
                         match k.kind.clone() {
                             TokKind::Ident(word) => {
                                 let fk = match word.as_str() {
@@ -1838,7 +1839,7 @@ impl Parser {
                                     }
                                 };
                                 self.bump();
-                                fk
+                                (fk, kl, kc)
                             }
                             other => {
                                 self.fail(
@@ -1965,7 +1966,15 @@ impl Parser {
                     }
                 }
                 let anim = self.element_anim()?;
-                ViewElementKind::Field { bind, kind, attrs, anim, handlers }
+                ViewElementKind::Field {
+                    bind,
+                    kind,
+                    kind_line: kind_val_line,
+                    kind_col: kind_val_col,
+                    attrs,
+                    anim,
+                    handlers,
+                }
             }
             _ => {
                 // Not a known element word — the word itself is already
@@ -3790,8 +3799,11 @@ mod tests {
             "app \"D\" { store \"tasks\" { items, done, filter } store \"ui\" { open } page Home { text \"x\" } }",
         );
         assert_eq!(a.stores.len(), 2);
-        assert_eq!(a.stores[0].keys, vec!["items", "done", "filter"]);
-        assert_eq!(a.stores[1].keys, vec!["open"]);
+        let keys: Vec<&str> = a.stores[0].keys.iter().map(|k| k.name.as_str()).collect();
+        assert_eq!(keys, vec!["items", "done", "filter"]);
+        assert_eq!(a.stores[1].keys[0].name, "open");
+        // Slice 5: each key carries its identifier position (E3059).
+        assert!(a.stores[0].keys[0].line > 0);
     }
 
     #[test]

@@ -369,12 +369,21 @@ pub struct ElementAnim {
     pub scroll: Option<AnimRef>,
 }
 
+/// One key inside a `store` block: the state-field name it persists and
+/// the key identifier's position (checker E3059 anchors there).
+#[derive(Debug, Clone)]
+pub struct StoreKey {
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+}
+
 /// `store "tasks" { items, filter }` — named set of persisted state keys
 /// (B.7/B.10). Keys must name declared state fields (checker E3059, S3).
 #[derive(Debug, Clone)]
 pub struct StoreDecl {
     pub name: String,
-    pub keys: Vec<String>,
+    pub keys: Vec<StoreKey>,
     pub line: u32,
     pub col: u32,
 }
@@ -472,9 +481,13 @@ pub enum ViewElementKind {
     Form { legend: Expr, body: Vec<ViewElement>, handlers: Vec<OnEvent> },
     /// `field <state-key> kind <text|number|date|email|password|textarea>
     /// { attrs..., on input/change/focus/blur { ... } }` (B.7).
+    /// `kind_line`/`kind_col` point at the kind word — the checker's
+    /// E3061 (kind/state-type mismatch) anchors there.
     Field {
         bind: OpenTarget,
         kind: FieldKind,
+        kind_line: u32,
+        kind_col: u32,
         attrs: Vec<FieldAttr>,
         anim: ElementAnim,
         handlers: Vec<OnEvent>,
@@ -1049,7 +1062,8 @@ fn dump_app(s: &mut String, a: &AppDecl) {
         }
     }
     for st in &a.stores {
-        s.push_str(&format!("  store {:?} ({})  ({}:{})\n", st.name, st.keys.join(", "), st.line, st.col));
+        let keys = st.keys.iter().map(|k| k.name.as_str()).collect::<Vec<_>>().join(", ");
+        s.push_str(&format!("  store {:?} ({})  ({}:{})\n", st.name, keys, st.line, st.col));
     }
     for r in &a.routes {
         s.push_str(&format!(
@@ -1196,7 +1210,7 @@ fn dump_view_elements(s: &mut String, elems: &[ViewElement], depth: usize) {
                 dump_view_elements(s, body, depth + 1);
                 dump_handlers(s, handlers, depth);
             }
-            ViewElementKind::Field { bind, kind, attrs, anim, handlers } => {
+            ViewElementKind::Field { bind, kind, attrs, anim, handlers, .. } => {
                 s.push_str(&format!(
                     "{}field {} kind {}{}  ({})\n",
                     ind,

@@ -47,6 +47,10 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         var_decls: Vec::new(),
         app: None,
         handler_depth: 0,
+        cur_component: None,
+        app_state_reads: HashSet::new(),
+        app_state_writes: HashSet::new(),
+        suppress_state_reads: false,
     };
 
     // Pass 0: website declarations (0.3.0). Only the entry file may
@@ -874,6 +878,94 @@ fn check_app(c: &mut Checker, a: &AppDecl) {
     for (t, subject, verb) in opens {
         unknown_page_target(c, t, &subject, verb, &page_names, &component_names);
     }
+
+    // -- E3059: store keys must name declared state fields -------------------
+    //
+    // A `store` block persists a set of app state fields (B.7): every
+    // key must name a field declared in the app's `state { … }` blocks.
+    // Component state fields are per-instance values — they are not
+    // shared state and cannot be persisted here, so they do not
+    // satisfy a key. Anchored on the key identifier.
+    if !a.stores.is_empty() {
+        let state_names: Vec<&str> = a.state.iter().map(|f| f.name.as_str()).collect();
+        for st in &a.stores {
+            for key in &st.keys {
+                if state_names.contains(&key.name.as_str()) {
+                    continue;
+                }
+                let mut d = Diagnostic::error(
+                    "E3059",
+                    format!(
+                        "store \"{}\" persists `{}`, which is not a declared state field",
+                        st.name, key.name
+                    ),
+                    key.line,
+                    key.col,
+                    key.name.chars().count() as u32,
+                );
+                d.hint = Some(if state_names.is_empty() {
+                    "store keys must be fields of the app's `state { … }` block — this app declares no state fields"
+                        .to_string()
+                } else {
+                    format!("store keys must be fields of the app's `state {{ … }}` block — declared state fields: {}", state_names.join(", "))
+                });
+                c.diags.push(d.in_file(c.file.clone()));
+            }
+        }
+    }
+
+    // -- N3040: beginner note on the first handler-bearing app ---------------
+    //
+    // B.11: "beginner hint: event handlers run in the browser, state is
+    // local". Emitted once per app declaration, in beginner mode (B) —
+    // mode A hides notes for terse output, mode S assumes the reader
+    // knows. Anchored on the `app` keyword.
+    if c.mode == Mode::B && app_has_handlers(&a.pages, &a.components) {
+        let mut d = Diagnostic::note(
+            "N3040",
+            "event handlers run in the browser; state is local to this device",
+            a.line,
+            a.col,
+            3, // the `app` keyword
+        );
+        d.hint = Some(
+            "handlers react to clicks and input; the state they change lives in this browser only (nothing is uploaded)"
+                .to_string(),
+        );
+        c.diags.push(d.in_file(c.file.clone()));
+    }
+}
+
+/// Whether any view in the app attaches an event handler (recursive
+/// over `when`/`otherwise`/`each`/`form` bodies), for the N3040 note.
+fn app_has_handlers(pages: &[AppPageDecl], components: &[ComponentDecl]) -> bool {
+    fn elements_have(elements: &[ViewElement]) -> bool {
+        for e in elements {
+            let direct = match &e.kind {
+                ViewElementKind::Button { handlers, .. }
+                | ViewElementKind::Link { handlers, .. }
+                | ViewElementKind::Image { handlers, .. }
+                | ViewElementKind::Input { handlers, .. }
+                | ViewElementKind::Field { handlers, .. }
+                | ViewElementKind::Component { handlers, .. } => !handlers.is_empty(),
+                ViewElementKind::Form { body, handlers, .. } => {
+                    !handlers.is_empty() || elements_have(body)
+                }
+                ViewElementKind::When { then_branch, else_branch, .. } => {
+                    elements_have(then_branch)
+                        || else_branch.as_ref().is_some_and(|els| elements_have(els))
+                }
+                ViewElementKind::Each { body, .. } => elements_have(body),
+                _ => false,
+            };
+            if direct {
+                return true;
+            }
+        }
+        false
+    }
+    pages.iter().any(|p| elements_have(&p.elements))
+        || components.iter().any(|comp| elements_have(&comp.view))
 }
 
 /// One E3063 for an unknown page target. The hint lists the declared
@@ -1013,10 +1105,12 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
     // layer resolves duplicates ("the name still resolves to the first").
     let mut components: HashMap<String, ComponentSig> = HashMap::new();
     let mut component_order: Vec<String> = Vec::new();
+    let mut comp_decls: HashMap<&str, &ComponentDecl> = HashMap::new();
     for comp in &a.components {
         if components.contains_key(&comp.name) {
             continue; // E3065 already fired in pass 0b; the first wins
         }
+        comp_decls.insert(comp.name.as_str(), comp);
         components.insert(
             comp.name.clone(),
             ComponentSig {
@@ -1034,8 +1128,80 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
         component_order.push(comp.name.clone());
     }
     let pages: Vec<String> = a.pages.iter().map(|p| p.name.clone()).collect();
+
+    // -- animation namespace (slice 5) ---------------------------------------
+    //
+    // One namespace for `keyframes` and `transition` names (B.8):
+    // `enter "pop"` resolves against both. B.11 assigns no duplicate-
+    // animation code, so the first declaration of a name wins and the
+    // rest resolve against it (the established first-wins pattern).
+    let mut animation_names: Vec<String> = Vec::new();
+    let mut animations: HashMap<&str, &KeyframesDecl> = HashMap::new();
+    let mut transitions_by_name: HashMap<&str, &TransitionDecl> = HashMap::new();
+    if let Some(anim) = &a.animation {
+        for k in &anim.keyframes {
+            if animations.contains_key(k.name.as_str()) {
+                continue;
+            }
+            animations.insert(k.name.as_str(), k);
+            animation_names.push(k.name.clone());
+        }
+        for t in &anim.transitions {
+            if animations.contains_key(t.name.as_str()) || transitions_by_name.contains_key(t.name.as_str()) {
+                continue;
+            }
+            transitions_by_name.insert(t.name.as_str(), t);
+            animation_names.push(t.name.clone());
+        }
+    }
     let hint = app_scope_hint(a, None);
-    c.app = Some(AppScope { route_params, hint, components, component_order, pages });
+    c.app = Some(AppScope { route_params, hint, components, component_order, pages, animation_names });
+
+    // -- slice 5: app-level animation declarations ---------------------------
+    //
+    // The `animation` block itself (E3048 keyframe property whitelist,
+    // E3049 easing, E3050 duration/delay) and the app-level page/route
+    // `transition "name"` reference (E3047).
+    if let Some(anim) = &a.animation {
+        check_animation_block(c, anim);
+    }
+    if let Some(tr) = &a.transition {
+        check_anim_ref(c, tr, "transition");
+    }
+
+    // -- E3053: component recursion (slice 5) ---------------------------------
+    check_component_recursion(c, a);
+
+    // -- E3054: composition depth (slice 5) -----------------------------------
+    //
+    // Pages are the roots of every rendered composition: view elements
+    // start at depth 1, `when`/`otherwise`/`each`/`form` bodies and
+    // instantiated component views nest one level deeper, and B.3 caps
+    // the composition at 32. The first element past the cap is reported
+    // per page (children of an over-cap element overflow for the same
+    // reason — one diagnostic teaches the fix without flooding).
+    for p in &a.pages {
+        let mut reported = false;
+        let mut stack: Vec<&str> = Vec::new();
+        check_view_depth(c, &p.elements, 1, p.name.as_str(), &mut reported, &mut stack, &comp_decls);
+    }
+
+    // -- E3044: computed dependency cycles (slice 5) --------------------------
+    //
+    // A computed value derives from state, other computed values and
+    // functions (B.4). References between computed values form a graph;
+    // cycles are E3044 — directly (`computed a = a + 1`) or through a
+    // chain (`a → b → c → a`). The diagnostic anchors on the reference
+    // that closes the cycle and names the whole path; each distinct
+    // cycle is reported once, independent cycles are all reported, and
+    // valid chains never report (DFS follows computed→computed edges
+    // only; state-field leaves terminate).
+    let computed_names: Vec<&str> = a.computed.iter().map(|cd| cd.name.as_str()).collect();
+    let mut computed_deps: Vec<Vec<(usize, u32, u32)>> = vec![Vec::new(); a.computed.len()];
+    for (i, cd) in a.computed.iter().enumerate() {
+        collect_computed_deps(&cd.expr, &computed_names, i, &mut computed_deps[i]);
+    }
+    detect_computed_cycles(c, a, &computed_deps);
 
     // App layer. E3042 already rejected duplicates in this scope; a
     // duplicate insert keeps the first declaration (its error is
@@ -1052,7 +1218,7 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
     }
     for cd in &a.computed {
         layer.entry(cd.name.clone()).or_insert(VarInfo {
-            ty: Type::Error, // published below, in source order
+            ty: Type::Error, // published in dependency order below; cycle members stay Error
             mutable: false,
             line: cd.line,
             col: cd.col,
@@ -1074,12 +1240,17 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
         }
     }
 
-    // Computed expressions. Each computed publishes its type in source
-    // order; references to later computed values poison silently until
-    // the E3044 (cycles) slice — names always resolve, cycles do not
-    // cascade as unknowns.
+    // Computed expressions type in **dependency order** (slice 5). The
+    // slice-3 pass published types in source order, which poisoned
+    // forward references; with cycles rejected by E3044 above, the
+    // dependency order exists, so a computed that references a later
+    // one now types from its target's real type (the replacement the
+    // slice-3 ruling scheduled). Cycle members and everything
+    // downstream of them never become ready and stay `Error` — the
+    // established poison pattern, so one mistake does not cascade.
     c.scopes.push(layer);
-    for cd in &a.computed {
+    for i in computed_type_order(&computed_deps) {
+        let cd = &a.computed[i];
         let t = c.check_expr(&cd.expr);
         if let Some(v) = c.scopes.last_mut().unwrap().get_mut(&cd.name) {
             if v.app_kind == Some(AppVarKind::Computed) && v.ty == Type::Error {
@@ -1091,6 +1262,7 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
     // Pages: views and handlers against the app layer.
     for p in &a.pages {
         c.app.as_mut().unwrap().hint = app_scope_hint(a, None);
+        c.cur_component = None;
         check_app_elements(c, &p.elements);
     }
 
@@ -1098,6 +1270,7 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
     // the E3042 ruling; a handler local shadowing it warns W3041).
     for comp in &a.components {
         c.app.as_mut().unwrap().hint = app_scope_hint(a, Some(comp));
+        c.cur_component = Some(comp.name.clone());
         let mut cl: HashMap<String, VarInfo> = HashMap::new();
         for p in &comp.props {
             cl.entry(p.name.clone()).or_insert(VarInfo {
@@ -1140,9 +1313,595 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
         check_app_elements(c, &comp.view);
         c.scopes.pop();
     }
+    c.cur_component = None;
+
+    // -- W3044: state fields written but never read (slice 5) -----------------
+    //
+    // A state field whose value is written somewhere (handler
+    // assignment, `field`/`input bind`) but is never read — no view
+    // binding, `computed` expression, handler read or two-way bind —
+    // cannot influence anything the user sees (B.11: "written but never
+    // read / never rendered"). Reported once per field, anchored on the
+    // field name; duplicate declarations (E3042) and duplicate
+    // components (E3065) report for their first declaration only. A
+    // field that is never written at all is not this diagnostic's
+    // subject. Reads counted are real expression reads; an
+    // `IndexAssign` base is a write, not a read.
+    for f in &a.state {
+        if c.app_state_writes.contains(&(None, f.name.clone()))
+            && !c.app_state_reads.contains(&(None, f.name.clone()))
+        {
+            report_w3044(c, &f.name, f.line, f.col, "app");
+        }
+    }
+    let mut seen_comps: HashSet<&str> = HashSet::new();
+    for comp in &a.components {
+        if !seen_comps.insert(comp.name.as_str()) {
+            continue; // E3065 already fired; the first declaration wins
+        }
+        let mut seen_fields: HashSet<&str> = HashSet::new();
+        for f in &comp.state {
+            if !seen_fields.insert(f.name.as_str()) {
+                continue; // E3042 duplicate; the first declaration wins
+            }
+            let owner = (Some(comp.name.clone()), f.name.clone());
+            if c.app_state_writes.contains(&owner) && !c.app_state_reads.contains(&owner) {
+                report_w3044(c, &f.name, f.line, f.col, &format!("component `{}`", comp.name));
+            }
+        }
+    }
 
     c.scopes.pop();
     c.app = None;
+}
+
+/// One W3044 for a state field that is written but never read.
+fn report_w3044(c: &mut Checker, name: &str, line: u32, col: u32, owner: &str) {
+    let mut d = Diagnostic::warning(
+        "W3044",
+        format!("{}state field `{}` is written but never read — nothing renders or derives from it", owner_prefix(owner), name),
+        line,
+        col,
+        name.chars().count() as u32,
+    );
+    d.hint = Some(
+        "render it in a view (`text …`), read it in a binding or `computed` value, or remove the writes"
+            .to_string(),
+    );
+    c.diags.push(d.in_file(c.file.clone()));
+}
+
+/// `app` fields need no prefix; component fields name their component.
+fn owner_prefix(owner: &str) -> String {
+    if owner == "app" {
+        String::new()
+    } else {
+        format!("{} ", owner)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S3 slice 5: animation declarations, recursion, depth, computed cycles.
+// ---------------------------------------------------------------------------
+
+/// The `animation` block (B.8): keyframe property whitelist (**E3048**),
+/// easing (**E3049**) and duration/delay (**E3050**). Keyframe and
+/// transition option values are compile-time data — the generated CSS
+/// is static — so `duration`/`delay` must be integer literals (positive
+/// duration, non-negative delay; milliseconds). Easing is a named word
+/// or `cubic(a, b, c, d)` with four numeric literal arguments.
+fn check_animation_block(c: &mut Checker, anim: &AnimationDecl) {
+    for k in &anim.keyframes {
+        for step in &k.steps {
+            for prop in &step.props {
+                if !KEYFRAME_PROPS.contains(&prop.name.as_str()) {
+                    let mut d = Diagnostic::error(
+                        "E3048",
+                        format!("unknown keyframe property `{}`", prop.name),
+                        prop.line,
+                        prop.col,
+                        prop.name.chars().count() as u32,
+                    );
+                    d.hint = Some(format!(
+                        "keyframe properties: {}",
+                        KEYFRAME_PROPS.join(", ")
+                    ));
+                    c.diags.push(d.in_file(c.file.clone()));
+                }
+            }
+        }
+        if let Some(dur) = &k.duration {
+            check_anim_millis(c, dur, "duration", 1);
+        }
+        if let Some(delay) = &k.delay {
+            check_anim_millis(c, delay, "delay", 0);
+        }
+        if let Some(e) = &k.easing {
+            check_easing(c, e);
+        }
+    }
+    for t in &anim.transitions {
+        if let Some(dur) = &t.duration {
+            check_anim_millis(c, dur, "duration", 1);
+        }
+        if let Some(delay) = &t.delay {
+            check_anim_millis(c, delay, "delay", 0);
+        }
+        if let Some(e) = &t.easing {
+            check_easing(c, e);
+        }
+    }
+}
+
+/// The keyframe property whitelist (B.8): mapped to opacity, translate,
+/// scale, rotate and blur in the generated CSS.
+const KEYFRAME_PROPS: [&str; 6] = ["opacity", "x", "y", "scale", "rotate", "blur"];
+
+/// The named easings (B.8); `cubic(a, b, c, d)` is the sixth shape.
+const NAMED_EASINGS: [&str; 5] = ["linear", "ease", "ease_in", "ease_out", "ease_in_out"];
+
+/// **E3049** — an easing expression is a named easing word or a
+/// `cubic(...)` call with exactly four numeric literal arguments.
+/// Anchored on the easing expression.
+fn check_easing(c: &mut Checker, e: &Expr) {
+    let ok = match &e.kind {
+        ExprKind::Ident(word) => NAMED_EASINGS.contains(&word.as_str()),
+        ExprKind::Call { name, args } if name == "cubic" => {
+            args.len() == 4 && args.iter().all(is_number_literal)
+        }
+        _ => false,
+    };
+    if ok {
+        return;
+    }
+    let found = match &e.kind {
+        ExprKind::Ident(word) => format!("unknown easing `{}`", word),
+        ExprKind::Call { name, args } if name == "cubic" => format!(
+            "invalid easing: `cubic` takes four numeric arguments, found {}",
+            args.len()
+        ),
+        _ => "invalid easing".to_string(),
+    };
+    let mut d = Diagnostic::error("E3049", found, e.line, e.col, 1);
+    d.hint = Some(format!(
+        "easing is {}, or cubic(a, b, c, d) with four numbers",
+        NAMED_EASINGS.join(", ")
+    ));
+    c.diags.push(d.in_file(c.file.clone()));
+}
+
+/// An int/float literal (a cubic argument); a negated literal counts.
+fn is_number_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::IntLit(_) | ExprKind::FloatLit(_) => true,
+        ExprKind::Unary { op: UnOp::Neg, expr } => is_number_literal(expr),
+        _ => false,
+    }
+}
+
+/// **E3050** — a `duration`/`delay` option must be a non-negative
+/// integer literal in milliseconds (`duration` additionally positive:
+/// a zero/negative duration animates nothing).
+fn check_anim_millis(c: &mut Checker, e: &Expr, what: &str, min: i64) {
+    let value = match &e.kind {
+        ExprKind::IntLit(v) => Some(*v),
+        ExprKind::Unary { op: UnOp::Neg, expr } => match &expr.kind {
+            ExprKind::IntLit(v) => Some(-v),
+            _ => None,
+        },
+        _ => None,
+    };
+    let ok = matches!(value, Some(v) if v >= min);
+    if ok {
+        return;
+    }
+    let requirement = if min > 0 {
+        "a positive integer literal (milliseconds)"
+    } else {
+        "a non-negative integer literal (milliseconds)"
+    };
+    let mut d = Diagnostic::error(
+        "E3050",
+        format!("the animation `{}` must be {}", what, requirement),
+        e.line,
+        e.col,
+        1,
+    );
+    d.hint = Some(format!(
+        "animations generate static CSS, so `{}` is compile-time data — write `{} 200`, not an expression",
+        what, what
+    ));
+    c.diags.push(d.in_file(c.file.clone()));
+}
+
+/// **E3047** — every animation reference (`enter`/`exit`/`hover`/
+/// `press`/`scroll` on elements, the app-level page `transition`)
+/// resolves against the app's animation namespace (keyframes names and
+/// transition names, B.8). Anchored on the name string.
+fn check_anim_ref(c: &mut Checker, r: &AnimRef, attribute: &str) {
+    let known = c
+        .app
+        .as_ref()
+        .map(|app| app.animation_names.iter().any(|n| n == &r.name))
+        .unwrap_or(false);
+    if known {
+        return;
+    }
+    let names = c
+        .app
+        .as_ref()
+        .map(|app| app.animation_names.clone())
+        .unwrap_or_default();
+    let mut d = Diagnostic::error(
+        "E3047",
+        format!("unknown animation name `{}` (used by `{}`)", r.name, attribute),
+        r.line,
+        r.col,
+        r.name.chars().count() as u32,
+    );
+    d.hint = Some(if names.is_empty() {
+        "this app declares no animations — add a `keyframes` or `transition` section to the `animation { … }` block"
+            .to_string()
+    } else {
+        format!("declared animations: {}", names.join(", "))
+    });
+    c.diags.push(d.in_file(c.file.clone()));
+}
+
+/// **E3053** — a component whose instantiation chain reaches itself,
+/// directly or through other components (B.3: components are template
+/// declarations; `each` is the loop construct). DFS over the
+/// component→component instantiation graph (unqualified instantiations
+/// in component views; the qualified form is always E3040 and never an
+/// edge). Each distinct cycle reports once, anchored on the
+/// instantiation element that closes it; legal repeated use of the same
+/// component is not recursion and never reports.
+fn check_component_recursion(c: &mut Checker, a: &AppDecl) {
+    // First-declaration components only (E3065 pattern), with their
+    // instantiation edges (target index + the element position).
+    let mut order: Vec<&ComponentDecl> = Vec::new();
+    let mut index_of: HashMap<&str, usize> = HashMap::new();
+    for comp in &a.components {
+        if index_of.contains_key(comp.name.as_str()) {
+            continue;
+        }
+        index_of.insert(comp.name.as_str(), order.len());
+        order.push(comp);
+    }
+    let mut edges: Vec<Vec<(usize, u32, u32)>> = vec![Vec::new(); order.len()];
+    for (i, comp) in order.iter().enumerate() {
+        collect_instantiations(&comp.view, &mut |name, module, line, col| {
+            if module.is_none() {
+                if let Some(&j) = index_of.get(name) {
+                    edges[i].push((j, line, col));
+                }
+            }
+        });
+    }
+    let mut reported: HashSet<Vec<usize>> = HashSet::new();
+    for root in 0..order.len() {
+        let mut stack: Vec<usize> = vec![root];
+        let mut on_stack: HashSet<usize> = HashSet::new();
+        on_stack.insert(root);
+        let mut visited: HashSet<usize> = HashSet::new();
+        visited.insert(root);
+        dfs_recursion(root, &edges, &mut stack, &mut on_stack, &mut visited, &mut reported, &order, c);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dfs_recursion(
+    node: usize,
+    edges: &[Vec<(usize, u32, u32)>],
+    stack: &mut Vec<usize>,
+    on_stack: &mut HashSet<usize>,
+    visited: &mut HashSet<usize>,
+    reported: &mut HashSet<Vec<usize>>,
+    order: &[&ComponentDecl],
+    c: &mut Checker,
+) {
+    for (next, line, col) in &edges[node] {
+        if on_stack.contains(next) {
+            // Cycle: stack from `next` ..= node, back to `next`.
+            let pos = stack.iter().position(|&n| n == *next).expect("on stack");
+            let path: Vec<usize> = stack[pos..].to_vec();
+            let canonical: Vec<usize> = {
+                let mut v = path.clone();
+                let m = v.iter().min().copied().expect("cycle non-empty");
+                if let Some(p) = v.iter().position(|&x| x == m) {
+                    v.rotate_left(p);
+                }
+                v
+            };
+            if reported.insert(canonical) {
+                let names: Vec<&str> = path.iter().map(|&i| order[i].name.as_str()).collect();
+                let mut cycle_str = names.join(" → ");
+                cycle_str.push_str(&format!(" → {}", order[*next].name));
+                let direct = path.len() == 1;
+                let message = if direct {
+                    format!("component `{}` instantiates itself", order[node].name)
+                } else {
+                    format!("component recursion: {}", cycle_str)
+                };
+                let mut d = Diagnostic::error("E3053", message, *line, *col, 1);
+                d.hint = Some(
+                    "components are templates, not runtime values — render repeated content with `each`, or restructure so the chain ends"
+                        .to_string(),
+                );
+                c.diags.push(d.in_file(c.file.clone()));
+            }
+            continue; // do not descend into a reported cycle again
+        }
+        if visited.insert(*next) {
+            stack.push(*next);
+            on_stack.insert(*next);
+            dfs_recursion(*next, edges, stack, on_stack, visited, reported, order, c);
+            stack.pop();
+            on_stack.remove(next);
+        }
+    }
+}
+
+/// A view-walk callback: (component name, module alias, element line,
+/// element col).
+type InstantiationFn<'a> = dyn FnMut(&str, Option<&str>, u32, u32) + 'a;
+
+/// Every component instantiation in a view list, in source order,
+/// recursive over `when`/`otherwise`/`each` and `form` bodies (the
+/// positions where B.3 allows instantiation). Calls back with
+/// (component name, module alias, element line, element col).
+fn collect_instantiations(elements: &[ViewElement], f: &mut InstantiationFn<'_>) {
+    for e in elements {
+        match &e.kind {
+            ViewElementKind::Component { module, name, .. } => {
+                f(name, module.as_deref(), e.line, e.col);
+            }
+            ViewElementKind::When { then_branch, else_branch, .. } => {
+                collect_instantiations(then_branch, f);
+                if let Some(els) = else_branch {
+                    collect_instantiations(els, f);
+                }
+            }
+            ViewElementKind::Each { body, .. } => collect_instantiations(body, f),
+            ViewElementKind::Form { body, .. } => collect_instantiations(body, f),
+            _ => {}
+        }
+    }
+}
+
+/// The composition depth limit (B.3): view elements, `when`/`otherwise`/
+/// `each`/`form` bodies and instantiated component views nest up to 32
+/// levels deep.
+const VIEW_DEPTH_LIMIT: u32 = 32;
+
+/// **E3054** — walk one page's composition, expanding instantiated
+/// component views (cycle-guarded: recursion is E3053's subject and is
+/// not descended here again). `depth` is the nesting level of
+/// `elements`; the first element past the limit is reported per page.
+fn check_view_depth<'a>(
+    c: &mut Checker,
+    elements: &'a [ViewElement],
+    depth: u32,
+    page: &str,
+    reported: &mut bool,
+    stack: &mut Vec<&'a str>,
+    comp_decls: &HashMap<&'a str, &'a ComponentDecl>,
+) {
+    if *reported {
+        return;
+    }
+    for e in elements {
+        if depth > VIEW_DEPTH_LIMIT {
+            let mut d = Diagnostic::error(
+                "E3054",
+                format!(
+                    "composition depth exceeds the limit of {} in page `{}`",
+                    VIEW_DEPTH_LIMIT, page
+                ),
+                e.line,
+                e.col,
+                1,
+            );
+            d.hint = Some(
+                "views nest up to 32 levels — elements, `when`/`otherwise`/`each`/`form` bodies and instantiated component views all count"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+            *reported = true;
+            return;
+        }
+        match &e.kind {
+            ViewElementKind::When { then_branch, else_branch, .. } => {
+                check_view_depth(c, then_branch, depth + 1, page, reported, stack, comp_decls);
+                if let Some(els) = else_branch {
+                    check_view_depth(c, els, depth + 1, page, reported, stack, comp_decls);
+                }
+            }
+            ViewElementKind::Each { body, .. } => {
+                check_view_depth(c, body, depth + 1, page, reported, stack, comp_decls);
+            }
+            ViewElementKind::Form { body, .. } => {
+                check_view_depth(c, body, depth + 1, page, reported, stack, comp_decls);
+            }
+            ViewElementKind::Component { module, name, .. } => {
+                // Expand only unqualified instantiations of declared
+                // components (the qualified form is E3040 — nothing to
+                // expand), and never re-enter a component already on
+                // the expansion stack (E3053 owns that diagnostic).
+                if module.is_none() && !stack.contains(&name.as_str()) {
+                    if let Some(comp) = comp_decls.get(name.as_str()) {
+                        stack.push(name);
+                        check_view_depth(c, &comp.view, depth + 1, page, reported, stack, comp_decls);
+                        stack.pop();
+                    }
+                }
+            }
+            _ => {}
+        }
+        if *reported {
+            return;
+        }
+    }
+}
+
+/// Computed→computed references inside one computed expression, in
+/// source order, paired with the reference position (the Ident the
+/// cycle diagnostic anchors on). Only bare identifiers that name a
+/// declared computed value count; `module.NAME` reads are consts.
+fn collect_computed_deps(
+    e: &Expr,
+    computed_names: &[&str],
+    self_index: usize,
+    out: &mut Vec<(usize, u32, u32)>,
+) {
+    match &e.kind {
+        ExprKind::Ident(name) => {
+            if let Some(i) = computed_names.iter().position(|n| n == name) {
+                out.push((i, e.line, e.col));
+            }
+        }
+        ExprKind::ArrayLit(items) => {
+            for it in items {
+                collect_computed_deps(it, computed_names, self_index, out);
+            }
+        }
+        ExprKind::Index { base, index } => {
+            collect_computed_deps(base, computed_names, self_index, out);
+            collect_computed_deps(index, computed_names, self_index, out);
+        }
+        ExprKind::Cast { expr, .. } => {
+            collect_computed_deps(expr, computed_names, self_index, out);
+        }
+        ExprKind::Unary { expr, .. } => {
+            collect_computed_deps(expr, computed_names, self_index, out);
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_computed_deps(lhs, computed_names, self_index, out);
+            collect_computed_deps(rhs, computed_names, self_index, out);
+        }
+        ExprKind::Call { args, .. } => {
+            for a in args {
+                collect_computed_deps(a, computed_names, self_index, out);
+            }
+        }
+        ExprKind::ModCall { args, .. } => {
+            for a in args {
+                collect_computed_deps(a, computed_names, self_index, out);
+            }
+        }
+        _ => {}
+    }
+    let _ = self_index;
+}
+
+/// **E3044** — cycles in the computed dependency graph. DFS per root
+/// (fresh stack per run, so no cycle is missed); a back-edge closes a
+/// cycle, reported once per distinct cycle (canonical form: rotated to
+/// its smallest member), anchored on the reference that closes it and
+/// naming the whole path. Traversal is finite: edges go only between
+/// computed declarations, and the on-stack set stops re-entry.
+fn detect_computed_cycles(c: &mut Checker, a: &AppDecl, deps: &[Vec<(usize, u32, u32)>]) {
+    let n = deps.len();
+    if n == 0 {
+        return;
+    }
+    let mut reported: HashSet<Vec<usize>> = HashSet::new();
+    for root in 0..n {
+        let mut stack: Vec<usize> = vec![root];
+        let mut on_stack: HashSet<usize> = HashSet::new();
+        on_stack.insert(root);
+        let mut visited: HashSet<usize> = HashSet::new();
+        visited.insert(root);
+        dfs_cycles(root, deps, &mut stack, &mut on_stack, &mut visited, &mut reported, a, c);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dfs_cycles(
+    node: usize,
+    deps: &[Vec<(usize, u32, u32)>],
+    stack: &mut Vec<usize>,
+    on_stack: &mut HashSet<usize>,
+    visited: &mut HashSet<usize>,
+    reported: &mut HashSet<Vec<usize>>,
+    a: &AppDecl,
+    c: &mut Checker,
+) {
+    for (next, line, col) in &deps[node] {
+        if on_stack.contains(next) {
+            let pos = stack.iter().position(|&n| n == *next).expect("on stack");
+            let path: Vec<usize> = stack[pos..].to_vec();
+            let canonical: Vec<usize> = {
+                let mut v = path.clone();
+                let m = v.iter().min().copied().expect("cycle non-empty");
+                if let Some(p) = v.iter().position(|&x| x == m) {
+                    v.rotate_left(p);
+                }
+                v
+            };
+            if reported.insert(canonical) {
+                let names: Vec<&str> = path.iter().map(|&i| a.computed[i].name.as_str()).collect();
+                let mut cycle_str = names.join(" → ");
+                cycle_str.push_str(&format!(" → {}", a.computed[*next].name));
+                let message = if path.len() == 1 {
+                    format!("computed value `{}` depends on itself", a.computed[node].name)
+                } else {
+                    format!("computed cycle: {}", cycle_str)
+                };
+                let mut d = Diagnostic::error("E3044", message, *line, *col, 1);
+                d.hint = Some(
+                    "computed values derive from state — break the cycle by restating one member directly from state fields, or computing it in a handler"
+                        .to_string(),
+                );
+                c.diags.push(d.in_file(c.file.clone()));
+            }
+            continue;
+        }
+        if visited.insert(*next) {
+            stack.push(*next);
+            on_stack.insert(*next);
+            dfs_cycles(*next, deps, stack, on_stack, visited, reported, a, c);
+            stack.pop();
+            on_stack.remove(next);
+        }
+    }
+}
+
+/// Kahn's algorithm over the computed dependency graph: indices in
+/// dependency order (a computed is typed after everything it reads).
+/// Nodes inside a cycle, and everything downstream of one, never become
+/// ready and are left out — their layer types stay `Error`.
+fn computed_type_order(deps: &[Vec<(usize, u32, u32)>]) -> Vec<usize> {
+    let n = deps.len();
+    let mut remaining: Vec<usize> = Vec::with_capacity(n);
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, ds) in deps.iter().enumerate() {
+        // Duplicate edges (the same computed read twice) count once:
+        // the publication loop publishes per node, not per edge.
+        let mut seen: Vec<usize> = Vec::new();
+        for (d, _, _) in ds {
+            if *d != i && !seen.contains(d) {
+                seen.push(*d);
+                dependents[*d].push(i);
+            }
+        }
+        remaining.push(seen.len());
+    }
+    let mut queue: Vec<usize> = (0..n).filter(|&i| remaining[i] == 0).collect();
+    let mut order = Vec::with_capacity(n);
+    let mut qi = 0;
+    while qi < queue.len() {
+        let i = queue[qi];
+        qi += 1;
+        order.push(i);
+        for &d in &dependents[i] {
+            remaining[d] -= 1;
+            if remaining[d] == 0 {
+                queue.push(d);
+            }
+        }
+    }
+    order
 }
 
 /// The E3066 hint: what the scope being checked makes visible, in
@@ -1196,6 +1955,24 @@ fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
         }
     };
     for e in elements {
+        // E3047 (slice 5): every animation attribute on an element
+        // resolves against the app's animation namespace.
+        let anim = match &e.kind {
+            ViewElementKind::Title { anim, .. }
+            | ViewElementKind::Heading { anim, .. }
+            | ViewElementKind::Text { anim, .. }
+            | ViewElementKind::Button { anim, .. }
+            | ViewElementKind::Link { anim, .. }
+            | ViewElementKind::Image { anim, .. }
+            | ViewElementKind::Divider { anim }
+            | ViewElementKind::Input { anim, .. }
+            | ViewElementKind::Component { anim, .. }
+            | ViewElementKind::Field { anim, .. } => Some(anim),
+            _ => None,
+        };
+        if let Some(anim) = anim {
+            check_anim_attrs(c, anim);
+        }
         match &e.kind {
             ViewElementKind::Title { value, .. }
             | ViewElementKind::Heading { value, .. }
@@ -1247,6 +2024,47 @@ fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
                         Type::Error
                     }
                 };
+                // W3042/W3043 (slice 5, B.5): an `each` without a `key`
+                // reuses DOM by position on reorderings — a warning, list
+                // rendering stays legal. A key expression that never
+                // mentions the loop variable gives every row the same
+                // key value (literals and state reads alike), so the
+                // keys duplicate by construction.
+                match key {
+                    None => {
+                        let mut d = Diagnostic::warning(
+                            "W3042",
+                            "this `each` has no `key` — reorderings will reuse DOM by position",
+                            e.line,
+                            e.col,
+                            4, // the `each` keyword
+                        );
+                        d.hint = Some(format!(
+                            "add a stable key (the loop variable is the canonical choice): `key {}`",
+                            var
+                        ));
+                        c.diags.push(d.in_file(c.file.clone()));
+                    }
+                    Some(k) => {
+                        if !expr_references_var(k, var) {
+                            let mut d = Diagnostic::warning(
+                                "W3043",
+                                format!(
+                                    "the `key` expression does not use the loop variable `{}` — every row gets the same key value",
+                                    var
+                                ),
+                                k.line,
+                                k.col,
+                                1,
+                            );
+                            d.hint = Some(format!(
+                                "key rows by the loop variable (`key {}`) or a value derived from it — duplicate keys make list reconciliation ambiguous",
+                                var
+                            ));
+                            c.diags.push(d.in_file(c.file.clone()));
+                        }
+                    }
+                }
                 let mut scope = HashMap::new();
                 scope.insert(
                     var.clone(),
@@ -1276,8 +2094,40 @@ fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
                 check_app_elements(c, body);
                 check_app_handlers(c, handlers);
             }
-            ViewElementKind::Field { bind, attrs, handlers, .. } => {
-                check_bind_target(c, bind, "field");
+            ViewElementKind::Field { bind, kind, kind_line, kind_col, attrs, handlers, .. } => {
+                let bound_ty = check_bind_target(c, bind, "field");
+                // E3061 (slice 5): the field kind and the bound state
+                // field's type must agree — `number` binds int/float,
+                // every other kind binds string. Arrays bind no field
+                // (their elements do). Anchored on the kind word.
+                if let Some(ty) = bound_ty {
+                    if ty != Type::Error {
+                        let ok = match kind {
+                            FieldKind::Number => matches!(ty, Type::Int | Type::Float),
+                            _ => ty == Type::Str,
+                        };
+                        if !ok {
+                            let mut d = Diagnostic::error(
+                                "E3061",
+                                format!(
+                                    "a `{}` field binds {} state, but the state field `{}` is {}",
+                                    kind.as_str(),
+                                    if matches!(kind, FieldKind::Number) { "int or float" } else { "string" },
+                                    bind.page,
+                                    ty.as_str()
+                                ),
+                                *kind_line,
+                                *kind_col,
+                                kind.as_str().chars().count() as u32,
+                            );
+                            d.hint = Some(
+                                "`number` fields bind int/float state fields; text, date, email, password and textarea fields bind string state fields"
+                                    .to_string(),
+                            );
+                            c.diags.push(d.in_file(c.file.clone()));
+                        }
+                    }
+                }
                 for attr in attrs {
                     match attr {
                         FieldAttr::Label(v)
@@ -1480,11 +2330,21 @@ fn check_component_instantiation(
 /// slice-2 §C2 ruling): shared state in pages, component state in
 /// components. Two-way binding writes, so a computed value or prop in
 /// that position is E3043 (an invalid assignment target — B.4), and a
-/// name that resolves nowhere is E3066.
-fn check_bind_target(c: &mut Checker, t: &OpenTarget, element: &str) {
+/// name that resolves nowhere is E3066. Returns the bound field's type
+/// when the target is a state field (for E3061's kind check); the
+/// target also counts as a **read** for W3044 — the bound value renders.
+fn check_bind_target(c: &mut Checker, t: &OpenTarget, element: &str) -> Option<Type> {
     if let Some(v) = c.lookup(&t.page) {
         match v.app_kind {
-            Some(AppVarKind::State) | Some(AppVarKind::ComponentState) => {}
+            Some(AppVarKind::State) | Some(AppVarKind::ComponentState) => {
+                let owner = if v.app_kind == Some(AppVarKind::ComponentState) {
+                    c.cur_component.clone()
+                } else {
+                    None
+                };
+                c.app_state_reads.insert((owner, t.page.clone()));
+                return Some(v.ty.clone());
+            }
             Some(kind) => {
                 let mut d = Diagnostic::error(
                     "E3043",
@@ -1544,6 +2404,49 @@ fn check_bind_target(c: &mut Checker, t: &OpenTarget, element: &str) {
         );
         d.hint = Some(hint);
         c.diags.push(d.in_file(c.file.clone()));
+    }
+    None
+}
+
+/// E3047 for every animation attribute present on an element.
+fn check_anim_attrs(c: &mut Checker, anim: &ElementAnim) {
+    if let Some(r) = &anim.enter {
+        check_anim_ref(c, r, "enter");
+    }
+    if let Some(r) = &anim.exit {
+        check_anim_ref(c, r, "exit");
+    }
+    if let Some(r) = &anim.hover {
+        check_anim_ref(c, r, "hover");
+    }
+    if let Some(r) = &anim.press {
+        check_anim_ref(c, r, "press");
+    }
+    if let Some(r) = &anim.scroll {
+        check_anim_ref(c, r, "scroll");
+    }
+}
+
+/// Whether an expression mentions the identifier `var` anywhere
+/// (W3043's static key test — a key not derived from the loop variable
+/// gives every row the same key value).
+fn expr_references_var(e: &Expr, var: &str) -> bool {
+    match &e.kind {
+        ExprKind::Ident(name) => name == var,
+        ExprKind::ArrayLit(items) => items.iter().any(|i| expr_references_var(i, var)),
+        ExprKind::Index { base, index } => {
+            expr_references_var(base, var) || expr_references_var(index, var)
+        }
+        ExprKind::Cast { expr, .. } | ExprKind::Unary { expr, .. } => {
+            expr_references_var(expr, var)
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            expr_references_var(lhs, var) || expr_references_var(rhs, var)
+        }
+        ExprKind::Call { args, .. } | ExprKind::ModCall { args, .. } => {
+            args.iter().any(|a| expr_references_var(a, var))
+        }
+        _ => false,
     }
 }
 
@@ -1770,6 +2673,11 @@ struct AppScope {
     /// Declared page names, for E3040's pages-vs-components namespace
     /// note (the mirror of E3063's component note).
     pages: Vec<String>,
+    /// Declared animation names (slice 5, E3047 hints): keyframes names
+    /// then transition names, each first declaration winning on
+    /// duplicates (B.11 assigns no duplicate-animation code; the first
+    /// definition is the one views resolve against).
+    animation_names: Vec<String>,
 }
 
 /// A component's checked signature (S3 slice 4): its props in
@@ -1840,6 +2748,24 @@ struct Checker {
     /// and the app pass closes before pass 2. Drives E3045 (`return` is
     /// illegal in handlers) and W3040 (`while` in a handler warns).
     handler_depth: u32,
+    /// The component whose view/handlers are being walked (S3 slice 5).
+    /// `None` while a page view is walked. Gives W3044's read/write
+    /// tracking its owner key: component state fields with the same
+    /// name in two components track independently.
+    cur_component: Option<String>,
+    /// App state fields read anywhere in the app pass (S3 slice 5,
+    /// W3044): `(None, name)` for shared state, `(Some(component), name)`
+    /// for component state. Filled by the expression checker.
+    app_state_reads: HashSet<(Option<String>, String)>,
+    /// App state fields written (assignment targets and `field`/`input`
+    /// bind targets write; bind targets also read — they render the
+    /// value). See [`Checker::app_state_reads`].
+    app_state_writes: HashSet<(Option<String>, String)>,
+    /// Suppresses state-read tracking while an `IndexAssign` base is
+    /// checked: `items[0] = v` writes into the array but does not make
+    /// the field's value influence any output, so the base must not
+    /// satisfy W3044's "read".
+    suppress_state_reads: bool,
 }
 
 impl Checker {
@@ -1975,7 +2901,21 @@ impl Checker {
             }
             Stmt::Assign { name, op, value, line, col } => {
                 let (vty, vmutable, vline, vcol, vkind) = match self.lookup(name) {
-                    Some(v) => (v.ty, v.mutable, v.line, v.col, v.app_kind),
+                    Some(v) => {
+                        // W3044 (slice 5): an assignment to a state
+                        // field is its write.
+                        match v.app_kind {
+                            Some(AppVarKind::State) => {
+                                self.app_state_writes.insert((None, name.clone()));
+                            }
+                            Some(AppVarKind::ComponentState) => {
+                                self.app_state_writes
+                                    .insert((self.cur_component.clone(), name.clone()));
+                            }
+                            _ => {}
+                        }
+                        (v.ty, v.mutable, v.line, v.col, v.app_kind)
+                    }
                     None => {
                         if self.consts[self.cur_file].contains_key(name) {
                             self.error(
@@ -2138,7 +3078,26 @@ impl Checker {
                 self.assigned.insert(name.clone());
             }
             Stmt::IndexAssign { base, index, value, line, col } => {
+                // W3044 (slice 5): an index-assign into a state field's
+                // array is a write; the base expression itself does not
+                // count as a read (nothing renders from it).
+                if let ExprKind::Ident(n) = &base.kind {
+                    if let Some(v) = self.lookup(n) {
+                        match v.app_kind {
+                            Some(AppVarKind::State) => {
+                                self.app_state_writes.insert((None, n.clone()));
+                            }
+                            Some(AppVarKind::ComponentState) => {
+                                self.app_state_writes
+                                    .insert((self.cur_component.clone(), n.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                self.suppress_state_reads = true;
                 let bt = self.check_expr(base);
+                self.suppress_state_reads = false;
                 let it = self.check_expr(index);
                 let vt = self.check_expr(value);
                 match &bt {
@@ -2347,7 +3306,24 @@ impl Checker {
             ExprKind::BoolLit(_) => Type::Bool,
             ExprKind::StrLit(_) => Type::Str,
             ExprKind::Ident(name) => match self.lookup(name) {
-                Some(v) => v.ty,
+                Some(v) => {
+                    // W3044 (slice 5): an identifier read that resolves
+                    // to a state field records a read — its value
+                    // influences whatever this expression feeds.
+                    if !self.suppress_state_reads {
+                        match v.app_kind {
+                            Some(AppVarKind::State) => {
+                                self.app_state_reads.insert((None, name.clone()));
+                            }
+                            Some(AppVarKind::ComponentState) => {
+                                self.app_state_reads
+                                    .insert((self.cur_component.clone(), name.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                    v.ty
+                }
                 // Fall back to the file's own consts (0.4.0 S1). Locals
                 // win: a local binding shadows a const of the same name.
                 None => match self.consts[self.cur_file].get(name) {
@@ -4913,6 +5889,7 @@ mod tests {
         "    }\n",
         "    state { n: int = 0 }\n",
         "    page Home {\n",
+        "        text str(n)\n",
         "        TaskRow(title: \"Study\")\n",
         "        TaskRow(title: \"Again\", completed: true)\n",
         "        Card(heading: \"Group\")\n",
@@ -4926,10 +5903,16 @@ mod tests {
 
     #[test]
     fn slice4_feature_surface_checks_clean() {
-        // Positive master: every slice-4 feature checks with zero
-        // diagnostics — warnings included (no `while` here).
+        // Positive master: every slice-4 feature checks without errors
+        // or warnings. Golden update for slice 5: the beginner-mode app
+        // carries exactly one diagnostic — the N3040 note B.11 assigns
+        // to handler-bearing apps in mode B (a note, not a finding).
         let diags = check_src(SLICE4_APP);
-        assert!(diags.is_empty(), "expected a clean app, got: {:#?}", diags);
+        assert!(
+            diags.iter().all(|d| d.code == "N3040"),
+            "expected no errors/warnings (N3040 note allowed), got: {:#?}",
+            diags
+        );
     }
 
     #[test]
@@ -5470,5 +6453,561 @@ mod tests {
             "}\n",
         ));
         assert!(!diags.iter().any(|d| d.code == "W3040"), "{:#?}", diags);
+    }
+
+    // -- S3 slice 5: computed cycles (E3044) --------------------------------
+
+    #[test]
+    fn direct_computed_cycle_is_e3044() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    computed a = b + 1\n",
+            "    computed b = a + 1\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3044").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("a"), "{:#?}", diags);
+        assert!(hits[0].message.contains("b"), "{:#?}", diags);
+        // Anchored on the reference that closes the cycle: DFS from
+        // root `a` reaches `b` and the cycle closes at b's reference of
+        // `a` (line 4), naming the whole path.
+        assert_eq!(hits[0].line, 4, "{:#?}", diags);
+        assert_eq!(hits[0].col, 18, "{:#?}", diags);
+    }
+
+    #[test]
+    fn self_referencing_computed_is_e3044() {
+        assert!(has("E3044", "app \"A\" {\n    state { n: int = 0 }\n    computed a = a + 1\n    page Home { text \"x\" }\n}\n"));
+        let diags = check_src("app \"A\" {\n    state { n: int = 0 }\n    computed a = a + 1\n    page Home { text \"x\" }\n}\n");
+        let hit = diags.iter().find(|d| d.code == "E3044").unwrap();
+        assert!(hit.message.contains("depends on itself"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn indirect_and_independent_cycles_each_report_once() {
+        // a → b → a (indirect) and c → c (independent), plus `d` that
+        // reads state only — never reported.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    computed a = b + 1\n",
+            "    computed b = a + 1\n",
+            "    computed c = c * 2\n",
+            "    computed d = n + 1\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        assert_eq!(diags.iter().filter(|d| d.code == "E3044").count(), 2, "{:#?}", diags);
+    }
+
+    #[test]
+    fn valid_dependency_chains_do_not_report_e3044() {
+        // Three-leg chain + a diamond: every reference is acyclic.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    computed a = n + 1\n",
+            "    computed b = a + 1\n",
+            "    computed c = a * 2\n",
+            "    computed d = b + c\n",
+            "    page Home { text str(d) }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn forward_referenced_computed_types_from_its_target() {
+        // The slice-3 placeholder poisoned forward references; slice 5
+        // types computed values in dependency order, so a type error
+        // downstream of a forward-referenced computed is caught: `n`
+        // is declared after `label`, yet `label` gets its real string
+        // type — concatenating an int reports the operator mismatch.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    computed label = str(n)\n",
+            "    computed n = 1 + 2\n",
+            "    page Home { text label + 3 }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3003"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn cycle_members_stay_poisoned_without_cascading() {
+        // One cycle; a binding that reads a cycle member suppresses its
+        // own mismatch (Error poison) — one mistake, one diagnostic.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    computed a = b + 1\n",
+            "    computed b = a + 1\n",
+            "    page Home { text a }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3044"), "{:#?}", diags);
+        assert!(!diags.iter().any(|d| d.code == "E3003"), "{:#?}", diags);
+    }
+
+    // -- S3 slice 5: component recursion and depth (E3053/E3054) ------------
+
+    #[test]
+    fn direct_component_recursion_is_e3053() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component Loop {\n",
+            "        view {\n",
+            "            Loop()\n",
+            "        }\n",
+            "    }\n",
+            "    page Home { Loop() }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3053").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("instantiates itself"), "{:#?}", diags);
+        assert_eq!(hits[0].line, 4, "{:#?}", diags);
+    }
+
+    #[test]
+    fn indirect_component_recursion_is_e3053() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component A {\n",
+            "        view { B() }\n",
+            "    }\n",
+            "    component B {\n",
+            "        view { A() }\n",
+            "    }\n",
+            "    page Home { A() }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3053").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("recursion"), "{:#?}", diags);
+        assert!(hits[0].message.contains("A"), "{:#?}", diags);
+        assert!(hits[0].message.contains("B"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn repeated_component_use_is_not_recursion() {
+        // The same component used three times (and nested one level
+        // through another component) is legal composition.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    component Group {\n",
+            "        view {\n",
+            "            Row(label: \"a\")\n",
+            "            Row(label: \"b\")\n",
+            "        }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        Group()\n",
+            "        Row(label: \"c\")\n",
+            "        Group()\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn composition_depth_boundary_is_32() {
+        // 31 nested `when` blocks wrap a text element at depth 32 — the
+        // last legal level. One more `when` would put it at 33.
+        let mut src = String::from("app \"A\" { page Home {\n");
+        for _ in 0..31 {
+            src.push_str("when true { ");
+        }
+        src.push_str("text \"deep\"");
+        for _ in 0..31 {
+            src.push_str(" }");
+        }
+        src.push_str(" } }\n");
+        clean(&src);
+        // One level deeper overflows.
+        let mut over = String::from("app \"A\" { page Home {\n");
+        for _ in 0..32 {
+            over.push_str("when true { ");
+        }
+        over.push_str("text \"deep\"");
+        for _ in 0..32 {
+            over.push_str(" }");
+        }
+        over.push_str(" } }\n");
+        let diags = check_src(&over);
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3054").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("32"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn instantiated_components_nest_into_the_depth_budget() {
+        // A component holding 30 nested `when`s, instantiated inside a
+        // page with 3 nested `when`s: the component's text lands at
+        // depth 34 — past the cap — through composition.
+        let mut comp = String::from("component Deep { view {\n");
+        for _ in 0..30 {
+            comp.push_str("when true { ");
+        }
+        comp.push_str("text \"deep\"");
+        for _ in 0..30 {
+            comp.push_str(" }");
+        }
+        comp.push_str(" } }\n");
+        let mut page = String::from("page Home {\n");
+        for _ in 0..3 {
+            page.push_str("when true { ");
+        }
+        page.push_str("Deep()");
+        for _ in 0..3 {
+            page.push_str(" }");
+        }
+        page.push_str(" }\n");
+        let src = format!("app \"A\" {{\n    {}    {}\n}}\n", comp, page);
+        let diags = check_src(&src);
+        assert!(diags.iter().any(|d| d.code == "E3054"), "{:#?}", diags);
+    }
+
+    // -- S3 slice 5: animations (E3047–E3050) -------------------------------
+
+    #[test]
+    fn unknown_animation_name_is_e3047() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"pop\" { from { opacity 0 } duration 200 }\n",
+            "    }\n",
+            "    page Home { heading \"H\" enter \"pop\" divider exit \"fade\" }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3047").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("fade"), "{:#?}", diags);
+        assert!(hits[0].message.contains("exit"), "{:#?}", diags);
+        // The hint lists the declared animations.
+        assert!(hits[0].hint.as_ref().unwrap().contains("pop"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn app_transition_resolves_like_element_animations() {
+        let diags = check_src("app \"A\" { transition \"slide\" page Home { text \"x\" } }\n");
+        let hit = diags.iter().find(|d| d.code == "E3047").unwrap();
+        assert!(hit.message.contains("slide"), "{:#?}", diags);
+        assert!(hit.message.contains("transition"), "{:#?}", diags);
+        // Declared names — keyframes and transitions in one namespace —
+        // resolve everywhere.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    transition \"fade\"\n",
+            "    animation { transition \"fade\" { duration 150 } }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn keyframe_properties_outside_the_whitelist_are_e3048() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"pop\" { from { opacity 0 color 1 } to { opacity 1 } duration 200 }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        let hit = diags.iter().find(|d| d.code == "E3048").unwrap();
+        assert!(hit.message.contains("color"), "{:#?}", diags);
+        assert_eq!(hit.line, 3, "{:#?}", diags);
+        assert!(hit.hint.as_ref().unwrap().contains("opacity"), "{:#?}", diags);
+        // All six whitelisted properties pass.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"pop\" {\n",
+            "            from { opacity 0 x 0 y 0 scale 0.9 rotate 0 blur 0 }\n",
+            "            to { opacity 1 x 10 y 10 scale 1 rotate 5 blur 1 }\n",
+            "            duration 200\n",
+            "        }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn unknown_or_malformed_easing_is_e3049() {
+        for (easing, src_line) in [
+            ("bouncy", "easing bouncy"),
+            ("cubic with three args", "easing cubic(0.1, 0.7, 0.3)"),
+            ("cubic with an expression", "easing cubic(0.1, n, 0.3, 1)"),
+        ] {
+            let _ = easing;
+            let src = format!(
+                "app \"A\" {{\n    state {{ n: int = 0 }}\n    animation {{ transition \"t\" {{ duration 150 {} }} }}\n    page Home {{ text \"x\" }}\n}}\n",
+                src_line
+            );
+            let diags = check_src(&src);
+            assert!(diags.iter().any(|d| d.code == "E3049"), "{:#?} — {}", diags, src_line);
+            // The easing rule owns its position: the ordinary checker's
+            // codes never cascade here (`cubic` is not E3002).
+            assert!(!diags.iter().any(|d| d.code == "E3002"), "{}", src_line);
+        }
+        // All named easings and a full cubic call pass.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"k\" { from { opacity 0 } to { opacity 1 } duration 200 easing cubic(0.1, 0.7, 0.3, 1.0) }\n",
+            "        transition \"t\" { duration 150 easing ease_in_out }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn invalid_duration_or_delay_is_e3050() {
+        for option in ["duration 0", "duration -5", "duration 2.5", "delay -1"] {
+            let src = format!(
+                "app \"A\" {{\n    animation {{ transition \"t\" {{ {} }} }}\n    page Home {{ text \"x\" }}\n}}\n",
+                option
+            );
+            let diags = check_src(&src);
+            assert!(diags.iter().any(|d| d.code == "E3050"), "{:#?} — {}", diags, option);
+        }
+        // Valid values pass; `delay 0` is legal.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"k\" { from { opacity 0 } duration 200 delay 0 }\n",
+            "        transition \"t\" { duration 150 delay 50 }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    // -- S3 slice 5: stores and fields (E3059/E3061) ------------------------
+
+    #[test]
+    fn store_key_not_a_state_field_is_e3059() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [] }\n",
+            "    component C {\n",
+            "        state expanded: bool = false\n",
+            "        view { text \"x\" }\n",
+            "    }\n",
+            "    store \"tasks\" { items, filter }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3059").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("filter"), "{:#?}", diags);
+        assert_eq!(hits[0].line, 7, "{:#?}", diags);
+        // Component state fields do not satisfy a store key either.
+        assert!(hits[0].hint.as_ref().unwrap().contains("items"), "{:#?}", diags);
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [] }\n",
+            "    store \"tasks\" { items }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn field_kind_mismatched_to_state_type_is_e3061() {
+        // `kind number` on a string field and `kind text` on an int
+        // field both mismatch; array state fields bind no field kind.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { label: string = \"\", count: int = 0, items: [string] = [] }\n",
+            "    page Home {\n",
+            "        form \"F\" {\n",
+            "            field label kind number { }\n",
+            "            field count kind text { }\n",
+            "            field items kind text { }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3061").collect();
+        assert_eq!(hits.len(), 3, "{:#?}", diags);
+        assert!(hits[0].message.contains("number"), "{:#?}", diags);
+        assert!(hits[0].message.contains("string"), "{:#?}", diags);
+        assert!(hits[1].message.contains("int"), "{:#?}", diags);
+        // Matching kinds pass: number↔int, number↔float, text↔string.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { label: string = \"\", count: int = 0, ratio: float = 0.0 }\n",
+            "    page Home {\n",
+            "        form \"F\" {\n",
+            "            field count kind number { }\n",
+            "            field ratio kind number { }\n",
+            "            field label kind text { }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    // -- S3 slice 5: each keys (W3042/W3043) ---------------------------------
+
+    #[test]
+    fn each_without_key_warns_w3042() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [] }\n",
+            "    page Home {\n",
+            "        each items as item { text item }\n",
+            "    }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "W3042").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("key"), "{:#?}", diags);
+        // A key silences it; the loop variable is the canonical choice.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [] }\n",
+            "    page Home {\n",
+            "        each items as item key item { text item }\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn key_expression_ignoring_the_loop_variable_warns_w3043() {
+        // Literals and state reads give every row the same key.
+        for key_expr in ["\"x\"", "1", "true"] {
+            let src = format!(
+                "app \"A\" {{\n    state {{ items: [string] = [], n: int = 0 }}\n    page Home {{\n        each items as item key {} {{ text item }}\n    }}\n}}\n",
+                key_expr
+            );
+            let diags = check_src(&src);
+            assert!(diags.iter().any(|d| d.code == "W3043"), "{:#?} — {}", diags, key_expr);
+        }
+        // Keys derived from the loop variable pass.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [] }\n",
+            "    page Home {\n",
+            "        each items as item key item { text item }\n",
+            "        each items as item key str(item) { text item }\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    // -- S3 slice 5: unused state fields (W3044) and the N3040 note ----------
+
+    #[test]
+    fn state_field_written_but_never_read_warns_w3044() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { unused: int = 0, used: int = 0, untouched: int = 0 }\n",
+            "    page Home {\n",
+            "        text str(used)\n",
+            "        button \"B\" { on click { unused = 1; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "W3044").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("unused"), "{:#?}", diags);
+        // `used` is read; `untouched` is never written — neither warns.
+        assert_eq!(hits[0].line, 2, "{:#?}", diags);
+    }
+
+    #[test]
+    fn component_state_written_but_never_read_warns_w3044() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component C {\n",
+            "        state hidden: bool = false\n",
+            "        view {\n",
+            "            button \"B\" { on click { hidden = true; } }\n",
+            "        }\n",
+            "    }\n",
+            "    page Home { C() }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "W3044").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("hidden"), "{:#?}", diags);
+        assert!(hits[0].message.contains("component"), "{:#?}", diags);
+        // Reading it anywhere (its own update included) keeps it quiet.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    component C {\n",
+            "        state shown: bool = false\n",
+            "        view {\n",
+            "            when shown { text \"on\" }\n",
+            "            button \"B\" { on click { shown = true; } }\n",
+            "        }\n",
+            "    }\n",
+            "    page Home { C() }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn index_assign_writes_without_counting_as_a_read() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { items: [int] = [1] }\n",
+            "    page Home {\n",
+            "        button \"B\" { on click { items[0] = 2; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        assert!(
+            diags.iter().any(|d| d.code == "W3044"),
+            "an index-assign is a write, not a read: {:#?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn two_way_bind_targets_count_as_reads() {
+        clean(concat!(
+            "app \"A\" {\n",
+            "    state { draft: string = \"\" }\n",
+            "    page Home {\n",
+            "        input bind draft\n",
+            "        button \"B\" { on click { draft = \"x\"; } }\n",
+            "    }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn beginner_mode_notes_the_handler_bearing_app_n3040() {
+        let src = concat!(
+            "*mode = B;\n",
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    page Home {\n",
+            "        text str(n)\n",
+            "        button \"B\" { on click { n = 1; } }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "N3040").collect();
+        assert_eq!(hits.len(), 1, "{:#?}", diags);
+        assert!(hits[0].message.contains("browser"), "{:#?}", diags);
+        assert_eq!(hits[0].line, 2, "{:#?}", diags);
+        // Standard mode assumes the reader knows: no note.
+        let src_s = src.replace("*mode = B;", "*mode = S;");
+        let diags = check_src(&src_s);
+        assert!(!diags.iter().any(|d| d.code == "N3040"), "{:#?}", diags);
     }
 }

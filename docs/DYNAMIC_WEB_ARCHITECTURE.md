@@ -696,39 +696,39 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E3041 | prop mismatch (unknown / missing / type) (implemented S3 slice 4 — plus the duplicate-prop shape; exact types, defaults optional; rulings in LANGUAGE_SPEC §C2) |
 | E3042 | duplicate state/computed/prop name in one scope |
 | E3043 | invalid assignment target (not handler local / state) |
-| E3044 | computed-cycle or handler-restricted construct |
+| E3044 | computed-cycle (implemented S3 slice 5 — the "handler-restricted construct" half of this early-draft wording is covered by E3045/E3046/W3040 since slice 4; anchored on the closing reference, names the path; each distinct cycle once) |
 | E3045 | `return` inside an event handler (implemented S3 slice 4 — both `return;` and `return expr;`) |
 | E3046 | duplicate event handler on one element (implemented S3 slice 4 — compared by the word after `on`; key filters do not disambiguate) |
-| E3047 | unknown animation name on element |
-| E3048 | keyframes property outside the whitelist |
-| E3049 | unknown/invalid easing |
-| E3050 | invalid duration/delay |
+| E3047 | unknown animation name on element (implemented S3 slice 5 — one namespace: keyframes + transition names; app-level `transition` included) |
+| E3048 | keyframes property outside the whitelist (implemented S3 slice 5 — opacity, x, y, scale, rotate, blur) |
+| E3049 | unknown/invalid easing (implemented S3 slice 5 — five named easings or `cubic(a, b, c, d)` with four numeric literals) |
+| E3050 | invalid duration/delay (implemented S3 slice 5 — integer literals in milliseconds: duration positive, delay non-negative; static CSS is the reason) |
 | E3051 | `app` outside entry file |
 | E3052 | both `website` and `app` declared |
-| E3053 | component recursion |
-| E3054 | view nesting/instantiation depth overflow |
+| E3053 | component recursion (implemented S3 slice 5 — direct and indirect; anchored on the cycle-closing instantiation; legal repeated use never reports) |
+| E3054 | view nesting/instantiation depth overflow (implemented S3 slice 5 — cap 32 per B.3, pages as composition roots, component views expand with a cycle guard) |
 | E3055 | malformed route path |
 | E3056 | duplicate route |
 | E3057 | SPA without `not_found` page (or `not_found` in MPA) |
 | E3058 | `param()` for undeclared route param |
-| E3059 | store key not a declared state field |
-| E3060 | store type/shape mismatch against state |
-| E3061 | field kind/state type mismatch (e.g. `kind number` bound to `Str`) |
+| E3059 | store key not a declared state field (implemented S3 slice 5 — shared app state only; component state does not satisfy a key) |
+| E3060 | store type/shape mismatch against state (registered; **no firing condition in the 0.4.0 state model** — B.4's scalars/arrays-of-scalars make every declared field persistable; becomes checkable with the structs/records decision, Part E D2) |
+| E3061 | field kind/state type mismatch (implemented S3 slice 5 — `number` binds int/float, the other kinds bind string; arrays bind no kind) |
 | E3062 | app name empty or whitespace-only (mirrors E3033; assigned at S3, found in the S2 review — F-015) |
 | E3063 | unknown app page target — any page-target position (`route "x" -> Missing`, `not_found Missing`, `open <Page>` on buttons/links in page and component views, nested views included). App-scoped sibling of E3032 (website-scoped, frozen) — never reused. Hint lists declared pages; a target that names a component says "'X' is a component; routes target pages" (assigned in slice 2 — P-029) |
 | E3064 | duplicate page name inside an app — case-insensitive (mirrors E3031: page slugs are lowercased; assigned in slice 2 — P-029) |
 | E3065 | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names; assigned in slice 2 — P-029) |
 | E3066 | unknown name in the app scope — a binding expression, handler statement, call or bind target that resolves to no local, `each` loop variable, component prop/state, shared state, computed value, const, function or registered app builtin. App-scoped sibling of E3001 (frozen for ordinary function bodies); the hint lists what the current scope declares (assigned in slice 3) |
-| E3067 | (reserved — remaining S3 slices: computed cycles, component recursion/depth, stores/fields/animations) |
+| E3067 | (reserved — stays reserved; the remaining S3 slices landed in slice 5) |
 | E3068 | (reserved) |
 | E3069 | (reserved) |
 | E3070 | target does not support `app` (android) |
 | W3040 | `while` inside an event handler (implemented S3 slice 4 — warning, never fatal; once per `while` statement, nested control flow included) |
-| W3041 | handler local shadows a state name |
-| W3042 | `each` without stable `key` |
-| W3043 | duplicate `each` key values |
-| W3044 | state field written but never read / never rendered |
-| N3040 | beginner hint: event handlers run in the browser, state is local |
+| W3041 | handler local shadows a state name (implemented S3 slice 3) |
+| W3042 | `each` without stable `key` (implemented S3 slice 5 — warning; list rendering stays legal) |
+| W3043 | duplicate `each` key values (implemented S3 slice 5 — static approximation: the key expression never references the loop variable) |
+| W3044 | state field written but never read / never rendered (implemented S3 slice 5 — any expression read satisfies; index-assign bases count as writes; never-written fields are not its subject) |
+| N3040 | beginner hint: event handlers run in the browser, state is local (implemented S3 slice 5 — once per handler-bearing app in mode B) |
 
 The E3038 inconsistency found by the audit (CLI prints the no-website
 error as a plain message while FFI emits code E3038) is fixed as part of

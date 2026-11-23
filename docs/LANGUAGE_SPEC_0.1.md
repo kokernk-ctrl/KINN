@@ -482,17 +482,36 @@ byte-identical across the rename.
 | E3058 | checker | `param("…")` reads a route parameter no valid route declares (literal arguments only — non-literals are runtime data); anchored on the quoted argument, the hint lists the declared parameters (implemented in slice 3) |
 | E3043 | checker | invalid assignment target inside an app: assigning to a prop, computed value or event builtin in a handler (`fin` locals and `const`s keep the frozen E3004), and `field`/`input bind` targets that are not state fields (live since slice 3) |
 | W3041 | warning | a handler local (`fin`/`var`) shadows an app state field or component state field of the same name — legal, but called out so beginners see the shadow (live since slice 3) |
+| E3040 | checker | unknown component at an instantiation site — the hint lists the declared components in declaration order; a page name gets the namespace note; qualified `alias.Name` is always E3040 until module components exist (live since slice 4) |
+| E3041 | checker | prop mismatch at an instantiation site: unknown, duplicate or mistyped prop (anchored per shape), or a required prop (no default) that was not passed; exact types, defaults optional (live since slice 4) |
+| E3045 | checker | `return` inside an event handler — both `return;` and `return expr;`; the ordinary E3006/mismatch checks are skipped in handlers so one statement reports one error (live since slice 4) |
+| E3046 | checker | duplicate event handler on one element, compared by the word after `on`; key filters do not disambiguate; the duplicate's body is still checked (live since slice 4) |
+| W3040 | warning | `while` inside an event handler — once per `while` statement, nested control flow included; legal, never fatal; `for` never warns (live since slice 4) |
+| E3044 | checker | computed dependency cycle — a computed value that reaches itself directly or through other computed values; anchored on the reference that closes the cycle, naming the whole path; each distinct cycle reports once (live since slice 5) |
+| E3047 | checker | unknown animation name — every `enter`/`exit`/`hover`/`press`/`scroll` on elements and the app-level page `transition` resolve against one namespace (keyframes names + transition names); the hint lists the declared animations (live since slice 5) |
+| E3048 | checker | keyframe property outside the whitelist (opacity, x, y, scale, rotate, blur); anchored on the property name (live since slice 5) |
+| E3049 | checker | unknown or invalid easing — a named easing (`linear`, `ease`, `ease_in`, `ease_out`, `ease_in_out`) or `cubic(a, b, c, d)` with exactly four numeric literal arguments (live since slice 5) |
+| E3050 | checker | invalid `duration`/`delay` — both must be integer literals in milliseconds (duration positive, delay non-negative); animations generate static CSS, so the values are compile-time data (live since slice 5) |
+| E3059 | checker | store key not a declared (shared) state field — component state fields do not satisfy a store key; anchored on the key identifier (live since slice 5) |
+| E3061 | checker | field kind/state type mismatch — `number` binds int/float state, text/date/email/password/textarea bind string state; array state fields bind no field kind; anchored on the kind word (live since slice 5) |
+| W3042 | warning | `each` without a `key` — reorderings reuse DOM by position; list rendering stays legal (live since slice 5) |
+| W3043 | warning | duplicate `each` key values — statically detectable when the key expression never references the loop variable (every row gets the same key by construction) (live since slice 5) |
+| W3044 | warning | state field written but never read — no view binding, `computed` expression, handler read or two-way bind consumes it, so nothing renders or derives from it; never-written fields are not its subject (live since slice 5) |
+| N3040 | note | beginner hint: event handlers run in the browser, state is local to the device — once per handler-bearing app in mode B (mode A hides notes, mode S assumes the reader knows) (live since slice 5) |
 
 E2031–E2039 are frozen by the S2 parser test suite; E3051/E3052 are the
 presence rules and E3042/E3055–E3057/E3062 the declaration-validation
-rules — both frozen by the S2/S3 checker test suites (the remaining
-semantic layer E3040–E3079 / W3040–W3049 arrives with the later S3
-slices). E3039 sits outside those reserved ranges and is fully owned
-by `const` (S1). E2017 likewise sits outside the app-grammar span
-(E2017 was free: 0.1/0.2 took E2001–E2015 and E2099, 0.3 took E2016
-and E2030, the app grammar E2031–E2039) and is fully owned by the
-`let`→`fin` rename (ADR-0029), frozen by its parser/lexer/CLI test
-suite.
+rules — both frozen by the S2/S3 checker test suites. The app semantic
+layer E3040–E3061/W3040–W3044 and N3040 is **complete** — every code in
+the range is live and frozen by the slice 4/5 checker test suites
+(E3067–E3069 stay reserved; E3060 is registered with its B.11 meaning
+"store type/shape mismatch against state" but never fires in the 0.4.0
+type model — see the slice-5 rulings). E3039 sits outside those reserved
+ranges and is fully owned by `const` (S1). E2017 likewise sits outside
+the app-grammar span (E2017 was free: 0.1/0.2 took E2001–E2015 and
+E2099, 0.3 took E2016 and E2030, the app grammar E2031–E2039) and is
+fully owned by the `let`→`fin` rename (ADR-0029), frozen by its
+parser/lexer/CLI test suite.
 
 S3 slice 1 rulings (B.11 authorizes implementation-time wording;
 codes and meanings are frozen, tests pin the wording):
@@ -688,6 +707,89 @@ wording):
   builtin belongs to which event context, param/store context
   restriction) is unchanged.
 
+S3 slice 5 rulings (app semantics complete, 2026-11-23; codes and
+meanings frozen, tests pin the wording):
+
+- **E3044 anchors on the reference that closes the cycle** (the
+  identifier in the closing computed's expression) and names the whole
+  path (`computed cycle: a → b → a`; a self-reference says "depends on
+  itself"). Each **distinct** cycle reports once; independent cycles
+  all report; valid chains never do (DFS follows computed→computed
+  edges only — state-field leaves terminate, functions and consts are
+  not edges). Cycle members, and anything downstream of them, keep the
+  `Type::Error` poison, so one mistake never cascades.
+- **Computed values now type in dependency order** (Kahn's algorithm).
+  This replaces the slice-3 placeholder that published types in source
+  order and poisoned forward references — that ruling explicitly
+  scheduled the replacement for "the E3044 (cycles) slice". A computed
+  that references a later one gets its target's real type; mismatch
+  diagnostics downstream of forward references fire with the ordinary
+  frozen codes (E3003/E3011).
+- **E3053 anchors on the instantiation element that closes the cycle**;
+  a direct self-instantiation says "instantiates itself", an indirect
+  one names the path (`component recursion: A → B → A`). Only
+  unqualified instantiations inside component views are edges (the
+  qualified form is always E3040). Each distinct cycle reports once;
+  legal repeated use of the same component never reports.
+- **E3054 walks pages as composition roots**: view elements start at
+  depth 1; `when`/`otherwise`/`each`/`form` bodies and instantiated
+  component views (cycle-guarded) nest one level deeper; the B.3 cap is
+  **32**. The first element past the cap is reported per page (children
+  of an over-cap element overflow for the same reason — one diagnostic
+  teaches the fix without flooding). Components that are never
+  instantiated have no rendered composition and are not walked.
+- **E3047 resolves one namespace**: keyframes names and transition
+  names together (B.8 — `enter "pop"` may name either). The hint lists
+  declared animations (keyframes first, then transitions, declaration
+  order). Duplicate animation names carry no code in B.11 — the first
+  declaration wins and duplicates are not reported (nothing is
+  invented; noted honestly here).
+- **E3048/E3049/E3050 are compile-time data rules**: animations
+  generate static CSS (S8), so `duration`/`delay` must be integer
+  literals in milliseconds — duration positive, delay non-negative
+  (B.8's "non-positive duration" plus the integer-milliseconds rule) —
+  and easing is a named word or `cubic(a, b, c, d)` with four numeric
+  literal arguments. The easing rule owns its position: `cubic` never
+  cascades into E3002. Keyframe property values and `step` percentages
+  carry no code in B.11 and are not semantically restricted here (CSS
+  generation is S8's contract).
+- **E3059 anchors on the key identifier**; the hint lists the app's
+  declared state fields. Component state fields do not satisfy a store
+  key (stores persist shared state only). Duplicate keys within one
+  store carry no code in B.11 and are not reported.
+- **E3061 anchors on the kind word**: `number` binds int/float state;
+  text, date, email, password and textarea bind string state; array
+  state fields bind no field kind. It fires only when the bind target
+  resolved to a real state field (an E3043-invalid target is not
+  further checked — the established pattern).
+- **W3042/W3043 are guidance, never fatal**: a key expression that
+  never references the loop variable gives every row the same key
+  value by construction (literals and state reads alike — the static
+  approximation of "duplicate keys within one `each`"); keys derived
+  from the loop variable pass. Non-literal per-row constants that do
+  use the loop variable are runtime data and pass.
+- **W3044 counts real reads**: any expression read of a state field
+  (view bindings, `computed` expressions, handler reads, two-way bind
+  targets) satisfies it. An `IndexAssign` base is a **write**, not a
+  read (`items[0] = v` renders nothing). A field whose only reads are
+  its own update expressions (`x = x + 1`) counts as read — finer
+  dataflow is future work, stated honestly. Fields that are never
+  written are not this diagnostic's subject (B.11: "written but never
+  read").
+- **N3040 fires once per handler-bearing app in mode B**, anchored on
+  the `app` keyword. Mode A hides notes (the established rendering
+  rule); mode S assumes the reader knows.
+- **E3060 has no firing condition in 0.4.0**: its B.11 meaning is
+  "store type/shape mismatch against state", but the 0.4.0 state model
+  (B.4 — scalars and one-dimensional arrays of scalars only) makes
+  every declared state field persistable, so the rule can never fire.
+  It stays registered with that meaning and becomes checkable when the
+  structs/records decision (Part E D2) widens the state model. Nothing
+  was invented to force a trigger.
+- **Not in slice 5 (S6 boundary unchanged)**: which event builtin
+  belongs to which event context, and param/store context-restricted
+  invocation, stay enforced at S6. E3067–E3069 remain reserved.
+
 ## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
 
 `app` is the dynamic sibling of `website` (ADR-0024). **S2 delivered
@@ -716,15 +818,23 @@ props, defaults optional, exact types — `return` inside a handler is
 E3045, duplicate handlers for one event name on one element are
 E3046 (compared by the word after `on`; key filters do not
 disambiguate), and `while` inside a handler warns W3040 (legal,
-never fatal). An app program parses, `kinn ast` shows its tree, the
-presence rules (E3051/E3052, no `main` required) and the slice 1–4
-rules hold. **Still unchecked, honestly**: computed cycles (E3044),
-component recursion/depth caps (E3053/E3054), and
-store/field/animation semantics (E3047–E3061, W3042–W3044, later
-slices — E3067–E3069 stay reserved; **param/store names recognized;
-context-restricted invocation enforced at S6**). Every other command
-says honestly that dynamic builds are not implemented yet. Lowering
-arrives with S4.
+never fatal). **Slice 5 completes the app semantics** (the §C2
+slice-5 rulings): computed dependency cycles are E3044 (computed
+values type in dependency order — forward references no longer
+poison), component recursion is E3053, the 32-level composition cap
+is E3054, store keys must name shared state fields (E3059), field
+kinds must match the bound state type (E3061), animation names
+resolve (E3047), the keyframe property whitelist, easing and
+duration/delay are enforced (E3048/E3049/E3050), `each` keys guide
+(W3042/W3043), state fields written but never read warn (W3044),
+and beginner mode notes N3040. An app program parses, `kinn ast`
+shows its tree, the presence rules (E3051/E3052, no `main`
+required) and every slice 1–5 rule hold. E3060 stays registered
+with no firing condition in the 0.4.0 state model (§C2 slice-5
+rulings); E3067–E3069 stay reserved; **param/store names
+recognized; context-restricted invocation enforced at S6**. Every
+other command says honestly that dynamic builds are not implemented
+yet. Lowering arrives with S4.
 
 ```
 app_decl      := "app" STRING "{" app_section* "}"            ; E2016 when the name is not a string

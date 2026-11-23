@@ -1,10 +1,10 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 4
-(instantiation sites + handler subset, develop past the slice-4
-push).** Update this
-file after significant milestones. Keep it between 500 and 900 words.
+**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 complete
+(all five slices; app semantics fully checked, P-030 closed to S4).**
+Update this file after significant milestones. Keep it between 500
+and 900 words.
 
 ## What KINN is
 
@@ -60,38 +60,34 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **411 Rust tests** (291 kinc unit incl. app grammar,
+Test totals: **439 Rust tests** (316 kinc unit incl. app grammar,
 const, website, app validation, scope resolution, the fin rename,
-instantiation + handler rules; 28
-pipeline, 44 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
+instantiation + handler rules, computed cycles, recursion/depth,
+store/field/animation rules; 28
+pipeline, 5 kinn-android, 47 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
 
 tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
-grammar showcase (parses and checks — scope resolution since slice 3,
-instantiation sites and the handler subset since slice 4; build
-guards say what is not implemented
-yet); `examples/modules/` demonstrates multi-file projects with const
-exports (0.4.0 S1).
+grammar showcase (parses and checks — the full app semantic surface
+is checked since S3 slice 5; build guards say what is not
+implemented yet); `examples/modules/` demonstrates multi-file
+projects with const exports (0.4.0 S1).
 
-Planned, not implemented (do not pretend otherwise): the remaining
-app semantics — computed cycles (E3044), component recursion/depth
-(E3053/E3054), stores/fields/animations (E3059–E3061, E3047–E3050,
-W3042–W3044) (0.4.0 S3 slice 5+, P-030 narrowed twice) — app
-lowering/AppModel (S4), KIR→JS + runtime
-(S5–S6), routing/forms/persistence (S7–S9), package manager/registry
-(spec in MODULE_SYSTEM.md), native codegen for console programs
-(0.4+), string interpolation (ADR-0013), graphics (0.5), Android
-`tokens` command, on-device backend-APK install (P-019), Studio
-desktop shell. An `app` program parses and checks (names, targets,
-scope, instantiation sites, handler subset) but does not build — the
-CLI says so.
+Planned, not implemented (do not pretend otherwise): app
+lowering/AppModel (S4) — the last app-stage item, with E3070 —
+KIR→JS + runtime (S5–S6), routing/forms/persistence (S7–S9),
+package manager/registry (spec in MODULE_SYSTEM.md), native codegen
+for console programs (0.4+), string interpolation (ADR-0013),
+graphics (0.5), Android `tokens` command, on-device backend-APK
+install (P-019), Studio desktop shell. An `app` program parses and
+checks (all of S3) but does not build — the CLI says so.
 
 ## Repository structure
 
 ```
-compiler/                  Rust workspace (cargo test = 411 tests)
+compiler/                  Rust workspace (cargo test = 439 tests)
   crates/kinrt/            KIR instruction set, stack VM, disassembler
   crates/kinc/             lexer, parser, project, checker, lower,
                            site (SiteModel), backend/{web,android}
@@ -119,14 +115,18 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
 - P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
-- P-030 narrowed 2026-11-23 (twice: slice 3, then slice 4): app scope
-  resolution, binding typing, `field`/`input bind` targets,
-  `param()`/assignment rules, the param/store builtins, component
-  instantiation validation (E3040/E3041) and the handler subset
-  (E3045/E3046, W3040) ARE checked; still unchecked: computed cycles,
-  component recursion/depth (E3053/E3054), stores/fields/animations
-  (slice 5+). Page targets resolved since slice 2 (P-028/P-029 closed
-  as F-017/F-018). Param/store context restriction enforced at S6.
+- P-030 closed to S4 work only (narrowed 2026-11-23, slice 5): the
+  whole B.11 app semantic surface IS checked — scope resolution,
+  binding typing, `field`/`input bind` targets, `param()`/assignment
+  rules, the param/store/B.10 builtins, component instantiation
+  validation (E3040/E3041), the handler subset (E3045/E3046, W3040),
+  computed cycles (E3044, dependency-order typing), component
+  recursion/depth (E3053/E3054), stores/fields/animations
+  (E3059/E3061, E3047–E3050, W3042–W3044, N3040). E3060 registered
+  with no firing condition in the 0.4.0 state model (see the §C2
+  slice-5 rulings). Page targets resolved since slice 2 (P-028/P-029
+  closed as F-017/F-018). Param/store context restriction enforced
+  at S6.
 
 ## Current task and next milestone
 
@@ -192,9 +192,19 @@ in a handler warns once per statement, nested control flow included;
 legal, never fatal); E3067–E3069 stay reserved; +14 tests (11
 checker + 3 CLI), workspace 411 green, 0.3.0 web dist
 byte-identical, Studio 66/66 on fresh wasm; P-030 narrowed again.**
-Next: **the remaining S3 slices — computed cycles (E3044), component
-recursion/depth (E3053/E3054), stores/fields/animations
-(E3047–E3061, W3042–W3044); E3067–E3069 stay reserved;
+**S3 slice 5 landed (2026-11-23): app semantics COMPLETE — E3044
+(computed cycles; computed values type in dependency order, the
+slice-3 forward-reference poison replaced as scheduled), E3053/
+E3054 (recursion; the B.3 32-level composition cap), E3059/E3061
+(store keys; field kind/state type matching), E3047–E3050
+(animation namespace, keyframe property whitelist, easing,
+duration/delay as compile-time literals), W3042/W3043 (`each` key
+guidance), W3044 (state field written but never read; index-assign
+bases are writes), N3040 (beginner note, mode B); E3060 registered
+with no firing condition in the 0.4.0 state model; +28 tests (25
+checker + 3 CLI), workspace 439 green, 0.3.0 web dist
+byte-identical; P-030 closed to S4 work.**
+Next: **S4 — AppModel lowering + E3070 (android rejects apps);
 Playwright-with-S6 APPROVED.**
 Carry-overs: string casts/interpolation decision, native codegen
 spike, structs/records ADR (D2 stays out of 0.4.0).

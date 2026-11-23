@@ -134,10 +134,20 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       word after `on`, key filters do not disambiguate), W3040
       (`while` in a handler warns, legal, never fatal); +14 tests
       (11 checker + 3 CLI), workspace 411 green, 0.3.0 web dist
-      byte-identical, Studio 66/66 on a fresh wasm.** Remaining
-      slices: computed cycles (E3044), component recursion/depth
-      (E3053/E3054), stores/fields/animations (E3047–E3061),
-      W3042–W3044 (P-030)
+      byte-identical, Studio 66/66 on a fresh wasm.** Slice 5 landed
+      (2026-11-23): the app semantics are COMPLETE — E3044 (computed
+      cycles; computed values type in dependency order, the slice-3
+      forward-reference poison replaced as that ruling scheduled),
+      E3053/E3054 (component recursion; the B.3 32-level composition
+      cap with pages as roots), E3059/E3061 (store keys name shared
+      state; field kind/state type matching), E3047–E3050 (animation
+      namespace, keyframe property whitelist, easing, duration/delay),
+      W3042/W3043 (`each` key guidance), W3044 (state field written
+      but never read) and N3040 (beginner-mode note); E3060 registered
+      with no firing condition in the 0.4.0 state model, E3067–E3069
+      stay reserved; +28 tests (25 checker + 3 CLI), workspace 439
+      green, 0.3.0 web dist byte-identical.** S3 is done. Remaining:
+      S4 AppModel lowering + E3070 (P-030)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

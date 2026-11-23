@@ -11,6 +11,85 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S3 slice 5: app semantics complete (P-030 closed to S4 work only)
+
+- Language: **the remaining app semantic rules are implemented** —
+  every code in the B.11 table is now live and frozen by tests:
+  - **E3044** — computed dependency cycles, direct and indirect.
+    DFS over the computed→computed reference graph (state-field
+    leaves terminate, functions/consts are not edges); anchored on
+    the identifier that closes the cycle, naming the whole path
+    (`computed cycle: a → b → a`; a self-reference says "depends on
+    itself"); each distinct cycle reports once, independent cycles
+    all report, legal chains never do. Cycle members and everything
+    downstream keep the `Type::Error` poison, so nothing cascades.
+  - **Computed values now type in dependency order** (Kahn's
+    algorithm) — the slice-3 placeholder (source-order publication,
+    forward references poison silently) is replaced exactly as that
+    ruling scheduled: a computed referencing a later one gets its
+    target's real type, and mismatch diagnostics downstream of
+    forward references fire with the frozen ordinary codes.
+  - **E3053** — component recursion (direct: "instantiates itself";
+    indirect: names the path `A → B → A`), anchored on the
+    cycle-closing instantiation element; each distinct cycle once;
+    legal repeated use of a component never reports.
+  - **E3054** — the B.3 composition cap of 32, with pages as
+    composition roots: view elements start at depth 1,
+    `when`/`otherwise`/`each`/`form` bodies and instantiated
+    component views (cycle-guarded) nest deeper; the first element
+    past the cap is reported per page.
+  - **E3047** — animation references resolve: `enter`/`exit`/
+    `hover`/`press`/`scroll` on every element and the app-level
+    page `transition` against one namespace (keyframes names +
+    transition names); the hint lists the declared animations.
+  - **E3048** — the keyframe property whitelist (opacity, x, y,
+    scale, rotate, blur), anchored on the property name.
+  - **E3049** — easing is one of the five named easings or
+    `cubic(a, b, c, d)` with exactly four numeric literal arguments;
+    the rule owns its position (`cubic` never cascades into E3002).
+  - **E3050** — `duration`/`delay` must be integer literals in
+    milliseconds (duration positive, delay non-negative): animations
+    generate static CSS, so the values are compile-time data.
+  - **E3059** — store keys must name declared app state fields
+    (component state does not satisfy a key); anchored on the key
+    identifier, hint lists the declared fields.
+  - **E3061** — field kind/state type mismatch: `number` binds
+    int/float state, text/date/email/password/textarea bind string
+    state, arrays bind no kind; anchored on the kind word.
+  - **W3042** — `each` without a `key` warns (reorderings reuse DOM
+    by position; list rendering stays legal).
+  - **W3043** — a `key` expression that never references the loop
+    variable gives every row the same key by construction (literals
+    and state reads alike) and warns; keys derived from the loop
+    variable pass.
+  - **W3044** — a state field that is written (assignment, compound
+    or index-assign) but never read anywhere — no view binding,
+    `computed` expression, handler read or two-way bind — warns;
+    index-assign bases count as writes, never-written fields are
+    not its subject; reported once per field, app and component
+    state both covered.
+  - **N3040** — the B.11 beginner hint ("event handlers run in the
+    browser, state is local") fires once per handler-bearing app in
+    mode B; mode A hides notes, mode S stays silent.
+- Rulings recorded in LANGUAGE_SPEC §C2 (slice-5 block) + §C3:
+  **E3060 never fires in the 0.4.0 state model** (B.4's
+  scalars/arrays-of-scalars make every declared field persistable —
+  it becomes checkable with the structs/records decision D2);
+  duplicate animation names and duplicate store keys carry no code
+  in B.11 and are not reported (first declaration wins, nothing
+  invented); keyframe property values and `step` percentages are
+  not semantically restricted (S8's CSS contract); the S6 boundary
+  (event-builtin contexts, param/store context restriction) is
+  unchanged; E3067–E3069 stay reserved.
+- AST: store keys carry their identifier position (`StoreKey`),
+  `field` elements carry the kind word's position (E3059/E3061
+  anchors). `kinn ast` output unchanged.
+- Tests: +28 (25 checker — positive + negative per code, positions
+  and hints asserted; 3 CLI). Workspace **439 green**. The 0.3.0
+  web dist is byte-identical (rebuilt and diffed); Studio unaffected.
+  `examples/web/tasks_app.kin` status header updated — its only
+  diagnostic is the expected N3040 note (mode B).
+
 ### Added — S3 slice 4: component instantiation validation, handler subset (P-030 narrowed)
 
 - Language: **component instantiation sites validate now** — the last
