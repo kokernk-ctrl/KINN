@@ -361,7 +361,12 @@ component TaskRow {
 - **Instantiation** inside a view: `TaskRow(label: item, done: is_done)` —
   same shape as function calls, parsed by position-insensitive named args.
   Unknown prop E3041; missing prop without default E3041; type mismatch
-  E3041.
+  E3041. **Checked since S3 slice 4** — at every instantiation position
+  (page views, component views with nested component usage,
+  `when`/`otherwise`/`each`/`form` bodies): unknown component E3040;
+  unknown, duplicate, mistyped or missing-required props E3041 (exact
+  types, no implicit conversion; props with defaults are optional;
+  rulings in LANGUAGE_SPEC §C2).
 - **No component instances as values** (no closures in the language):
   components are template declarations; the compiler unrolls/statically
   instantiates each use site with its prop bindings — this keeps the
@@ -499,20 +504,32 @@ form "Add task" {
   `event_key: string` on keydown/keyup, `event_x/event_y: int` on
   pointer events, `form_valid: bool` and `field_errors: [string]`
   inside `on submit`); and `return` is illegal in
-  handlers (E3045). Since S3 slice 3 the builtins are registered by
+  handlers (E3045 — **enforced since S3 slice 4**: both `return;` and
+  `return expr;` report it; the frozen function-return rules stay with
+  ordinary functions, including ones called from handlers). Since S3
+  slice 3 the builtins are registered by
   name and type (B.11, LANGUAGE_SPEC §C2); which builtin belongs to
   which event context is enforced at S6.
 - `while` is allowed in handlers but always triggers W3040 ("a long loop
   in an event handler freezes the page; prefer `for` over a range") —
-  honest guidance, not a prohibition. (W3044 is "state field written
-  but never read" per the B.11 table — the earlier W3044 here was an
-  erratum, corrected with S3 slice 3.)
+  honest guidance, not a prohibition. **Emitted since S3 slice 4**: once
+  per `while` statement, nested control flow included (`while` under
+  `if`/blocks inside the handler warns too); a warning, never a fatal
+  error — a handler whose only diagnostic is W3040 checks OK; `for`
+  never warns; ordinary functions never see W3040. (W3044 is "state
+  field written but never read" per the B.11 table — the earlier W3044
+  here was an erratum, corrected with S3 slice 3.)
 - Handlers are lowered to KIR functions (same lowering as any Kin
   function) and compiled to JS (C.3). They may call any function of the
   program, including imported module functions — R1's "modules and
   components communicate through the official system".
 - Multiple handlers per element and one handler per event name
-  (duplicate `on click` on one element: E3046).
+  (duplicate `on click` on one element: E3046). **Enforced since S3
+  slice 4**, with the comparison unit ruled to be **the word after
+  `on`**: two `on key` handlers collide even with different key filters
+  (the filter is runtime data — the hint teaches merging them through
+  `event_key`), while `on key "Escape"` and `on keydown` are different
+  event names and coexist.
 
 ### B.7 Forms, validation, persistence, JSON (R8)
 
@@ -675,13 +692,13 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E2031 | unknown event name in `on` |
 | E2032 | malformed `each`/`when`/component instantiation syntax |
 | E2033 | view argument must be expression or string |
-| E3040 | unknown component |
-| E3041 | prop mismatch (unknown / missing / type) |
+| E3040 | unknown component (implemented S3 slice 4 — hint lists the declared components in declaration order; a page name gets the namespace note; qualified `alias.Name` is always E3040 until module components exist) |
+| E3041 | prop mismatch (unknown / missing / type) (implemented S3 slice 4 — plus the duplicate-prop shape; exact types, defaults optional; rulings in LANGUAGE_SPEC §C2) |
 | E3042 | duplicate state/computed/prop name in one scope |
 | E3043 | invalid assignment target (not handler local / state) |
 | E3044 | computed-cycle or handler-restricted construct |
-| E3045 | `return` inside an event handler |
-| E3046 | duplicate event handler on one element |
+| E3045 | `return` inside an event handler (implemented S3 slice 4 — both `return;` and `return expr;`) |
+| E3046 | duplicate event handler on one element (implemented S3 slice 4 — compared by the word after `on`; key filters do not disambiguate) |
 | E3047 | unknown animation name on element |
 | E3048 | keyframes property outside the whitelist |
 | E3049 | unknown/invalid easing |
@@ -702,11 +719,11 @@ this proposal (final wording at implementation, codes frozen by tests):
 | E3064 | duplicate page name inside an app — case-insensitive (mirrors E3031: page slugs are lowercased; assigned in slice 2 — P-029) |
 | E3065 | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names; assigned in slice 2 — P-029) |
 | E3066 | unknown name in the app scope — a binding expression, handler statement, call or bind target that resolves to no local, `each` loop variable, component prop/state, shared state, computed value, const, function or registered app builtin. App-scoped sibling of E3001 (frozen for ordinary function bodies); the hint lists what the current scope declares (assigned in slice 3) |
-| E3067 | (reserved — remaining S3 slices: handler subset, prop instantiation, computed cycles, stores/fields/animations) |
+| E3067 | (reserved — remaining S3 slices: computed cycles, component recursion/depth, stores/fields/animations) |
 | E3068 | (reserved) |
 | E3069 | (reserved) |
 | E3070 | target does not support `app` (android) |
-| W3040 | `while` inside an event handler |
+| W3040 | `while` inside an event handler (implemented S3 slice 4 — warning, never fatal; once per `while` statement, nested control flow included) |
 | W3041 | handler local shadows a state name |
 | W3042 | `each` without stable `key` |
 | W3043 | duplicate `each` key values |

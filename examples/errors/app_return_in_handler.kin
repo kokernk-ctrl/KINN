@@ -1,0 +1,25 @@
+// errors/app_return_in_handler.kin — an event handler whose body
+// contains a `return`. Since S3 slice 4, the handler subset is
+// enforced: handlers are callbacks that return to the caller
+// automatically when the body ends, so `return` is illegal inside
+// them — `kinn check` reports E3045 for both `return;` and `return
+// expr;`, anchored on the `return` keyword. Ordinary functions keep
+// their `return` rules unchanged (E3006 and friends).
+
+// error: E3045
+
+*mode = S;
+
+app "Counter" {
+    state {
+        n: int = 0
+    }
+
+    page Home {
+        button "Save" {
+            on click {
+                return;
+            }
+        }
+    }
+}

@@ -1,0 +1,28 @@
+// errors/app_unknown_component.kin — a dynamic app whose view
+// instantiates a component nothing declares. Since S3 slice 4,
+// instantiation sites validate against the app's component
+// declarations: `MissingRow` is not a declared component (the app
+// declares `TaskRow`), so `kinn check` reports E3040, anchored on the
+// component name, with a hint listing the declared components. The
+// argument expression itself still resolves (slice 3), so only the
+// component name is at fault here.
+
+// error: E3040
+
+*mode = S;
+
+app "Tasks" {
+    component TaskRow {
+        prop title: string
+        prop completed: bool = false
+
+        view {
+            text title
+        }
+    }
+
+    page Home {
+        TaskRow(title: "Study")
+        MissingRow(title: "Study")
+    }
+}

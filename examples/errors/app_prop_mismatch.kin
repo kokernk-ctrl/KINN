@@ -1,0 +1,27 @@
+// errors/app_prop_mismatch.kin — a component instantiation whose
+// argument does not match the component's prop signature. Since S3
+// slice 4, prop signatures are checked at every instantiation site:
+// `TaskRow` declares `title: string` (no default, so it is required)
+// and `completed: bool = false` (optional). Here `title` is passed `123`
+// — an int — so `kinn check` reports E3041 (the instantiation-site
+// type-mismatch code), anchored on the value expression, with the
+// no-implicit-conversion hint.
+
+// error: E3041
+
+*mode = S;
+
+app "Tasks" {
+    component TaskRow {
+        prop title: string
+        prop completed: bool = false
+
+        view {
+            text title
+        }
+    }
+
+    page Home {
+        TaskRow(title: 123)
+    }
+}

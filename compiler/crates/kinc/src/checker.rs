@@ -46,6 +46,7 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         assigned: HashSet::new(),
         var_decls: Vec::new(),
         app: None,
+        handler_depth: 0,
     };
 
     // Pass 0: website declarations (0.3.0). Only the entry file may
@@ -327,13 +328,15 @@ pub fn check_project(project: &Project) -> Vec<Diagnostic> {
         }
     }
 
-    // Pass 1c: app semantics (0.4.0 S3 slice 3) — scope resolution,
+    // Pass 1c: app semantics (0.4.0 S3 slices 3–4) — scope resolution,
     // binding typing, the app builtin table and E3058/E3066/E3043/W3041
-    // for the app registered in pass 0b. Runs after pass 1, because
-    // binding expressions and handler bodies resolve against the entry
-    // file's functions, consts and imports through the ordinary checker
-    // (B.6: handler bodies are official statements), and before pass 2
-    // so app diagnostics keep preceding function-body diagnostics.
+    // for the app registered in pass 0b, plus the instantiation-site and
+    // handler-subset rules of slice 4 (E3040/E3041, E3045/E3046, W3040).
+    // Runs after pass 1, because binding expressions and handler bodies
+    // resolve against the entry file's functions, consts and imports
+    // through the ordinary checker (B.6: handler bodies are official
+    // statements), and before pass 2 so app diagnostics keep preceding
+    // function-body diagnostics.
     if let Some(a) = entry_app {
         c.cur_file = 0;
         c.file = project.files[0].path.clone();
@@ -957,12 +960,14 @@ fn collect_open_targets<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// S3 slice 3: app scope resolution and binding typing (0.4.0).
+// S3 slices 3–4: app scope resolution, binding typing, instantiation
+// sites and the handler subset (0.4.0).
 // ---------------------------------------------------------------------------
 
-/// Scope resolution, binding typing and the app builtins for a
-/// registered app (the pass-0b rules and the slice-1/2 rules already
-/// ran: presence, declaration validation, page targets).
+/// Scope resolution, binding typing, the app builtins and the
+/// instantiation-site/handler-subset rules for a registered app (the
+/// pass-0b rules and the slice-1/2 rules already ran: presence,
+/// declaration validation, page targets).
 ///
 /// Names resolve through the ordinary checker scopes: the app layer
 /// (state fields + computed values) is the outermost scope, each
@@ -976,13 +981,17 @@ fn collect_open_targets<'a>(
 /// **W3041**. Binding expressions type through the ordinary checker:
 /// text/heading/label/placeholder expressions must be strings, `when`
 /// conditions bool, `each` iterables arrays (E3003/E3011, no implicit
-/// conversions — B.5).
+/// conversions — B.5). Since slice 4, component instantiations validate
+/// against the app's component declarations — **E3040** for an unknown
+/// component, **E3041** for unknown/missing/duplicate/mistyped props —
+/// and handler bodies obey the handler subset: **E3045** (`return`
+/// illegal), **E3046** (duplicate handler per event name on one
+/// element), **W3040** (`while` warns but stays legal).
 ///
-/// NOT checked here, honestly (P-030, narrowed by this slice):
-/// component names and prop signatures at instantiation sites
-/// (E3040/E3041), handler subset enforcement (E3045/E3046, W3040),
-/// computed cycles (E3044), store/field/animation semantics
-/// (E3047–E3061), W3042–W3044 and N3040. E3067–E3069 stay reserved.
+/// NOT checked here, honestly (P-030, narrowed by slice 4): computed
+/// cycles (E3044), component recursion/depth caps (E3053/E3054),
+/// store/field/animation semantics (E3047–E3061), W3042–W3044 and
+/// N3040. E3067–E3069 stay reserved.
 fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
     // `:name` parameters of valid routes; malformed paths are not
     // further checked (the established E3062/E3055 pattern).
@@ -996,8 +1005,37 @@ fn check_app_semantics(c: &mut Checker, a: &AppDecl) {
             }
         }
     }
+    // Component signatures for the instantiation-site rules (slice 4).
+    // E3065 already rejected duplicate component names in pass 0b; the
+    // first declaration wins here. E3042 already rejected duplicate
+    // prop names within one component — the signature keeps every
+    // declaration and lookups take the first, mirroring how the app
+    // layer resolves duplicates ("the name still resolves to the first").
+    let mut components: HashMap<String, ComponentSig> = HashMap::new();
+    let mut component_order: Vec<String> = Vec::new();
+    for comp in &a.components {
+        if components.contains_key(&comp.name) {
+            continue; // E3065 already fired in pass 0b; the first wins
+        }
+        components.insert(
+            comp.name.clone(),
+            ComponentSig {
+                props: comp
+                    .props
+                    .iter()
+                    .map(|p| PropSig {
+                        name: p.name.clone(),
+                        ty: p.ty.clone(),
+                        has_default: p.default.is_some(),
+                    })
+                    .collect(),
+            },
+        );
+        component_order.push(comp.name.clone());
+    }
+    let pages: Vec<String> = a.pages.iter().map(|p| p.name.clone()).collect();
     let hint = app_scope_hint(a, None);
-    c.app = Some(AppScope { route_params, hint });
+    c.app = Some(AppScope { route_params, hint, components, component_order, pages });
 
     // App layer. E3042 already rejected duplicates in this scope; a
     // duplicate insert keeps the first declaration (its error is
@@ -1147,9 +1185,9 @@ fn app_scope_hint(a: &AppDecl, comp: Option<&ComponentDecl>) -> String {
 /// with the app/component layers open. `each` loop variables are
 /// read-only and scoped to the body (mirroring `for`). Handlers are
 /// official statement bodies (B.6) checked by the existing checker with
-/// the event builtins in scope. Component names and prop signatures at
-/// instantiation sites stay unchecked in this slice (E3040/E3041,
-/// P-030) — the argument *expressions* are still checked.
+/// the event builtins in scope and the handler subset enforced (slice 4:
+/// E3045/E3046, W3040). Component instantiations validate against the
+/// app's component declarations since slice 4 (E3040/E3041).
 fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
     let expect = |c: &mut Checker, e: &Expr, want: &Type| {
         let t = c.check_expr(e);
@@ -1224,13 +1262,13 @@ fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
                 check_app_elements(c, body);
                 c.scopes.pop();
             }
-            ViewElementKind::Component { args, handlers, .. } => {
-                // E3040/E3041 (component names, prop signatures) are
-                // the instantiation-site slice (P-030); the argument
-                // expressions themselves resolve here.
-                for arg in args {
-                    c.check_expr(&arg.value);
-                }
+            ViewElementKind::Component { module, name, args, handlers, .. } => {
+                // Slice 4: instantiation sites validate against the
+                // app's component declarations (E3040/E3041). The
+                // argument expressions still resolve as everywhere in
+                // the app scope — even for an unknown component, so
+                // names inside the arguments keep reporting E3066.
+                check_component_instantiation(c, e.line, e.col, module.as_deref(), name, args);
                 check_app_handlers(c, handlers);
             }
             ViewElementKind::Form { legend, body, handlers } => {
@@ -1253,6 +1291,186 @@ fn check_app_elements(c: &mut Checker, elements: &[ViewElement]) {
                     }
                 }
                 check_app_handlers(c, handlers);
+            }
+        }
+    }
+}
+
+/// A component instantiation inside a view (B.3): `Name(prop: expr, …)`
+/// or the qualified `alias.Name(...)`. Slice 4 validates it against the
+/// app's component declarations:
+///
+/// - **E3040** — the component is not declared in this app. The hint
+///   lists the declared components; a name that matches a declared
+///   *page* gets the namespace note (pages and components are separate
+///   namespaces — the mirror of E3063's component note); the qualified
+///   form is always unknown today because module files cannot declare
+///   components yet, so its hint says so honestly.
+/// - **E3041** — prop mismatches, four shapes: an unknown prop name, a
+///   prop passed twice, a type mismatch against the prop's declared
+///   type (no implicit conversions — int and float do not mix), and a
+///   required prop (no default) that was not passed. Omitting a prop
+///   with a default is legal.
+///
+/// The argument expressions always resolve through the ordinary checker
+/// (slice 3), even when the component is unknown — unknown names inside
+/// the arguments keep reporting E3066, and a poisoned (`Error`) argument
+/// suppresses only the E3041 type comparison.
+fn check_component_instantiation(
+    c: &mut Checker,
+    line: u32,
+    col: u32,
+    module: Option<&str>,
+    name: &str,
+    args: &[PropArg],
+) {
+    // E3040 — the component table lives in the app scope; the walk only
+    // runs inside the app pass, so it is always present here.
+    let sig = c
+        .app
+        .as_ref()
+        .and_then(|app| app.components.get(name))
+        .map(|s| s.props.clone());
+    if sig.is_none() {
+        let display = match module {
+            Some(m) => format!("{}.{}", m, name),
+            None => name.to_string(),
+        };
+        let len = display.chars().count() as u32;
+        let mut d = Diagnostic::error(
+            "E3040",
+            format!("unknown component `{}`", display),
+            line,
+            col,
+            len,
+        );
+        d.hint = Some(match module {
+            // Qualified instantiation: no module can declare components
+            // in 0.4.0 (components are app sections) — say so instead
+            // of pretending the import path exists.
+            Some(_) => "components are declared inside `app { … }`; importing \
+                        components from module files is not implemented in 0.4.0"
+                .to_string(),
+            None => {
+                let app = c.app.as_ref().unwrap();
+                if app.component_order.is_empty() {
+                    "this app declares no components".to_string()
+                } else if app.pages.iter().any(|p| p == name) {
+                    format!(
+                        "'{}' is a page; views instantiate components — pages and \
+                         components are separate namespaces (declared components: {})",
+                        name,
+                        app.component_order.join(", ")
+                    )
+                } else {
+                    format!("declared components: {}", app.component_order.join(", "))
+                }
+            }
+        });
+        c.diags.push(d.in_file(c.file.clone()));
+    }
+
+    // E3041 — prop-level checks. Arguments are checked in source order;
+    // every value expression resolves through the ordinary checker even
+    // when its prop name is unknown (the expression's own errors, like
+    // E3066, still fire).
+    let mut passed: Vec<&str> = Vec::new();
+    for arg in args {
+        let arg_ty = c.check_expr(&arg.value);
+        let Some(props) = &sig else { continue };
+        let Some(prop) = props.iter().find(|p| p.name == arg.name) else {
+            let mut d = Diagnostic::error(
+                "E3041",
+                format!(
+                    "component `{}` has no prop `{}`",
+                    name, arg.name
+                ),
+                arg.line,
+                arg.col,
+                arg.name.chars().count() as u32,
+            );
+            d.hint = Some(if props.is_empty() {
+                format!("component `{}` declares no props — instantiate it as `{}()`", name, name)
+            } else {
+                format!(
+                    "props of `{}`: {}",
+                    name,
+                    props
+                        .iter()
+                        .map(|p| {
+                            if p.has_default {
+                                format!("{} (optional)", p.name)
+                            } else {
+                                format!("{} (required)", p.name)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+            c.diags.push(d.in_file(c.file.clone()));
+            continue;
+        };
+        if passed.contains(&arg.name.as_str()) {
+            let mut d = Diagnostic::error(
+                "E3041",
+                format!(
+                    "prop `{}` is passed twice in this `{}` instantiation",
+                    arg.name, name
+                ),
+                arg.line,
+                arg.col,
+                arg.name.chars().count() as u32,
+            );
+            d.hint =
+                Some("a prop is passed at most once — remove one of the two arguments".to_string());
+            c.diags.push(d.in_file(c.file.clone()));
+        } else {
+            passed.push(arg.name.as_str());
+        }
+        if arg_ty != Type::Error && arg_ty != prop.ty {
+            let mut d = Diagnostic::error(
+                "E3041",
+                format!(
+                    "prop `{}` of component `{}` expects {}, found {}",
+                    prop.name,
+                    name,
+                    prop.ty.as_str(),
+                    arg_ty.as_str()
+                ),
+                arg.value.line,
+                arg.value.col,
+                1,
+            );
+            d.hint = Some(
+                "props have exact types — there is no implicit conversion (int and float do not mix)"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+        }
+    }
+
+    // E3041 — required props (no default) that were not passed. One
+    // diagnostic per missing prop, anchored on the instantiation name.
+    if let Some(props) = &sig {
+        for prop in props {
+            if !prop.has_default && !passed.contains(&prop.name.as_str()) {
+                let mut d = Diagnostic::error(
+                    "E3041",
+                    format!(
+                        "component `{}` is missing the required prop `{}` (it has no default value)",
+                        name, prop.name
+                    ),
+                    line,
+                    col,
+                    name.chars().count() as u32,
+                );
+                d.hint = Some(format!(
+                    "pass `{}: <value>` inside the parentheses, or give the prop a default: \
+                     `prop {}: {} = …`",
+                    prop.name, prop.name, prop.ty.as_str()
+                ));
+                c.diags.push(d.in_file(c.file.clone()));
             }
         }
     }
@@ -1331,13 +1549,53 @@ fn check_bind_target(c: &mut Checker, t: &OpenTarget, element: &str) {
 
 /// Handler bodies are official Kin statements (B.6) checked by the
 /// existing checker, with the event builtins in scope below the
-/// locals. This slice registers their **names and types only** — which
-/// builtin belongs to which event context is enforced at S6 (the
-/// approved A2 ruling), and the handler subset itself (E3045 `return`,
-/// E3046 duplicate handlers, W3040 `while`) is a later slice (P-030):
-/// `return;` is accepted here exactly like in any void body until then.
+/// locals. Names/types only for the builtins — which builtin belongs to
+/// which event context is enforced at S6 (the approved A2 ruling).
+/// Slice 4 adds the handler subset (B.6):
+///
+/// - **E3046** — one handler per event name on one element. Handlers
+///   are compared by the word after `on` (`click`, `key`, …): two `on
+///   key` handlers collide even with different key filters (the filter
+///   is runtime data, B.6), while `on key "Escape"` and `on keydown`
+///   are different event names and coexist. The duplicate's body is
+///   still checked — errors inside it are not hidden by E3046.
+/// - **E3045** — `return` is illegal inside a handler (they are
+///   callbacks; control returns to the caller automatically). Enforced
+///   in [`Checker::check_stmt`] via `handler_depth`.
+/// - **W3040** — `while` stays legal but always warns (a long loop in
+///   a handler freezes the page). Also via `handler_depth`, so a
+///   `while` nested under `if`/`for`/blocks inside the handler warns
+///   too. `for` never warns — it is the suggested alternative.
 fn check_app_handlers(c: &mut Checker, handlers: &[OnEvent]) {
+    let mut seen: Vec<EventKind> = Vec::new();
     for on in handlers {
+        // E3046 — duplicate event name on one element, anchored on the
+        // duplicate's `on` keyword. One diagnostic per extra handler.
+        if seen.contains(&on.event) {
+            let mut d = Diagnostic::error(
+                "E3046",
+                format!(
+                    "duplicate `on {}` handler on this element — one handler per event name",
+                    on.event.as_str()
+                ),
+                on.line,
+                on.col,
+                2, // the `on` keyword
+            );
+            d.hint = Some(if on.event == EventKind::Key {
+                "`on key \"A\"` and `on key \"B\"` both count as `on key` — combine them \
+                 into one handler that checks `event_key`"
+                    .to_string()
+            } else {
+                format!(
+                    "merge the two `on {}` bodies, or listen for a different event",
+                    on.event.as_str()
+                )
+            });
+            c.diags.push(d.in_file(c.file.clone()));
+        } else {
+            seen.push(on.event);
+        }
         let mut scope: HashMap<String, VarInfo> = HashMap::new();
         for (name, ty) in [
             ("event_value", Type::Str),
@@ -1364,7 +1622,9 @@ fn check_app_handlers(c: &mut Checker, handlers: &[OnEvent]) {
         c.loop_depth = 0;
         c.assigned.clear();
         c.var_decls.clear();
+        c.handler_depth += 1;
         c.check_block(&on.body);
+        c.handler_depth -= 1;
         c.ret = saved_ret;
         c.scopes.pop();
     }
@@ -1488,15 +1748,44 @@ impl AppVarKind {
 }
 
 /// State carried while the app semantic pass walks a registered app
-/// (S3 slice 3). Present only inside that pass: it switches unknown-name
+/// (S3 slices 3–4). Present only inside that pass: it switches unknown-name
 /// diagnostics to the app-scoped E3066 (the sibling of E3001, the way
 /// E3063 siblings E3032 — frozen meanings are never reused,
-/// ADR-0011), carries the `:param` names valid routes declare (E3058)
-/// and holds the hint naming what the scope being checked makes
-/// visible.
+/// ADR-0011), carries the `:param` names valid routes declare (E3058),
+/// holds the hint naming what the scope being checked makes
+/// visible, and keeps the component signatures for the
+/// instantiation-site rules (E3040/E3041, slice 4).
 struct AppScope {
     route_params: Vec<String>,
     hint: String,
+    /// Component signatures by name (slice 4). Duplicate component names
+    /// were rejected by E3065 in pass 0b; the first declaration wins
+    /// here (the established "invalid declarations are not further
+    /// checked" pattern).
+    components: HashMap<String, ComponentSig>,
+    /// Component names in declaration order — HashMap iteration is
+    /// random, and E3040's hint teaches better when it lists components
+    /// the way they were declared.
+    component_order: Vec<String>,
+    /// Declared page names, for E3040's pages-vs-components namespace
+    /// note (the mirror of E3063's component note).
+    pages: Vec<String>,
+}
+
+/// A component's checked signature (S3 slice 4): its props in
+/// declaration order, for E3041 at instantiation sites.
+struct ComponentSig {
+    props: Vec<PropSig>,
+}
+
+/// One prop of a component signature: name, declared type, and whether
+/// a default value makes it optional at instantiation sites (B.3 —
+/// missing props without defaults are E3041).
+#[derive(Clone)]
+struct PropSig {
+    name: String,
+    ty: Type,
+    has_default: bool,
 }
 
 #[derive(Clone)]
@@ -1540,9 +1829,17 @@ struct Checker {
     assigned: HashSet<String>,
     /// `var` declarations of the current function (for the B-mode lint).
     var_decls: Vec<(String, u32, u32)>,
-    /// App semantic pass state (0.4.0 S3 slice 3); `Some` only while a
+    /// App semantic pass state (0.4.0 S3 slices 3–4); `Some` only while a
     /// registered app is being walked (see [`check_app_semantics`]).
     app: Option<AppScope>,
+    /// Depth of event-handler bodies on the check stack (S3 slice 4).
+    /// Greater than zero only while a handler's statements are being
+    /// checked (nested blocks included — a `while` under an `if` inside
+    /// the handler still counts). Function bodies checked in pass 2
+    /// always see zero: handlers cannot contain function declarations,
+    /// and the app pass closes before pass 2. Drives E3045 (`return` is
+    /// illegal in handlers) and W3040 (`while` in a handler warns).
+    handler_depth: u32,
 }
 
 impl Checker {
@@ -1887,7 +2184,26 @@ impl Checker {
                     self.check_stmt(e);
                 }
             }
-            Stmt::While { cond, body, .. } => {
+            Stmt::While { cond, body, line, col } => {
+                // S3 slice 4 (B.6): `while` stays legal inside event
+                // handlers but always warns — a long loop freezes the
+                // page. `for` (bounded) is the suggested alternative and
+                // never warns. Fires once per `while` statement, nested
+                // control flow included (handler_depth survives blocks).
+                if self.handler_depth > 0 {
+                    let mut d = Diagnostic::warning(
+                        "W3040",
+                        "a long `while` loop in an event handler freezes the page; prefer `for` over a range",
+                        *line,
+                        *col,
+                        5, // the `while` keyword
+                    );
+                    d.hint = Some(
+                        "`while` remains allowed — this is guidance; a `for` over a range always ends"
+                            .to_string(),
+                    );
+                    self.diags.push(d.in_file(self.file.clone()));
+                }
                 let ct = self.check_expr(cond);
                 if ct != Type::Bool && ct != Type::Error {
                     self.error(
@@ -1958,27 +2274,51 @@ impl Checker {
                 self.loop_depth -= 1;
                 self.scopes.pop();
             }
-            Stmt::Return { value, line, col } => match value {
-                None => {
-                    if self.ret != Type::Void {
-                        self.error(
-                            "E3006",
-                            format!("missing return value (function returns {})", self.ret.as_str()),
-                            *line,
-                            *col,
-                            6,
-                        );
+            Stmt::Return { value, line, col } => {
+                // S3 slice 4 (B.6): `return` is illegal inside an event
+                // handler — handlers are callbacks that return to the
+                // caller automatically when the body ends. E3045 fires
+                // for both `return;` and `return expr;`; the ordinary
+                // E3006/mismatch checks are skipped in handlers so one
+                // statement reports one error, but a value expression is
+                // still checked — unknown names inside it keep reporting
+                // their own diagnostics.
+                let in_handler = self.handler_depth > 0;
+                if in_handler {
+                    let mut d = Diagnostic::error(
+                        "E3045",
+                        "`return` is not allowed inside an event handler — handlers are callbacks that return to the caller automatically",
+                        *line,
+                        *col,
+                        6, // the `return` keyword
+                    );
+                    d.hint = Some("remove the `return` statement".to_string());
+                    self.diags.push(d.in_file(self.file.clone()));
+                }
+                match value {
+                    None => {
+                        if !in_handler && self.ret != Type::Void {
+                            self.error(
+                                "E3006",
+                                format!("missing return value (function returns {})", self.ret.as_str()),
+                                *line,
+                                *col,
+                                6,
+                            );
+                        }
+                    }
+                    Some(v) => {
+                        let vt = self.check_expr(v);
+                        if !in_handler {
+                            if self.ret == Type::Void {
+                                self.error("E3006", "void function cannot return a value", *line, *col, 6);
+                            } else if vt != Type::Error && vt != self.ret {
+                                self.mismatch(&self.ret.clone(), &vt, v.line, v.col, 1);
+                            }
+                        }
                     }
                 }
-                Some(v) => {
-                    let vt = self.check_expr(v);
-                    if self.ret == Type::Void {
-                        self.error("E3006", "void function cannot return a value", *line, *col, 6);
-                    } else if vt != Type::Error && vt != self.ret {
-                        self.mismatch(&self.ret.clone(), &vt, v.line, v.col, 1);
-                    }
-                }
-            },
+            }
             Stmt::Break { line, col } => {
                 if self.loop_depth == 0 {
                     self.error("E3009", "`break` outside of a loop", *line, *col, 5);
@@ -4545,5 +4885,590 @@ mod tests {
             "    page Home { text label Row(label: \"row\") }\n",
             "}\n",
         ));
+    }
+
+    // -- S3 slice 4: instantiation sites and the handler subset --------
+
+    /// The task's normative example: valid instantiation, default
+    /// omission, multiple instantiations, nested component usage and
+    /// distinct handlers on one element — zero diagnostics.
+    const SLICE4_APP: &str = concat!(
+        "*mode = B;\n",
+        "app \"Tasks\" {\n",
+        "    component TaskRow {\n",
+        "        prop title: string\n",
+        "        prop completed: bool = false\n",
+        "        view {\n",
+        "            text title\n",
+        "            button \"Toggle\" {\n",
+        "                on click { print(\"t\"); }\n",
+        "            }\n",
+        "        }\n",
+        "    }\n",
+        "    component Card {\n",
+        "        prop heading: string\n",
+        "        view {\n",
+        "            TaskRow(title: heading, completed: true)\n",
+        "        }\n",
+        "    }\n",
+        "    state { n: int = 0 }\n",
+        "    page Home {\n",
+        "        TaskRow(title: \"Study\")\n",
+        "        TaskRow(title: \"Again\", completed: true)\n",
+        "        Card(heading: \"Group\")\n",
+        "        button \"Save\" {\n",
+        "            on click { n += 1; }\n",
+        "            on focus { n = 0; }\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    #[test]
+    fn slice4_feature_surface_checks_clean() {
+        // Positive master: every slice-4 feature checks with zero
+        // diagnostics — warnings included (no `while` here).
+        let diags = check_src(SLICE4_APP);
+        assert!(diags.is_empty(), "expected a clean app, got: {:#?}", diags);
+    }
+
+    #[test]
+    fn unknown_components_report_e3040() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        Card(label: \"x\")\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3040").expect("E3040");
+        assert_eq!((d.line, d.col, d.len), (7, 9, 4), "anchored on the component name");
+        assert!(d.message.contains("unknown component `Card`"), "{}", d.message);
+        assert!(
+            d.hint.as_deref().unwrap().contains("declared components: Row"),
+            "{:?}",
+            d.hint
+        );
+        // A name that matches a declared page gets the namespace note
+        // (the mirror of E3063's component note).
+        let diags = check_src(
+            "app \"A\" { page Home { text \"x\" } component Row { view { text \"r\" } } page Other { Home() } }",
+        );
+        let d = diags.iter().find(|d| d.code == "E3040").expect("E3040 for the page name");
+        assert!(
+            d.hint.as_deref().unwrap().contains("'Home' is a page; views instantiate components"),
+            "{:?}",
+            d.hint
+        );
+        // No components at all.
+        let diags = check_src("app \"A\" { page Home { Ghost() } }");
+        let d = diags.iter().find(|d| d.code == "E3040").expect("E3040 for Ghost");
+        assert!(
+            d.hint.as_deref().unwrap().contains("this app declares no components"),
+            "{:?}",
+            d.hint
+        );
+        // Qualified instantiation: no module can declare components in
+        // 0.4.0, so the honest hint says the import path is not
+        // implemented — instead of pretending the name could resolve.
+        let diags = check_src("app \"A\" { page Home { ui.Card(title: \"Hi\") } }");
+        let d = diags.iter().find(|d| d.code == "E3040").expect("E3040 for ui.Card");
+        assert!(d.message.contains("unknown component `ui.Card`"), "{}", d.message);
+        assert_eq!(d.len, 7, "the anchor spans `ui.Card`");
+        assert!(
+            d.hint
+                .as_deref()
+                .unwrap()
+                .contains("importing components from module files is not implemented in 0.4.0"),
+            "{:?}",
+            d.hint
+        );
+        // Argument expressions still resolve when the component is
+        // unknown (slice-3 behavior preserved): `nope` reports E3066.
+        let diags = check_src("app \"A\" { page Home { Ghost(x: nope) } }");
+        assert!(diags.iter().any(|d| d.code == "E3040"));
+        assert!(diags.iter().any(|d| d.code == "E3066"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn unknown_component_props_report_e3041() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component TaskRow {\n",
+            "        prop title: string\n",
+            "        prop completed: bool = false\n",
+            "        view { text title }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        TaskRow(title: \"Study\", name: \"X\")\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3041" && d.message.contains("no prop"))
+            .expect("E3041 for the unknown prop");
+        assert_eq!((d.line, d.col, d.len), (8, 33, 4), "anchored on the prop name");
+        assert!(
+            d.message.contains("component `TaskRow` has no prop `name`"),
+            "{}",
+            d.message
+        );
+        let hint = d.hint.as_deref().unwrap();
+        assert!(hint.contains("title (required)"), "{:?}", hint);
+        assert!(hint.contains("completed (optional)"), "{:?}", hint);
+        // A component without props teaches the empty instantiation.
+        let diags = check_src(
+            "app \"A\" { component Row { view { text \"x\" } } page Home { Row(a: 1) } }",
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3041" && d.message.contains("no prop"))
+            .expect("E3041 for the prop of a propless component");
+        assert!(
+            d.hint.as_deref().unwrap().contains("declares no props"),
+            "{:?}",
+            d.hint
+        );
+        // Omitting the unknown prop but keeping the required one was the
+        // task's second negative example — it reports the unknown prop
+        // (and the still-missing nothing else).
+        assert!(has(
+            "E3041",
+            "app \"A\" { component TaskRow { prop title: string view { text title } } page Home { TaskRow(title: \"Study\", name: \"Study\") } }"
+        ));
+    }
+
+    #[test]
+    fn missing_required_props_report_e3041() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component TaskRow {\n",
+            "        prop title: string\n",
+            "        prop completed: bool = false\n",
+            "        view { text title }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        TaskRow()\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3041" && d.message.contains("missing the required prop"))
+            .expect("E3041 for the missing prop");
+        assert_eq!((d.line, d.col, d.len), (8, 9, 7), "anchored on the instantiation name");
+        assert!(
+            d.message.contains("component `TaskRow` is missing the required prop `title`"),
+            "{}",
+            d.message
+        );
+        let hint = d.hint.as_deref().unwrap();
+        assert!(hint.contains("pass `title: <value>`"), "{:?}", hint);
+        assert!(hint.contains("`prop title: string = …`"), "{:?}", hint);
+        // Passing only the optional prop leaves the required one missing.
+        assert!(has(
+            "E3041",
+            "app \"A\" { component TaskRow { prop title: string prop completed: bool = false view { text title } } page Home { TaskRow(completed: true) } }"
+        ));
+        // Two required props missing → two diagnostics, declaration order.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component Pair {\n",
+            "        prop a: int\n",
+            "        prop b: string\n",
+            "        view { text b }\n",
+            "    }\n",
+            "    page Home { Pair() }\n",
+            "}\n",
+        ));
+        let missing: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == "E3041" && d.message.contains("missing the required prop"))
+            .collect();
+        assert_eq!(missing.len(), 2, "{:#?}", diags);
+        assert!(missing[0].message.contains("`a`"), "{}", missing[0].message);
+        assert!(missing[1].message.contains("`b`"), "{}", missing[1].message);
+        // Negative: omitting a prop WITH a default is legal — the
+        // master SLICE4_APP covers it (`TaskRow(title: \"Study\")`).
+    }
+
+    #[test]
+    fn prop_type_mismatches_report_e3041() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component TaskRow {\n",
+            "        prop title: string\n",
+            "        prop completed: bool = false\n",
+            "        view { text title }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        TaskRow(title: 123)\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3041" && d.message.contains("expects"))
+            .expect("E3041 for the type mismatch");
+        assert_eq!((d.line, d.col, d.len), (8, 24, 1), "anchored on the value expression");
+        assert!(
+            d.message.contains("prop `title` of component `TaskRow` expects string, found int"),
+            "{}",
+            d.message
+        );
+        assert!(
+            d.hint.as_deref().unwrap().contains("no implicit conversion"),
+            "{:?}",
+            d.hint
+        );
+        // int↔float keeps the no-conversion rule but reports E3041 (the
+        // instantiation-site code), never the frozen E3011 wording.
+        let diags = check_src(
+            "app \"A\" { component F { prop n: float view { text \"x\" } } page Home { F(n: 1) } }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3041" && d.message.contains("expects float, found int")));
+        assert!(!diags.iter().any(|d| d.code == "E3011"), "E3011 stays frozen: {:#?}", diags);
+        // A void value is a real mismatch.
+        assert!(has(
+            "E3041",
+            "app \"A\" { component T { prop s: string view { text s } } page Home { T(s: print(\"x\")) } }"
+        ));
+        // A poisoned argument suppresses only the E3041 comparison —
+        // the unknown name still reports E3066 (no cascade).
+        let diags = check_src(
+            "app \"A\" { component T { prop s: string view { text s } } page Home { T(s: ghost) } }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3066"), "{:#?}", diags);
+        assert!(!diags.iter().any(|d| d.code == "E3041"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn duplicate_prop_args_report_e3041() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        Row(label: \"a\", label: \"b\")\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E3041" && d.message.contains("passed twice"))
+            .expect("E3041 for the duplicate prop");
+        assert_eq!((d.line, d.col, d.len), (7, 25, 5), "anchored on the second occurrence");
+        assert!(
+            d.message.contains("prop `label` is passed twice in this `Row` instantiation"),
+            "{}",
+            d.message
+        );
+    }
+
+    #[test]
+    fn instantiations_validate_in_every_view_position() {
+        // Pages, component views, `when`/`otherwise`, `each` and `form`
+        // bodies all validate: one bad instantiation inside an `each`
+        // reports E3041 once, nested component views report too, and a
+        // good instantiation beside a bad one reports nothing extra.
+        let src = concat!(
+            "app \"A\" {\n",
+            "    state { items: [string] = [\"a\"] }\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    component Group {\n",
+            "        view {\n",
+            "            Row(label: 1)\n",
+            "        }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        each items as item {\n",
+            "            Row(label: item)\n",
+            "            Row(label: 2)\n",
+            "        }\n",
+            "        when len(items) == 0 {\n",
+            "            text \"empty\"\n",
+            "        } otherwise {\n",
+            "            Row(label: 3)\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let mismatches: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == "E3041" && d.message.contains("expects string"))
+            .collect();
+        assert_eq!(mismatches.len(), 3, "component view, each body, otherwise body: {:#?}", diags);
+        // Raw diagnostics arrive in walk order (pages before components);
+        // `render` sorts by position for display, so assert the set.
+        let mut lines: Vec<u32> = mismatches.iter().map(|d| d.line).collect();
+        lines.sort();
+        assert_eq!(lines, [9, 15, 20], "all three positions: {:#?}", mismatches);
+    }
+
+    #[test]
+    fn instantiation_uses_the_first_declaration_after_e3042_or_e3065() {
+        // E3042 already rejected the duplicate prop; the signature keeps
+        // the first declaration, so a matching instantiation must not
+        // cascade into E3041 ("invalid declarations are not further
+        // checked" — the established pattern).
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component Row {\n",
+            "        prop label: string\n",
+            "        prop label: int\n",
+            "        view { text label }\n",
+            "    }\n",
+            "    page Home { Row(label: \"x\") }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3042"), "{:#?}", diags);
+        assert!(!diags.iter().any(|d| d.code == "E3041"), "{:#?}", diags);
+        // E3065-duplicate components: the first declaration resolves, so
+        // the instantiation reports no E3040.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    component Card { view { text \"first\" } }\n",
+            "    component Card { view { text \"second\" } }\n",
+            "    page Home { Card() }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3065"), "{:#?}", diags);
+        assert!(!diags.iter().any(|d| d.code == "E3040"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn return_inside_handlers_is_e3045() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"Save\" {\n",
+            "            on click {\n",
+            "                return;\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3045").expect("E3045");
+        assert_eq!((d.line, d.col, d.len), (5, 17, 6), "anchored on the `return` keyword");
+        assert!(
+            d.message.contains("`return` is not allowed inside an event handler"),
+            "{}",
+            d.message
+        );
+        assert_eq!(d.hint.as_deref(), Some("remove the `return` statement"));
+        // `return expr;` is E3045, and the ordinary E3006 does not
+        // double-report the same statement.
+        let diags = check_src(
+            "app \"A\" { page Home { button \"B\" { on click { return 1; } } } }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3045"), "{:#?}", diags);
+        assert!(!diags.iter().any(|d| d.code == "E3006"), "{:#?}", diags);
+        // Nested control flow still counts — the handler's statements
+        // are on the stack under `if` and `while` alike.
+        assert!(has(
+            "E3045",
+            "app \"A\" { page Home { button \"B\" { on click { if true { return; } } } } }"
+        ));
+        let diags = check_src(
+            "app \"A\" { page Home { button \"B\" { on click { while true { return; } } } } }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3045"), "{:#?}", diags);
+        assert!(diags.iter().any(|d| d.code == "W3040"), "{:#?}", diags);
+        // The value expression of a rejected `return` still resolves:
+        // `ghost` reports E3066 next to the E3045.
+        let diags = check_src(
+            "app \"A\" { page Home { button \"B\" { on click { return ghost; } } } }",
+        );
+        assert!(diags.iter().any(|d| d.code == "E3045"), "{:#?}", diags);
+        assert!(diags.iter().any(|d| d.code == "E3066"), "{:#?}", diags);
+        // Negative: `return` in ordinary functions is untouched —
+        // including a function called from a handler.
+        clean(concat!(
+            "func f() { return; }\n",
+            "func g() -> int { while true { return 1; } }\n",
+            "app \"A\" {\n",
+            "    page Home { button \"B\" { on click { f(); print(g()); } } }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn duplicate_handlers_are_e3046() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"Save\" {\n",
+            "            on click { print(\"First\"); }\n",
+            "            on click { print(\"Second\"); }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        let d = diags.iter().find(|d| d.code == "E3046").expect("E3046");
+        assert_eq!((d.line, d.col, d.len), (5, 13, 2), "anchored on the duplicate's `on` keyword");
+        assert!(
+            d.message.contains("duplicate `on click` handler on this element"),
+            "{}",
+            d.message
+        );
+        assert!(
+            d.hint.as_deref().unwrap().contains("merge the two `on click` bodies"),
+            "{:?}",
+            d.hint
+        );
+        // Slice-4 ruling (B.6: "one handler per event name"): the event
+        // NAME is the word after `on`. Two `on key` handlers collide
+        // even with different filters — the filter is runtime data — and
+        // the hint teaches the `event_key` merge; `on key` and `on
+        // keydown` are different names and coexist.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"K\" {\n",
+            "            on key \"A\" { print(\"a\"); }\n",
+            "            on key \"B\" { print(\"b\"); }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        let d = diags.iter().find(|d| d.code == "E3046").expect("E3046 for the two `on key`");
+        assert!(
+            d.hint.as_deref().unwrap().contains("checks `event_key`"),
+            "{:?}",
+            d.hint
+        );
+        clean(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"K\" {\n",
+            "            on key \"Escape\" { print(\"esc\"); }\n",
+            "            on keydown { print(\"down\"); }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        // Distinct events on one element are fine (the master app pairs
+        // click + focus); three same-name handlers report two E3046s.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"B\" {\n",
+            "            on click { print(1); }\n",
+            "            on click { print(2); }\n",
+            "            on click { print(3); }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        assert_eq!(diags.iter().filter(|d| d.code == "E3046").count(), 2, "{:#?}", diags);
+        // Handler blocks on component instantiations are elements too.
+        assert!(has(
+            "E3046",
+            "app \"A\" { component Row { view { text \"x\" } } page Home { Row() { on click { print(1); } on click { print(2); } } } }"
+        ));
+        // The duplicate's body is still checked — `ghost;` inside it
+        // reports E3066 next to the E3046.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"B\" {\n",
+            "            on click { print(1); }\n",
+            "            on click { ghost; }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        assert!(diags.iter().any(|d| d.code == "E3046"), "{:#?}", diags);
+        assert!(diags.iter().any(|d| d.code == "E3066"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn while_inside_handlers_warns_w3040() {
+        let src = concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"Process\" {\n",
+            "            on click {\n",
+            "                while true {\n",
+            "                    print(\"Processing\");\n",
+            "                }\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let diags = check_src(src);
+        // A warning, never a fatal error: exactly one diagnostic and it
+        // is the W3040 warning — the app still checks.
+        assert_eq!(diags.len(), 1, "{:#?}", diags);
+        let d = &diags[0];
+        assert_eq!(d.code, "W3040");
+        assert!(
+            d.severity == crate::diagnostics::Severity::Warning,
+            "W3040 must be a warning, not an error"
+        );
+        assert_eq!((d.line, d.col, d.len), (5, 17, 5), "anchored on the `while` keyword");
+        assert!(
+            d.message.contains(
+                "a long `while` loop in an event handler freezes the page; prefer `for` over a range"
+            ),
+            "{}",
+            d.message
+        );
+        // Nested control flow inside the handler warns too.
+        assert!(has(
+            "W3040",
+            "app \"A\" { page Home { button \"B\" { on click { if true { while false { print(1); } } } } } }"
+        ));
+        // Every `while` statement warns once — two loops, two warnings.
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"B\" {\n",
+            "            on click {\n",
+            "                while false { print(1); }\n",
+            "                while false { print(2); }\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ));
+        assert_eq!(diags.iter().filter(|d| d.code == "W3040").count(), 2, "{:#?}", diags);
+        // `for` never warns — it is the suggested alternative.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"B\" { on click { for i in 0..3 { print(i); } } }\n",
+            "    }\n",
+            "}\n",
+        ));
+        // `while` outside handlers stays silent: ordinary functions —
+        // including one called from a handler — never see W3040.
+        let diags = check_src(concat!(
+            "func spin() { while true { break; } }\n",
+            "app \"A\" {\n",
+            "    page Home { button \"B\" { on click { spin(); } } }\n",
+            "}\n",
+        ));
+        assert!(!diags.iter().any(|d| d.code == "W3040"), "{:#?}", diags);
     }
 }

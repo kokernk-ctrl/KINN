@@ -583,6 +583,117 @@ fn targets_command_lists_both_targets() {
 }
 
 #[test]
+fn component_instantiation_rules_are_reported_at_the_cli() {
+    // S3 slice 4: instantiation sites validate — E3040 for an unknown
+    // component (hint lists the declared ones) and E3041 for a prop
+    // type mismatch (hint: no implicit conversion), both positioned.
+    let dir = tempdir("slice4inst");
+    let path = dir.join("inst.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"Tasks\" {\n",
+            "    component TaskRow {\n",
+            "        prop title: string\n",
+            "        prop completed: bool = false\n",
+            "        view { text title }\n",
+            "    }\n",
+            "    page Home {\n",
+            "        TaskRow(title: 123)\n",
+            "        GhostRow(title: \"x\")\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("error[E3041]"), "stderr: {}", stderr);
+    assert!(stderr.contains("prop `title` of component `TaskRow` expects string, found int"));
+    assert!(stderr.contains("no implicit conversion"));
+    assert!(stderr.contains("error[E3040]"), "stderr: {}", stderr);
+    assert!(stderr.contains("unknown component `GhostRow`"));
+    assert!(stderr.contains("declared components: TaskRow"));
+    assert!(stderr.contains("-->"));
+    assert!(stderr.contains("^"));
+}
+
+#[test]
+fn handler_subset_rules_are_reported_at_the_cli() {
+    // S3 slice 4: the handler subset — E3045 (`return` in a handler),
+    // E3046 (duplicate `on click`) and the W3040 `while` warning all
+    // surface through `kinn check` in one run.
+    let dir = tempdir("slice4hand");
+    let path = dir.join("handlers.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"Save\" {\n",
+            "            on click { return; }\n",
+            "        }\n",
+            "        button \"B\" {\n",
+            "            on click { print(\"First\"); }\n",
+            "            on click { print(\"Second\"); }\n",
+            "        }\n",
+            "        button \"P\" {\n",
+            "            on click {\n",
+            "                while true {\n",
+            "                    print(\"Processing\");\n",
+            "                }\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("error[E3045]"), "stderr: {}", stderr);
+    assert!(stderr.contains("`return` is not allowed inside an event handler"));
+    assert!(stderr.contains("remove the `return` statement"));
+    assert!(stderr.contains("error[E3046]"), "stderr: {}", stderr);
+    assert!(stderr.contains("duplicate `on click` handler on this element"));
+    assert!(stderr.contains("warning[W3040]"), "stderr: {}", stderr);
+    assert!(stderr.contains("prefer `for` over a range"));
+}
+
+#[test]
+fn while_warning_alone_still_exits_zero_at_the_cli() {
+    // W3040 is honest guidance, not a prohibition: an app whose only
+    // diagnostic is the `while` warning still checks OK (exit 0).
+    let dir = tempdir("w3040only");
+    let path = dir.join("warn.kin");
+    std::fs::write(
+        &path,
+        concat!(
+            "app \"A\" {\n",
+            "    page Home {\n",
+            "        button \"P\" {\n",
+            "            on click {\n",
+            "                while true {\n",
+            "                    print(\"Processing\");\n",
+            "                }\n",
+            "            }\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let out = kinn(&["check", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("OK: no errors found (1 diagnostic shown)"), "{}", stdout);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("warning[W3040]"));
+}
+
+
+#[test]
 fn build_reads_the_kinn_toml_manifest() {
     let dir = tempdir("manifest");
     std::fs::write(

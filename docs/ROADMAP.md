@@ -122,10 +122,22 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       limit: param/store names recognized; context-restricted
       invocation enforced at S6); B.3/B.4/B.5/B.6/B.10 errata; +17
       tests (15 checker + 2 CLI), workspace 397 green, 0.3.0 web dist
-      byte-identical, Studio 66/66 on fresh wasm.** Remaining
-      slices: handler subset (E3045/E3046, W3040), prop checking at
-      instantiation sites (E3040/E3041), computed cycles (E3044),
-      stores/fields/animations (E3047–E3061), W3042–W3044 (P-030)
+      byte-identical, Studio 66/66 on fresh wasm. Slice 4 landed
+      (instantiation sites + handler subset, P-030 narrowed
+      2026-11-23): E3040 (unknown component — hint lists declared
+      components; page-name namespace note; qualified `alias.Name`
+      honestly not resolvable until module components exist), E3041
+      (prop signature at every instantiation position: unknown,
+      duplicate, mistyped and missing-required props; defaults
+      optional; exact types), E3045 (`return` illegal in handlers),
+      E3046 (one handler per event name per element — compared by the
+      word after `on`, key filters do not disambiguate), W3040
+      (`while` in a handler warns, legal, never fatal); +14 tests
+      (11 checker + 3 CLI), workspace 411 green, 0.3.0 web dist
+      byte-identical, Studio 66/66 on a fresh wasm.** Remaining
+      slices: computed cycles (E3044), component recursion/depth
+      (E3053/E3054), stores/fields/animations (E3047–E3061),
+      W3042–W3044 (P-030)
 - [ ] S4 AppModel lowering + honest static-target rejection (E3070)
 - [ ] S5 KIR → JS codegen with differential testing against kinrt
 - [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,

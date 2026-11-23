@@ -1,8 +1,9 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 3 +
-the let→fin rename (ADR-0029, develop past the slice-3 push).** Update this
+**Last updated: 2026-11-23, release 0.3.0 + 0.4.0 S1–S3 slice 4
+(instantiation sites + handler subset, develop past the slice-4
+push).** Update this
 file after significant milestones. Keep it between 500 and 900 words.
 
 ## What KINN is
@@ -59,34 +60,38 @@ backwards compatibility is tested, including contextual keywords).
   real APK on the runner, verifies signature + zero permissions,
   uploads artifact), Windows/Linux packaging unchanged.
 
-Test totals: **397 Rust tests** (280 kinc unit incl. app grammar,
-const, website, app validation, scope resolution, the fin rename; 28
-pipeline, 41 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
+Test totals: **411 Rust tests** (291 kinc unit incl. app grammar,
+const, website, app validation, scope resolution, the fin rename,
+instantiation + handler rules; 28
+pipeline, 44 CLI incl. 5 manifest, 16 ffi) and **66 Studio vitest
+
 tests**
 (15 real-wasm incl. build targets). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
-grammar showcase (parses and checks — scope resolution since slice 3;
-build guards say what is not implemented
+grammar showcase (parses and checks — scope resolution since slice 3,
+instantiation sites and the handler subset since slice 4; build
+guards say what is not implemented
 yet); `examples/modules/` demonstrates multi-file projects with const
 exports (0.4.0 S1).
 
 Planned, not implemented (do not pretend otherwise): the remaining
-app semantics — prop signatures at instantiation sites (E3040/E3041),
-handler subset (E3045/E3046, W3040), computed cycles (E3044),
-stores/fields/animations (E3047–E3061, W3042–W3044) (0.4.0 S3 slice
-4+, P-030 narrowed) — app lowering/AppModel (S4), KIR→JS + runtime
+app semantics — computed cycles (E3044), component recursion/depth
+(E3053/E3054), stores/fields/animations (E3059–E3061, E3047–E3050,
+W3042–W3044) (0.4.0 S3 slice 5+, P-030 narrowed twice) — app
+lowering/AppModel (S4), KIR→JS + runtime
 (S5–S6), routing/forms/persistence (S7–S9), package manager/registry
 (spec in MODULE_SYSTEM.md), native codegen for console programs
 (0.4+), string interpolation (ADR-0013), graphics (0.5), Android
 `tokens` command, on-device backend-APK install (P-019), Studio
 desktop shell. An `app` program parses and checks (names, targets,
-scope resolution since slice 3) but does not build — the CLI says so.
+scope, instantiation sites, handler subset) but does not build — the
+CLI says so.
 
 ## Repository structure
 
 ```
-compiler/                  Rust workspace (cargo test = 397 tests)
+compiler/                  Rust workspace (cargo test = 411 tests)
   crates/kinrt/            KIR instruction set, stack VM, disassembler
   crates/kinc/             lexer, parser, project, checker, lower,
                            site (SiteModel), backend/{web,android}
@@ -114,11 +119,13 @@ docs/                      design documents; BACKEND_WEB/BACKEND_ANDROID/
 - P-025 doc drift (SYNTAX 0.1-only, COMPILER_ARCHITECTURE crate count, CLI_DESIGN plan).
 - P-026 Studio VFS/.kinnproj are flat — blocks 0.4 multi-folder projects.
 - P-027 preview lacks runtime error/console forwarding; CLI/FFI E3038 asymmetry.
-- P-030 narrowed 2026-11-23: app scope resolution IS checked (slice 3
-  — E3066/E3043/E3058/W3041, binding typing, param/store builtins by
-  name and type); still unchecked: handler subset, prop signatures at
-  instantiation sites, computed cycles, stores/fields/animations
-  (slice 4+). Page targets resolved since slice 2 (P-028/P-029 closed
+- P-030 narrowed 2026-11-23 (twice: slice 3, then slice 4): app scope
+  resolution, binding typing, `field`/`input bind` targets,
+  `param()`/assignment rules, the param/store builtins, component
+  instantiation validation (E3040/E3041) and the handler subset
+  (E3045/E3046, W3040) ARE checked; still unchecked: computed cycles,
+  component recursion/depth (E3053/E3054), stores/fields/animations
+  (slice 5+). Page targets resolved since slice 2 (P-028/P-029 closed
   as F-017/F-018). Param/store context restriction enforced at S6.
 
 ## Current task and next milestone
@@ -171,9 +178,23 @@ builtins registered by name and type (known limit: param/store names
 recognized; context-restricted invocation enforced at S6), array
 `+`/`+=` app-scope-only (B.7); B.3/B.4/B.5/B.6/B.10 errata; the
 showcase's `due` state key added; +17 tests, workspace 397 green,
-0.3.0 web dist byte-identical; P-030 narrowed.** Next:
-**slice 4 = handler subset (E3045/E3046, W3040) + prop checking at
-instantiation sites (E3040/E3041); E3067–E3069 stay reserved;
+0.3.0 web dist byte-identical; P-030 narrowed.** **S3 slice 4 landed (2026-11-23):
+component instantiation validation + the handler subset — E3040
+(unknown component; hint lists declared components; a page name gets
+the namespace note; qualified `alias.Name` is honestly E3040 until
+module components exist), E3041 (prop signature at every
+instantiation position: unknown, duplicate, mistyped,
+missing-required props; defaults optional; exact types, no implicit
+conversion), E3045 (`return` illegal in handlers), E3046 (one
+handler per event name per element — the word after `on` is the
+comparison unit, key filters do not disambiguate), W3040 (`while`
+in a handler warns once per statement, nested control flow included;
+legal, never fatal); E3067–E3069 stay reserved; +14 tests (11
+checker + 3 CLI), workspace 411 green, 0.3.0 web dist
+byte-identical, Studio 66/66 on fresh wasm; P-030 narrowed again.**
+Next: **the remaining S3 slices — computed cycles (E3044), component
+recursion/depth (E3053/E3054), stores/fields/animations
+(E3047–E3061, W3042–W3044); E3067–E3069 stay reserved;
 Playwright-with-S6 APPROVED.**
 Carry-overs: string casts/interpolation decision, native codegen
 spike, structs/records ADR (D2 stays out of 0.4.0).

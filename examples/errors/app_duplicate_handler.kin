@@ -1,0 +1,29 @@
+// errors/app_duplicate_handler.kin — one element with two handlers for
+// the same event. Since S3 slice 4, the handler subset is enforced:
+// an element may carry multiple handlers, but one per event name —
+// the second `on click` on this button reports E3046, anchored on its
+// `on` keyword. (Event names are compared by the word after `on`:
+// two `on key` handlers collide even with different key filters;
+// `on key` and `on keydown` are different names and coexist.)
+
+// error: E3046
+
+*mode = S;
+
+app "Counter" {
+    state {
+        n: int = 0
+    }
+
+    page Home {
+        button "Save" {
+            on click {
+                print("First");
+            }
+
+            on click {
+                print("Second");
+            }
+        }
+    }
+}

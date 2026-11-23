@@ -11,6 +11,96 @@ as `docs/DYNAMIC_WEB_ARCHITECTURE.md` + ADR-0023…0027; **the owner
 approved all Part E decisions (D1–D6) on 2026-11-22 and Phase 5
 implementation began with S1.**
 
+### Added — S3 slice 4: component instantiation validation, handler subset (P-030 narrowed)
+
+- Language: **component instantiation sites validate now** — the last
+  silently-unchecked view construct. New checker rules on the
+  app's component declarations, at every instantiation position
+  (page views, component views — nested component usage included —
+  and `when`/`otherwise`/`each`/`form` bodies):
+  - **E3040** (unknown component), anchored on the instantiation
+    name. The hint lists the declared components in declaration
+    order; a name that matches a declared *page* gets the namespace
+    note ("'X' is a page; views instantiate components" — the mirror
+    of E3063's component note; pages and components stay separate
+    namespaces). The qualified form `alias.Name(...)` is always
+    E3040 today — module files cannot declare components in 0.4.0 —
+    and its hint says so honestly instead of pretending the import
+    path exists. Argument expressions still resolve when the
+    component is unknown (slice-3 behavior preserved: unknown names
+    inside arguments keep reporting E3066, and E3040 never cascades
+    into E3041s).
+  - **E3041** (prop mismatch), four shapes: an unknown prop name
+    (anchored on the prop name; the hint lists the component's props
+    as required/optional, or teaches `Name()` for prop-less
+    components); a prop passed twice (anchored on the second
+    occurrence); a type mismatch against the prop's declared type
+    (anchored on the value expression — exact types, no implicit
+    conversion: int↔float reports E3041 at instantiation sites, and
+    the frozen E3011 never fires there; a `Type::Error` argument
+    suppresses only the comparison, so E3066 does not cascade); and
+    a required prop (no default) that was not passed (anchored on
+    the instantiation name, one diagnostic per missing prop).
+    Omitting a prop **with** a default stays legal — `prop completed:
+    bool = false` may be left out. After E3042 (duplicate prop) or
+    E3065 (duplicate component) the signature keeps the first
+    declaration and matching instantiations do not cascade — the
+    established "invalid declarations are not further checked"
+    pattern.
+- Language: **the handler subset is enforced now** (B.6):
+  - **E3045** — `return` is illegal inside event handlers (handlers
+    are callbacks that return to the caller automatically). Fires
+    for both `return;` and `return expr;`, anchored on the `return`
+    keyword; the ordinary E3006/mismatch checks are skipped in
+    handlers so one statement reports one error, but a value
+    expression is still checked (unknown names inside it report
+    E3066). `return` in ordinary functions — including functions
+    called from handlers — is untouched.
+  - **E3046** — one handler per event name on one element, anchored
+    on the duplicate's `on` keyword. Slice-4 ruling: the comparison
+    unit is the word after `on` (B.6: "one handler per event name"),
+    so two `on key` handlers collide **even with different key
+    filters** (the filter is runtime data) — the hint teaches the
+    `event_key` merge — while `on key "Escape"` and `on keydown` are
+    different event names and coexist. Distinct events on one
+    element remain legal; three same-name handlers report two
+    E3046s; handler blocks on component instantiations are elements
+    like any other; a duplicate's body is still checked (errors
+    inside it are not hidden).
+  - **W3040** — `while` inside an event handler warns ("a long
+    `while` loop in an event handler freezes the page; prefer `for`
+    over a range") but stays legal — a warning, never a fatal
+    error; a handler whose only diagnostic is W3040 checks OK.
+    Fires once per `while` statement, nested control flow included
+    (`while` under `if`/blocks inside the handler warns too); `for`
+    never warns; ordinary functions — including ones called from
+    handlers — never see W3040.
+- Example: the error corpus gains
+  `examples/errors/app_unknown_component.kin` (`// error: E3040`),
+  `app_prop_mismatch.kin` (`// error: E3041`),
+  `app_return_in_handler.kin` (`// error: E3045`) and
+  `app_duplicate_handler.kin` (`// error: E3046`); every file is
+  verified by the pipeline corpus test. `examples/web/tasks_app.kin`'s
+  status comment states the new checked/unchecked boundary exactly
+  (it still checks clean end-to-end — its `TaskRow(label: item)`
+  instantiation validates, `done` defaults).
+- Docs: DYNAMIC_WEB_ARCHITECTURE B.3/B.6 mark the implemented rules
+  and record the E3046 event-name ruling; B.11's E3040/E3041/E3045/
+  E3046/W3040 rows carry their implementation status;
+  LANGUAGE_SPEC §C2 gains the slice-4 rulings and §C3 the new
+  boundary; ROADMAP and AI_CONTEXT updated; PROBLEM_REGISTRY P-030
+  narrowed to what remains (computed cycles E3044, component
+  recursion/depth E3053/E3054, stores/fields/animations
+  E3047–E3061, W3042–W3044, N3040).
+- Tests: **+14** (11 checker + 3 CLI; workspace 397 → 411, all
+  green); every new code has positive and negative tests with
+  position (line/col/len) and hint asserted — the task's four
+  negative examples (unknown component, unknown prop, missing
+  required prop, mistyped prop) and its three handler examples
+  (`return`, duplicate `on click`, `while` warning) are each
+  covered by name. Studio 66/66 on a freshly built wasm (the wasm
+  contains the new rules); the 0.3.0 web dist is byte-identical.
+
 ### Added — S3 slice 3: app scope resolution, binding typing, param/store builtins (P-030 narrowed)
 
 - Language: **names resolve inside apps now**. New checker code

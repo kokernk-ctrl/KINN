@@ -624,12 +624,69 @@ wording):
   to later computed values resolve by name but poison silently until
   the E3044 (cycles) slice — names always resolve, cycles never
   cascade as unknowns.
-- **Not in this slice (P-030, narrowed)**: component names and prop
-  signatures at instantiation sites (E3040/E3041 — the argument
-  expressions themselves do resolve), the handler subset (E3045/
-  E3046, W3040 — `return;` is accepted like in any void body until
-  then), computed cycles (E3044), stores/fields/animations
-  (E3047–E3061), W3042–W3044, N3040; E3067–E3069 stay reserved.
+- **Not in slice 3 (P-030, as it stood then)**: component names and
+  prop signatures at instantiation sites (E3040/E3041), the handler
+  subset (E3045/E3046, W3040), computed cycles (E3044),
+  stores/fields/animations (E3047–E3061), W3042–W3044, N3040;
+  E3067–E3069 stay reserved. The first two landed in slice 4:
+
+S3 slice 4 rulings (component instantiation validation and the
+handler subset, 2026-11-23; codes and meanings frozen, tests pin the
+wording):
+
+- **E3040 anchors on the instantiation name** (`Name` or the full
+  `alias.Name`). The hint lists the declared components in
+  **declaration order**; a name matching a declared page gets the
+  namespace note ("'X' is a page; views instantiate components" —
+  the mirror of E3063). Qualified instantiation is **always E3040
+  today**: module files cannot declare components in 0.4.0, and the
+  hint states that honestly ("importing components from module files
+  is not implemented in 0.4.0"). When the component is unknown, the
+  argument expressions still resolve (E3066 inside them fires) and
+  E3040 never cascades into E3041s.
+- **E3041 covers every prop-signature mismatch**, four shapes:
+  unknown prop (anchored on the prop name; hint lists the props as
+  required/optional), prop passed twice (anchored on the second
+  occurrence), type mismatch (anchored on the value expression),
+  missing required prop — one without a default — (anchored on the
+  instantiation name, one diagnostic per missing prop). Omitting a
+  prop **with** a default is legal.
+- **Instantiation-site types are exact**: `TaskRow(title: 123)`
+  reports E3041 ("expects string, found int"), and int↔float mixing
+  reports E3041 there too — the frozen E3003/E3011 codes stay with
+  ordinary expressions (binding typing, assignments, calls); a
+  `Type::Error` (poisoned) argument suppresses only the E3041
+  comparison so unknown names report exactly their own E3066.
+- **First declaration wins after E3042/E3065**: a component with a
+  duplicate prop name (E3042) or duplicate components (E3065)
+  resolve instantiations against the first declaration — invalid
+  declarations are not further checked, and nothing cascades.
+- **E3045**: `return` is illegal in event handler bodies (both
+  `return;` and `return expr;`), anchored on the `return` keyword.
+  One error per statement: the ordinary E3006/mismatch checks are
+  skipped inside handlers, but the value expression of a rejected
+  `return` still resolves. `return` in ordinary functions —
+  including functions called from a handler — keeps the frozen
+  rules.
+- **E3046**: one handler per event name on one element; the
+  comparison unit is **the word after `on`** (B.6: "one handler per
+  event name"). Two `on key` handlers collide even with different
+  key filters (the filter is runtime data, not semantics — the hint
+  teaches merging them with `event_key`); `on key` and `on keydown`
+  are different event names and coexist. Anchored on the duplicate's
+  `on` keyword; fires on every interactive element, component
+  instantiations included; a duplicate's body is still checked.
+- **W3040**: `while` in a handler body warns once per `while`
+  statement — nested control flow included (`while` under `if`/
+  blocks inside the handler), functions never — and stays legal: a
+  warning, never an error; a handler whose only diagnostic is W3040
+  checks OK. `for` never warns.
+- **Not in slice 4 (P-030, narrowed again)**: computed cycles
+  (E3044), component recursion and instantiation depth (E3053/
+  E3054), store/field/animation semantics (E3047–E3061), W3042–W3044
+  and N3040; E3067–E3069 stay reserved; the S6 boundary (which event
+  builtin belongs to which event context, param/store context
+  restriction) is unchanged.
 
 ## C3. The `app` declaration — dynamic web module, grammar (0.4.0 S2)
 
@@ -651,13 +708,20 @@ targets must be state keys, `param("…")` must name a declared route
 parameter (E3058), props/computed values/event builtins are
 read-only in handlers (E3043), a handler local shadowing state warns
 W3041, and binding typing reuses the ordinary E3003/E3011 mismatch
-codes. An app program parses, `kinn ast` shows its tree, the presence
-rules (E3051/E3052, no `main` required) and the slice 1–3 rules
-hold. **Still unchecked, honestly**: component names and prop
-signatures at instantiation sites (E3040/E3041), handler subset
-enforcement (E3045/E3046, W3040), computed cycles (E3044), and
-store/field/animation semantics (E3047–E3061, W3042–W3044, slice 4+
-— E3067–E3069 stay reserved; **param/store names recognized;
+codes. **Slice 4 validates instantiation sites and enforces the
+handler subset** (the §C2 slice-4 rulings): component names and prop
+signatures are checked at every instantiation position — E3040
+unknown component; E3041 unknown/duplicate/mistyped/missing-required
+props, defaults optional, exact types — `return` inside a handler is
+E3045, duplicate handlers for one event name on one element are
+E3046 (compared by the word after `on`; key filters do not
+disambiguate), and `while` inside a handler warns W3040 (legal,
+never fatal). An app program parses, `kinn ast` shows its tree, the
+presence rules (E3051/E3052, no `main` required) and the slice 1–4
+rules hold. **Still unchecked, honestly**: computed cycles (E3044),
+component recursion/depth caps (E3053/E3054), and
+store/field/animation semantics (E3047–E3061, W3042–W3044, later
+slices — E3067–E3069 stay reserved; **param/store names recognized;
 context-restricted invocation enforced at S6**). Every other command
 says honestly that dynamic builds are not implemented yet. Lowering
 arrives with S4.
