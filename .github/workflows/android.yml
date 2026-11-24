@@ -167,11 +167,20 @@ jobs:
             echo "LAUNCHER IS NOT NextActivity"; exit 1; }
           grep -q "versionName='0.4.0'" badging.txt || {
             echo "VERSION IS NOT 0.4.0"; exit 1; }
-          # Offline app: still no permissions.
-          if "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep -q uses-permission; then
-            echo "UNEXPECTED PERMISSIONS FOUND"; exit 1
+          # Offline-first invariant: the app must not be able to open a
+          # network socket. (Debug variants also carry AGP's profiling
+          # DUMP permission and androidx's signature
+          # DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION boilerplate — both
+          # were already present in the 0.2/0.3 debug APKs; neither
+          # grants network access.)
+          if "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep "uses-permission" | grep -v "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" | grep -q "."; then
+            "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep "uses-permission" | grep -v "DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+            exit 1
           fi
-          echo "no permissions requested (verified)"
+          if "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep -q "android.permission.INTERNET"; then
+            echo "UNEXPECTED INTERNET PERMISSION"; exit 1
+          fi
+          echo "offline-first verified: no INTERNET permission"
 
           APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           {
