@@ -134,7 +134,7 @@ class NextActivity : AppCompatActivity() {
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest,
-            ): WebResourceResponse? = assetLoader.intercept(request.url)
+            ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 // Only our own (local) origin may render; anything else
