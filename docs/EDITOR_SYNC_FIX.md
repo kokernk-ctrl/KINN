@@ -225,6 +225,25 @@ the Kotlin sources were syntax-checked with kotlinc (only unresolved
 Android references, as expected) and the full `assembleDebug` +
 `assembleRelease` build runs in CI (`android.yml`) on push.
 
+## CI results for this change
+
+- `ci` — **success** (Rust matrix + Studio web tests with the real
+  wasm backend, which includes the 21 new editor unit tests).
+- `android` — **success**: debug APK built and debug-signed, release
+  APK built (unsigned, no signing secrets in the repo), both verified
+  (NEXT bundle, kinn.wasm, native lib, launcher activity).
+- `linux` — **success**.
+- `windows` — **failure, unrelated to this change**: the only failing
+  step is "Build NSIS installer" because
+  `community.chocolatey.org` answered 503/504 for over an hour (a
+  dozen retries across three attempts). The Windows job itself ran
+  the full Rust test suite successfully and produced the CLI zip; only
+  the NSIS-packaged installer could not be built. Mitigations landed
+  with this change: retry that verifies the actual `makensis` binary
+  (chocolatey returns exit 0 on "installed 0/0 packages") and an
+  actions/cache of the NSIS install so future builds stop depending on
+  the feed. Re-run the workflow once chocolatey.org recovers.
+
 ## Limitations / not verifiable here
 
 - **Real soft-keyboard IME behaviour** (Gboard composition, autocorrect
