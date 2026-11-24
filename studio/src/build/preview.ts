@@ -10,6 +10,7 @@
  */
 
 import type { OutputFile } from '../wasm/kinnwasm';
+import { hostSaveFile } from '../host';
 
 /** Message posted by the injected script when the user navigates. */
 export interface PreviewNavMessage {
@@ -77,13 +78,7 @@ export function downloadZip(
   // zipFiles returns a fresh buffer over its whole ArrayBuffer, so the
   // cast to BlobPart is exact (TS strict mode wants the narrower type).
   const bytes = zipper(files.map((f) => ({ path: f.path, content: f.content })));
-  const blob = new Blob([bytes.buffer as ArrayBuffer], {
-    type: 'application/zip',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${name}.zip`;
-  a.click();
-  URL.revokeObjectURL(url);
+  // Browser: Blob + <a download>; Android host: SAF save through the
+  // bridge (a WebView drops anchor downloads silently).
+  hostSaveFile(`${name}.zip`, bytes, 'application/zip');
 }

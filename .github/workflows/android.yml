@@ -2,10 +2,16 @@ name: android
 
 # Two pipelines:
 #
-# 1. `studio-app` — the KINN Studio Android app: debug APK (debug-
-#    signed), release APK (signed with the ANDROID_KEYSTORE_* secrets
-#    when they exist, otherwise left unsigned and clearly labeled),
-#    signature verification with apksigner, artifact upload.
+# 1. `studio-app` — the KINN Studio Android app (0.4.0: Studio NEXT is
+#    the default launcher interface; the classic native Studio stays
+#    bundled as the fallback): builds the web app (NEXT + classic +
+#    kinn.wasm) and bundles it into the APK, builds the arm64 JNI
+#    compiler for the classic app, then produces a debug APK (debug-
+#    signed) and a release APK (signed with the ANDROID_KEYSTORE_*
+#    secrets when they exist, otherwise left unsigned and clearly
+#    labeled), verifies signatures with apksigner, checks the APK
+#    contents (NEXT bundle, wasm, native lib, launcher activity) and
+#    uploads the artifacts.
 # 2. `backend-apk` — the 0.3 Android *application backend*: exports a
 #    Gradle project from a Kin website with the real CLI, builds it on
 #    the runner (SDK preinstalled), verifies the APK signature and
@@ -56,6 +62,9 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Add the wasm32 target (kinn.wasm for Studio NEXT)
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -67,6 +76,25 @@ jobs:
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Studio NEXT ships inside the APK: the built web bundle
+      # (next.html + classic entry + JS/CSS) and the real compiler
+      # (kinn.wasm, built from the same kinn-ffi as the CLI).
+      - name: Build the Studio web bundle (NEXT + wasm compiler)
+        working-directory: studio
+        run: |
+          npm ci
+          npm run build:wasm
+          npm run build
+          ls -la dist/ dist/assets/
+          test -f dist/next.html
+          test -f dist/index.html
+          test -f dist/kinn.wasm
 
       - name: Build the native compiler for arm64
         working-directory: compiler
@@ -107,25 +135,52 @@ jobs:
           OUT=android-artifacts
           mkdir -p "$OUT"
           DEBUG_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          cp "$DEBUG_APK" "$OUT/kinn-studio-0.3.0-debug.apk"
+          cp "$DEBUG_APK" "$OUT/kinn-studio-0.4.0-debug.apk"
           RELEASE_APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           # Name by actual signing state.
           if ls app/build/outputs/apk/release/*unsigned*.apk > /dev/null 2>&1; then
-            cp "$RELEASE_APK" "$OUT/kinn-studio-0.3.0-release-UNSIGNED.apk"
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.4.0-release-UNSIGNED.apk"
           else
-            cp "$RELEASE_APK" "$OUT/kinn-studio-0.3.0-release.apk"
+            cp "$RELEASE_APK" "$OUT/kinn-studio-0.4.0-release.apk"
           fi
+
+          # Content verification: the APK must really contain Studio
+          # NEXT (web bundle + wasm compiler), the native compiler for
+          # the classic app, and must launch NEXT by default.
+          echo "== APK content verification (0.4.0) =="
+          unzip -l "$OUT/kinn-studio-0.4.0-debug.apk" > contents.txt
+          for REQUIRED in \
+            "assets/studio-web/next.html" \
+            "assets/studio-web/index.html" \
+            "assets/studio-web/kinn.wasm" \
+            "lib/arm64-v8a/libkinn_android.so" ; do
+            grep -q "$REQUIRED" contents.txt || {
+              echo "MISSING IN APK: $REQUIRED"; exit 1; }
+            echo "ok: $REQUIRED"
+          done
+          AAPT="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep -E "^package|launchable-activity" \
+            | tee badging.txt
+          grep -q "launchable-activity: name='dev.kinn.studio.NextActivity'" badging.txt || {
+            echo "LAUNCHER IS NOT NextActivity"; exit 1; }
+          grep -q "versionName='0.4.0'" badging.txt || {
+            echo "VERSION IS NOT 0.4.0"; exit 1; }
+          # Offline app: still no permissions.
+          if "$AAPT" dump badging "$OUT/kinn-studio-0.4.0-debug.apk" | grep -q uses-permission; then
+            echo "UNEXPECTED PERMISSIONS FOUND"; exit 1
+          fi
+          echo "no permissions requested (verified)"
 
           APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           {
-            echo "== kinn-studio-0.3.0-debug.apk (debug-signed) =="
-            "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.3.0-debug.apk" || true
+            echo "== kinn-studio-0.4.0-debug.apk (debug-signed) =="
+            "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.4.0-debug.apk" || true
             echo
-            if [ -f "$OUT/kinn-studio-0.3.0-release.apk" ]; then
-              echo "== kinn-studio-0.3.0-release.apk (release-signed) =="
-              "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.3.0-release.apk"
+            if [ -f "$OUT/kinn-studio-0.4.0-release.apk" ]; then
+              echo "== kinn-studio-0.4.0-release.apk (release-signed) =="
+              "$APKSIGNER" verify --print-certs "$OUT/kinn-studio-0.4.0-release.apk"
             else
-              echo "== kinn-studio-0.3.0-release-UNSIGNED.apk =="
+              echo "== kinn-studio-0.4.0-release-UNSIGNED.apk =="
               echo "NOT SIGNED: configure the ANDROID_KEYSTORE_* secrets to produce"
               echo "a signed release build (see docs/SECURITY.md)."
             fi

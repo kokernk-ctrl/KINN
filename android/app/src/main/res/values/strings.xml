@@ -14,4 +14,7 @@
     <string name="new_project_hint">project name</string>
     <string name="terminal_prompt">kinn&gt;</string>
     <string name="editor_hint">Kin source</string>
+    <string name="next_error_title">NEXT failed to start</string>
+    <string name="next_error_retry">retry</string>
+    <string name="next_error_classic">open classic Studio</string>
 </resources>

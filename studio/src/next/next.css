@@ -826,6 +826,13 @@ body.nx-resizing:has(.nx-handle-h.dragging) { cursor: row-resize; }
   .nx-topbar { height: auto; flex-wrap: wrap; padding: 6px 8px; gap: 6px; row-gap: 6px; }
   .nx-crumb { order: 10; width: 100%; padding-left: 2px; }
   .nx-layout-switch, .nx-classic-link { display: none; }
+
+  /* Bottom tab row must never overflow the viewport on phones: the
+     err/warn mini counters are redundant (the PROBLEMS tab badge shows
+     the count) and the tab paddings shrink one notch. */
+  .nx-bottom-tabs { gap: 2px; padding: 0 4px; }
+  .nx-btab { padding: 8px 6px 6px; letter-spacing: 0.08em; }
+  .nx-problems-mini { display: none; }
   .nx-btn { min-height: 36px; }
   .nx-backend-badge { display: none; }
   .nx-buildstatus { margin-left: auto; }

@@ -3,8 +3,9 @@
 Status snapshot for AI assistants (and humans) working on KINN.
 **Last updated: 2026-11-24, release 0.3.0 + 0.4.0 S1–S4 complete
 (all app semantics checked, AppModel lowering landed, E3070 gating
-android) + Studio NEXT experimental interface (0.4).** Update this
-file after significant milestones. Keep it between 500 and 900 words.
+android) + Studio NEXT interface promoted to the default Android
+launcher (0.4.0 APK).** Update this file after significant milestones.
+Keep it between 500 and 900 words.
 
 ## What KINN is
 
@@ -67,9 +68,19 @@ backwards compatibility is tested, including contextual keywords).
   `docs/KINN_STUDIO_NEXT.md`. Shares `vfs`/`syntax`/`diagnostics`/
   `wasm`/`storage`/`build` with classic — no second parser/checker,
   no compiler changes, same .kinnproj + IndexedDB key.
-- **KINN Studio Android 0.3.0**: `build web`/`build android`/
-  `preview`/`export android` through JNI; PreviewActivity renders the
-  build offline over file:// with in-app navigation; Build Web button.
+- **KINN Studio Android app 0.4.0**: launcher is `NextActivity` — a
+  WebView hosting the built NEXT bundle (APK assets `studio-web/`,
+  served via `WebViewAssetLoader` on an https origin so IndexedDB/
+  localStorage/WASM work; no INTERNET permission; compiler = the same
+  `kinn.wasm`). `window.kinnAndroid` bridge (`studio/src/host.ts`,
+  feature-detected, inert in browsers): SAF `saveFile` for exports,
+  `openClassicStudio` to the native classic app; import completes the
+  standard `<input type=file>` flow via `onShowFileChooser`. The
+  classic native Studio 0.3 (JNI compiler, `MainActivity`) stays
+  bundled as fallback (no longer the launcher). Gradle `copyStudioWeb`
+  bundles `studio/dist` and fails the build when it is missing;
+  `.github/workflows/android.yml` builds web+wasm+NDK and verifies APK
+  contents (NEXT bundle, wasm, native lib, launchable activity).
 - **CI**: 3-platform target smoke (web dist + android export checks),
   Studio tests with real wasm, Android Studio APK pipeline
   (sign+verify), **backend-apk job** (exports a Kin website, builds a
@@ -79,9 +90,11 @@ backwards compatibility is tested, including contextual keywords).
 Test totals: **457 Rust tests** (329 kinc unit incl. app grammar,
 const, website, the full app semantic surface, the AppModel lowering
 suite; 30
-pipeline, 5 kinn-android, 49 CLI incl. 5 manifest, 17 ffi) and **128 Studio vitest
+pipeline, 5 kinn-android, 49 CLI incl. 5 manifest, 17 ffi) and **142 Studio vitest
 tests** (19 real-wasm incl. build targets and the NEXT terminal
-engine; 58 of the 128 belong to Studio NEXT). Examples carry `// expect:`
+engine; 58 belong to Studio NEXT; 0.4.0 adds the Android host-bridge
+suite, a spec-fake IndexedDB persistence regression suite, and a
+preview-navigator selector regression). Examples carry `// expect:`
 blocks; error examples declare codes; `examples/web/site.kin` is the
 website example; `examples/web/tasks_app.kin` is the 0.4.0 app
 grammar showcase (parses and checks — the full app semantic surface

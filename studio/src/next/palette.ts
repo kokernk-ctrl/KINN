@@ -13,7 +13,7 @@ export interface PaletteCommand {
   title: string;
   /** Optional right-side hint (e.g. keybinding). */
   hint?: string;
-  group: 'file' | 'build' | 'view' | 'terminal' | 'project';
+  group: 'file' | 'build' | 'view' | 'terminal' | 'project' | 'app';
   run: () => void;
 }
 

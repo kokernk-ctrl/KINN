@@ -88,10 +88,15 @@ or the user's own GitHub authentication only (SECURITY.md, ADR-0017).
 - **Studio web**: `build android` (terminal) or the *Export Android*
   button downloads the project as a .zip — explicitly labeled a
   project.
-- **Studio Android app**: `build android` exports the project through
-  the native bridge; `export android` shares it as a .zip via SAF;
-  `build web` + `preview` give the on-device offline preview. Statuses
-  use the vocabulary above.
+- **Studio Android app (0.4.0)**: the app launches **Studio NEXT**
+  (`NextActivity`: WebView + `kinn.wasm`, see
+  docs/KINN_STUDIO_NEXT.md); the classic native Studio 0.3 remains
+  bundled as the fallback. In NEXT, `build android` produces the
+  project through the wasm backend and `export android`/download saves
+  it via the host bridge (SAF); in the classic app the same commands
+  run through the native JNI bridge and `export android` shares the
+  .zip via SAF; `build web` + `preview` give the on-device offline
+  preview. Statuses use the vocabulary above.
 
 ## 6. Verification performed
 

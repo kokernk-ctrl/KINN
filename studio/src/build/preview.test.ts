@@ -62,6 +62,21 @@ describe('buildPreviewHtml', () => {
     expect(html).toContain('href="index.html"');
   });
 
+  // Regression: the injected interceptor must target anchors with a
+  // VALID selector. A corrupted selector (e.g. "aref]") would throw a
+  // DOMException on every click and break in-preview navigation while
+  // the build itself kept passing — this pins the exact selector.
+  it('uses a valid anchor selector in the navigation interceptor', () => {
+    const html = buildPreviewHtml(FILES, 'about.html');
+    const m = html.match(/closest\("([^"]+)"\)/);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe('a[href]');
+    // And the selector is genuinely valid in a DOM (throws otherwise).
+    if (typeof document !== 'undefined') {
+      expect(() => document.querySelector(m![1])).not.toThrow();
+    }
+  });
+
   it('throws on an unknown page (honest error, no fake output)', () => {
     expect(() => buildPreviewHtml(FILES, 'missing.html')).toThrow(/missing\.html/);
   });

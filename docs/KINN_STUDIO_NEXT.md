@@ -198,6 +198,34 @@ built" badges, and instructions instead of fake results.
 - The classic suite (`vfs`, `syntax`, `diagnostics`, `storage`,
   `build`, `wasm`) keeps passing untouched.
 
+## Android packaging (0.4.0)
+
+The Android app (`android/`) launches **NEXT by default** since 0.4.0:
+
+- `NextActivity` (new) hosts the built web bundle inside a WebView
+  served through `WebViewAssetLoader` on
+  `https://appassets.androidplatform.net/assets/studio-web/next.html`.
+  A real https origin — not `file://` — is what makes IndexedDB,
+  localStorage and WebAssembly work in the WebView; every byte still
+  comes from the APK (the app has no INTERNET permission).
+- The compiler inside NEXT is `kinn.wasm` (same `kinn-ffi` as the CLI)
+  — real checking, running and building on-device, offline.
+- The web bundle is a build artifact: Gradle's `copyStudioWeb` task
+  copies `studio/dist` into the APK assets and fails the build with
+  build instructions when it is missing or incomplete.
+- `window.kinnAndroid` (injected by `NextActivity`, feature-detected by
+  `studio/src/host.ts`): `saveFile` routes exports through the system
+  document picker (a WebView drops `<a download>` silently), and
+  `openClassicStudio` opens the native classic Studio. In a plain
+  browser the bridge is absent and the exact previous behavior runs.
+- Import uses the standard `<input type=file>` flow, completed by
+  `onShowFileChooser`.
+- The classic **native** Studio 0.3.0 (`MainActivity` + JNI compiler)
+  stays bundled and reachable; the launcher filter moved to
+  `NextActivity`. Web classic also ships (`assets/studio-web/index.html`).
+- Keyboard: `adjustResize` + the page's visual-viewport tracking; back
+  navigation: WebView history first, then finish.
+
 ## Known limitations (honest)
 
 - The terminal is an in-browser command engine, not a system shell: it
@@ -208,8 +236,10 @@ built" badges, and instructions instead of fake results.
   folders. The Kin module system resolves flat file names today.
 - The compiler wasm still reports its own build version (0.3.0); the
   NEXT shell is 0.4.0-next. `version` shows both, separately.
-- Android export is a Gradle project, not an APK — building the APK
-  needs Android Studio / gradle / CI (docs/BACKEND_ANDROID.md).
+- Android *export* (`build android` in the terminal) is a Gradle
+  project, not an APK — building that APK needs Android Studio /
+  gradle / CI (docs/BACKEND_ANDROID.md). (Unrelated: the KINN Studio
+  app itself is packaged by `.github/workflows/android.yml`.)
 - Editor find is per-file, without highlighting-all or replace.
 - Single Vfs project per browser profile (shared with classic Studio,
   same IndexedDB key — opening the same project in both is supported,

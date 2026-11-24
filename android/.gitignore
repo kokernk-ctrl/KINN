@@ -6,3 +6,6 @@ local.properties
 .DS_Store
 captures/
 .cxx/
+
+# native compiler builds (cargo-ndk output, CI-built)
+app/src/main/jniLibs/

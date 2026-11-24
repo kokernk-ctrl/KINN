@@ -7,6 +7,7 @@
  */
 
 import { DEFAULT_SETTINGS, EDITOR_FONT_SIZES, INDENT_SIZES, TERMINAL_FONT_SIZES, type NextSettings } from '../settings';
+import { wireClassicLink } from '../../host';
 
 type SettingKey = 'editorFont' | 'terminalFont' | 'indentSize' | 'autoCheck';
 
@@ -115,6 +116,8 @@ export class SettingsModal {
     const classic = document.createElement('a');
     classic.href = './index.html';
     classic.textContent = '← return to classic Studio';
+    // Inside the Android host this opens the native classic app instead.
+    wireClassicLink(classic);
     about.appendChild(classic);
     const ver = document.createElement('span');
     ver.textContent = ` · defaults restored on data reset · v${DEFAULT_SETTINGS.editorFont}px editor`;

@@ -61,6 +61,71 @@ implementation began with S1.**
   limitations, rollback path); `AI_CONTEXT.md` updated so future
   agents can work on the Studio without rescanning.
 
+### Added — Studio NEXT on Android: the 0.4.0 APK (launcher default)
+
+- **`NextActivity` (android/)**: the app now launches directly into
+  Studio NEXT. The built web bundle (`studio/dist`: `next.html` +
+  classic entry + JS/CSS + `kinn.wasm`) is bundled into APK assets
+  (`studio-web/`) and served through `WebViewAssetLoader` on a real
+  `https://appassets.androidplatform.net` origin — the piece that makes
+  IndexedDB, localStorage and WebAssembly work inside a WebView. Every
+  byte loads from the APK; the app still has **no INTERNET permission**.
+  The compiler inside NEXT on-device is `kinn.wasm` (the same
+  `kinn-ffi` crate the `kinn` CLI is built from) — check, run, build
+  web and build android all execute for real, offline.
+- **Host bridge `window.kinnAndroid`** (`NextActivity` injects,
+  `studio/src/host.ts` feature-detects, inert in every browser): SAF
+  `saveFile` for exports (.kinnproj, web dist .zip, android project
+  .zip — a WebView silently drops `<a download>` clicks) and
+  `openClassicStudio()` which the NEXT "classic" links and palette use
+  to open the native classic app. Import keeps the standard
+  `<input type=file>` flow, completed by `onShowFileChooser`.
+- **Classic Studio preserved**: the native 0.3 app (`MainActivity`,
+  JNI compiler `libkinn_android.so`, docs, preview) stays bundled and
+  reachable through the bridge; the web classic entry also ships in
+  the bundle. Home-screen shortcuts pinned to the 0.3 launcher need
+  one re-pin after updating.
+- **Gradle**: `copyStudioWeb` bundles `studio/dist` and **fails the
+  build** (with build instructions) when it is missing or incomplete —
+  an APK with an empty WebView can never be produced. Version
+  0.4.0 / versionCode 4; `androidx.webkit` added for the asset loader.
+- **CI (`android.yml`)**: builds the web bundle (Node 22 +
+  `npm run build:wasm` + `npm run build`) before Gradle, then verifies
+  the APK itself — `assets/studio-web/next.html`, `kinn.wasm`,
+  `lib/arm64-v8a/libkinn_android.so` present, launchable activity is
+  `NextActivity`, versionName 0.4.0, no permissions — before uploading
+  `kinn-studio-0.4.0-debug.apk` and the release APK (signed only when
+  the `ANDROID_KEYSTORE_*` secrets exist; otherwise clearly UNSIGNED).
+
+### Fixed — project persistence actually works now (web + Android)
+
+Two silent IndexedDB bugs in `storage.ts` had cancelled each other out
+since 0.2.0 — no project ever persisted across a reload:
+
+- `saveProject` passed the key as the second `put()` argument on a
+  keyPath (in-line keys) store — a spec `DataError` swallowed by
+  `persistNow`'s catch, so **nothing was ever written**.
+- The row stored the raw project object, but `loadProject` parses
+  through `parseProject` (the versioned `.kinnproj` format) — with a
+  row present, every load would have thrown inside the success handler.
+
+Fixed together (rows now hold `serializeProject` output); pinned by a
+new regression suite (`storage.idb.test.ts`) against a spec-fake
+IndexedDB that reproduces both failure modes. Verified end-to-end:
+create/edit/run a file, reload, the project (files, content, active
+tab) is restored.
+
+### Fixed — mobile polish and hardening
+
+- The bottom tab row (TERMINAL/PROBLEMS/OUTPUT + counters + actions)
+  overflowed 412px phone viewports by 24px; on ≤880px the redundant
+  err/warn mini counters now hide (the PROBLEMS badge keeps the count)
+  and the tab paddings shrink — zero horizontal overflow in every
+  mobile view (verified at 412x915).
+- Preview navigator regression test pins the injected selector to a
+  valid `a[href]` (guards against silent corruption of the injected
+  script string).
+
 ### Added — S4: AppModel lowering + android rejection (E3070)
 
 - Language/pipeline: **`app` programs lower now**. `lower::app_model`

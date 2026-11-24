@@ -63,7 +63,15 @@ export class IdbStorage implements ProjectStorage {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put({ key: KEY, project }, KEY);
+      // Two pre-0.4.0 bugs are pinned by storage.idb.test.ts:
+      //  1. The store uses in-line keys (keyPath: "key"): passing the
+      //     key as the second put() argument throws DataError — and it
+      //     was swallowed, so nothing ever persisted.
+      //  2. The row must hold the versioned .kinnproj format, because
+      //     loadProject parses through parseProject (format/version
+      //     validation). Storing the raw object made every load of an
+      //     existing row throw inside the success handler.
+      tx.objectStore(STORE).put({ key: KEY, project: serializeProject(project) });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

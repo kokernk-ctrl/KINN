@@ -17,6 +17,7 @@ import { lex } from '../syntax/lexer';
 import { detectMode, quickCheck, type Problem } from '../diagnostics/checks';
 import { backend, type BuildResult, type OutputFile } from '../wasm/kinnwasm';
 import { serializeProject } from '../storage/storage';
+import { hostSaveFile } from '../host';
 
 export type LineClass = 'accent' | 'dim' | 'ok' | 'err' | 'warn' | 'out';
 
@@ -475,13 +476,12 @@ print(len(a) + abs(-3) + min(1, 2) + max(1.5, 2.5));
 
   exportProject(): void {
     const json = serializeProject(this.vfs.toStoredProject());
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${this.vfs.projectName}.kinnproj`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Browser: Blob + <a download>; Android host: SAF save via the bridge.
+    hostSaveFile(
+      `${this.vfs.projectName}.kinnproj`,
+      new TextEncoder().encode(json),
+      'application/json',
+    );
     this.print(`exported ${this.vfs.list().length} files to ${this.vfs.projectName}.kinnproj`, 'ok');
   }
 

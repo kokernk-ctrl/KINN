@@ -25,6 +25,7 @@ import { loadSettings, saveSettings, type NextSettings } from './settings';
 import { Layout } from './layout';
 import type { PaletteCommand } from './palette';
 import type { TermStatus } from './termcmd';
+import { androidHost, wireClassicLink } from '../host';
 import { Topbar } from './ui/topbar';
 import { NextExplorer } from './ui/explorer';
 import { EditorTabs } from './ui/editortabs';
@@ -444,6 +445,17 @@ function commands(): PaletteCommand[] {
       terminal.exec('syntax');
     } },
   ];
+  // Inside the Android host: a real extra command — the classic fallback
+  // there is the native Studio activity, opened through the bridge.
+  const host = androidHost();
+  if (host) {
+    list.push({
+      id: 'app.classic',
+      title: `Open classic Studio (native app · bridge ${host.hostVersion()})`,
+      group: 'app',
+      run: () => host.openClassicStudio(),
+    });
+  }
   return list;
 }
 
@@ -567,6 +579,15 @@ function updateNet(): void {
 window.addEventListener('online', updateNet);
 window.addEventListener('offline', updateNet);
 updateNet();
+
+// -- android host bridge (inert in the browser) -------------------------------------
+
+// The top-bar "classic" anchor keeps its href (web classic) for plain
+// browsers; inside the Android host it opens the *native* classic app.
+{
+  const classicLink = document.querySelector<HTMLAnchorElement>('.nx-classic-link');
+  if (classicLink) wireClassicLink(classicLink);
+}
 
 // -- toast ---------------------------------------------------------------------------
 

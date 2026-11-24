@@ -16,6 +16,7 @@ import { lex } from '../syntax/lexer';
 import { detectMode, quickCheck } from '../diagnostics/checks';
 import { backend, type BuildResult, type OutputFile } from '../wasm/kinnwasm';
 import { serializeProject } from '../storage/storage';
+import { hostSaveFile } from '../host';
 
 const BANNER = [
   { text: 'KINN Studio 0.3.0 — terminal shell', cls: 'accent' },
@@ -458,13 +459,12 @@ print("text " + "concat");    // print, len, abs, min, max builtins
 
   private exportProject(): void {
     const json = serializeProject(this.deps.vfs.toStoredProject());
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${this.deps.vfs.projectName}.kinnproj`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Browser: Blob + <a download>; Android host: SAF save via the bridge.
+    hostSaveFile(
+      `${this.deps.vfs.projectName}.kinnproj`,
+      new TextEncoder().encode(json),
+      'application/json',
+    );
     this.print(`exported ${this.deps.vfs.list().length} files to ${this.deps.vfs.projectName}.kinnproj`, 'ok');
   }
 
