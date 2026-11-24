@@ -41,6 +41,7 @@ const vfs = new Vfs('samples', SAMPLES, storage);
 
 const editor = new Editor(
   $('editor-input') as HTMLTextAreaElement,
+  $('editor-scroll'),
   $('highlight'),
   $('gutter'),
   $('status-pos'),
@@ -74,6 +75,16 @@ function setStatusSaved(): void {
   const el = $('status-saved');
   el.textContent = 'saved to this browser';
   el.classList.remove('dirty');
+}
+
+/**
+ * The compiler always sees exactly what the user sees: mirror the
+ * current editor value (the single source of truth) into the vfs right
+ * before any run/check/build — nothing stale can reach the compiler.
+ */
+function syncActiveText(): void {
+  const f = vfs.active;
+  if (f) vfs.save(f.name, editor.getText());
 }
 
 // -- problems ---------------------------------------------------------------
@@ -222,6 +233,7 @@ importPicker.addEventListener('change', async () => {
 // -- top bar actions ----------------------------------------------------------
 
 $('btn-check').addEventListener('click', () => {
+  syncActiveText();
   terminal.exec(`check ${vfs.activeName}`);
   tabs.select('side');
 });
@@ -232,11 +244,13 @@ $('btn-tokens').addEventListener('click', () => {
 });
 
 $('btn-run').addEventListener('click', () => {
+  syncActiveText();
   terminal.exec(`run ${vfs.activeName}`);
   tabs.select('side');
 });
 
 $('btn-build-web').addEventListener('click', () => {
+  syncActiveText();
   terminal.exec('build web');
   tabs.select('side');
 });

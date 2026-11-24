@@ -47,11 +47,16 @@
           <span class="mode-badge" id="mode-badge" title="Programming mode (*mode directive)">MODE S</span>
         </div>
         <div class="editor-wrap" id="editor-wrap">
+          <!-- single-scroll editor (0.4.1 fix, same architecture as
+               NEXT): the in-flow <pre> sizes .editor-sizer and the
+               textarea covers it exactly — one scroll for everything. -->
           <div class="gutter" id="gutter" aria-hidden="true"></div>
           <div class="editor-scroll" id="editor-scroll">
-            <pre class="highlight" id="highlight" aria-hidden="true"></pre>
-            <textarea class="editor-input" id="editor-input" spellcheck="false" autocapitalize="off"
-              autocomplete="off" wrap="off" aria-label="Kin source code"></textarea>
+            <div class="editor-sizer" id="editor-sizer">
+              <pre class="highlight" id="highlight" aria-hidden="true"></pre>
+              <textarea class="editor-input" id="editor-input" spellcheck="false" autocapitalize="off"
+                autocorrect="off" autocomplete="off" wrap="off" aria-label="Kin source code"></textarea>
+            </div>
           </div>
         </div>
         <div class="statusbar">

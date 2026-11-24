@@ -5,10 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
-import android.text.SpannableString
-import android.text.Spanned
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -21,7 +18,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import dev.kinn.studio.KinSyntax.SyntaxColors
 import java.io.File
 
 /**
@@ -44,8 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var filesList: RecyclerView
     private lateinit var problemsList: RecyclerView
     private lateinit var problemsHeader: TextView
-    private lateinit var editor: EditText
-    private lateinit var gutter: TextView
+    private lateinit var editor: CodeEditorView
     private lateinit var editorStatus: TextView
     private lateinit var terminalOut: TextView
     private lateinit var terminalScroll: ScrollView
@@ -138,7 +133,6 @@ class MainActivity : AppCompatActivity() {
         problemsList = findViewById(R.id.problems_list)
         problemsHeader = findViewById(R.id.problems_header)
         editor = findViewById(R.id.editor)
-        gutter = findViewById(R.id.gutter)
         editorStatus = findViewById(R.id.editor_status)
         terminalOut = findViewById(R.id.terminal_output)
         terminalScroll = findViewById(R.id.terminal_scroll)
@@ -200,6 +194,13 @@ class MainActivity : AppCompatActivity() {
 
     // -- editor -----------------------------------------------------------------
 
+    /**
+     * Persist what the user typed. Highlighting and line numbers are
+     * owned by [CodeEditorView] itself (spans on the live Editable,
+     * numbers drawn from the real text layout) — this watcher never
+     * replaces the field content, so the caret, selection and IME
+     * composition are never interrupted (0.4.1 fix).
+     */
     private val editorWatcher = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -209,47 +210,7 @@ class MainActivity : AppCompatActivity() {
             val text = s?.toString() ?: return
             store.writeFile(p, f, text)
             editorStatus.text = "saved on device"
-            updateGutter(text)
-            scheduleRehighlight()
         }
-    }
-
-    private var highlightScheduled = false
-
-    private fun scheduleRehighlight() {
-        if (highlightScheduled) return
-        highlightScheduled = true
-        editor.postDelayed({
-            highlightScheduled = false
-            rehighlight()
-        }, 250)
-    }
-
-    private fun rehighlight() {
-        val text = editor.text.toString()
-        if (text.length > 60_000) return // keep editing smooth on huge files
-        val colors = SyntaxColors(
-            keyword = 0xFFFF7A1A.toInt(),
-            type = 0xFF79C0FF.toInt(),
-            string = 0xFFA5D6FF.toInt(),
-            number = 0xFFF2CC60.toInt(),
-            comment = 0xFF6E7681.toInt(),
-        )
-        val spanned = KinSyntax.highlight(text, colors)
-        val selStart = editor.selectionStart.coerceIn(0, spanned.length)
-        val selEnd = editor.selectionEnd.coerceIn(0, spanned.length)
-        editor.removeTextChangedListener(editorWatcher)
-        editor.text = spanned
-        editor.setSelection(selStart, selEnd)
-        editor.addTextChangedListener(editorWatcher)
-        updateGutter(text)
-    }
-
-    private fun updateGutter(text: String) {
-        val count = text.count { it == '\n' } + 1
-        val sb = StringBuilder()
-        for (i in 1..count) sb.append(i).append('\n')
-        gutter.text = sb.toString()
     }
 
     // -- project / file state ---------------------------------------------------
@@ -279,10 +240,14 @@ class MainActivity : AppCompatActivity() {
         val content = store.readFile(p, name) ?: return
         activeFile = name
         activeFileLabel.text = name
+        // TextWatcher off while replacing the content (no pointless
+        // write-back). The CodeEditorView re-highlights and re-numbers
+        // itself from its own watcher — no layout/text replacement
+        // outside this explicit file load.
         editor.removeTextChangedListener(editorWatcher)
         editor.setText(content)
         editor.addTextChangedListener(editorWatcher)
-        rehighlight()
+        editor.rehighlight()
         refreshFiles()
     }
 
@@ -291,7 +256,7 @@ class MainActivity : AppCompatActivity() {
         activeFileLabel.text = "(no file)"
         editor.removeTextChangedListener(editorWatcher)
         editor.setText("")
-        updateGutter("")
+        editor.addTextChangedListener(editorWatcher)
     }
 
     private fun gotoLine(line: Int) {
@@ -305,17 +270,28 @@ class MainActivity : AppCompatActivity() {
         }
         editor.requestFocus()
         editor.setSelection(index.coerceIn(0, text.length))
+        editor.showOffset(index.coerceIn(0, text.length))
         sectionIds.forEach { findViewById<View>(it).visibility = View.GONE }
         findViewById<View>(R.id.section_editor).visibility = View.VISIBLE
     }
 
     // -- compile + run ---------------------------------------------------------
 
-    /** Entry file name and its source, or null when there is nothing to compile. */
+    /**
+     * Entry file name and its source, or null when there is nothing to
+     * compile. When the entry is the file on screen, the source comes
+     * STRAIGHT from the editor field (the current value the user sees —
+     * never a cached copy on disk), so what is compiled is exactly what
+     * is visible at that moment.
+     */
     private fun entrySource(): Pair<String, String>? {
         val p = project ?: return null
         val entry = activeFile ?: store.listFiles(p).firstOrNull() ?: return null
-        val src = store.readFile(p, entry) ?: return null
+        val src = if (entry == activeFile) {
+            editor.text.toString()
+        } else {
+            store.readFile(p, entry) ?: return null
+        }
         return entry to src
     }
 

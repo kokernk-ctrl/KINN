@@ -64,12 +64,19 @@
           <span class="nx-mode-badge" id="nx-mode-badge" title="Programming mode (*mode directive)">MODE S</span>
         </div>
         <div class="nx-editor-wrap" id="nx-editor-wrap">
+          <!-- single-scroll editor (0.4.1): the gutter never scrolls
+               itself (it is translated by the one vertical scroll), and
+               .nx-editor-scroll is THE only scrollable element — the
+               in-flow <pre> sizes .nx-editor-sizer and the textarea
+               covers it exactly, so overlay and input can never drift. -->
           <div class="nx-gutter" id="nx-gutter" aria-hidden="true"></div>
           <div class="nx-editor-scroll" id="nx-editor-scroll">
-            <div class="nx-active-line" id="nx-active-line" aria-hidden="true"></div>
-            <pre class="nx-highlight" id="nx-highlight" aria-hidden="true"></pre>
-            <textarea class="nx-editor-input" id="nx-editor-input" spellcheck="false" autocapitalize="off"
-              autocomplete="off" wrap="off" aria-label="Kin source code"></textarea>
+            <div class="nx-editor-sizer" id="nx-editor-sizer">
+              <div class="nx-active-line" id="nx-active-line" aria-hidden="true"></div>
+              <pre class="nx-highlight" id="nx-highlight" aria-hidden="true"></pre>
+              <textarea class="nx-editor-input" id="nx-editor-input" spellcheck="false" autocapitalize="off"
+                autocorrect="off" autocomplete="off" wrap="off" aria-label="Kin source code"></textarea>
+            </div>
           </div>
           <div class="nx-findbar" id="nx-findbar" hidden>
             <input type="text" class="nx-find-input" placeholder="find in file" aria-label="Find in file" />

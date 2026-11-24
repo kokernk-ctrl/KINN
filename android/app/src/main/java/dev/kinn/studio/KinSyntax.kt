@@ -1,19 +1,36 @@
 package dev.kinn.studio
 
-import android.graphics.Typeface
 import android.text.Editable
 import android.text.Spannable
-import android.text.SpannableStringBuilder
-import android.text.style.ForegroundColorSpan
-import android.text.style.StyleSpan
+import android.text.Spanned
+import android.text.style.CharacterStyle
+import android.text.style.UpdateAppearance
 
 /**
- * Minimal Kin syntax highlighting for the Android editor. A small
- * tokenizer (same token set as the reference lexers) drives spannable
- * colors; it is intentionally simple — full diagnostics come from the
- * native compiler.
+ * Kin syntax highlighting for the Android editor — 0.4.1 fix.
+ *
+ * Highlights are applied IN PLACE to the live [Editable] of the editor
+ * field via [Editable.setSpan] ([applyHighlight]), never by building a
+ * new Spannable and replacing the field content: replacing the Editable
+ * with setText() would reset the caret, break the selection and kill
+ * the IME composition mid-word — the cause of the 0.3 "backspace
+ * deletes the wrong character / visible text differs from compiled
+ * text" symptoms.
+ *
+ * Spans are instances of our own [KinSpan] class, so removal only ever
+ * touches OUR spans — composition/suggestion spans installed by the
+ * IME are untouched.
  */
+
 object KinSyntax {
+
+    /** A colored run of code — our marker class for cleanup. */
+    class KinSpan(val color: Int, val bold: Boolean = false) : CharacterStyle(), UpdateAppearance {
+        override fun updateDrawState(ds: android.text.TextPaint) {
+            ds.color = color
+            if (bold) ds.typeface = android.graphics.Typeface.create(ds.typeface, android.graphics.Typeface.BOLD)
+        }
+    }
 
     private val KEYWORDS = setOf(
         "func", "fin", "var", "if", "else", "while", "for", "in",
@@ -22,16 +39,24 @@ object KinSyntax {
     )
     private val TYPES = setOf("int", "float", "bool", "string", "void")
 
-    /** Apply Kin highlighting to `text` (single pass, allocations kept low). */
-    fun highlight(text: String, colors: SyntaxColors): SpannableStringBuilder {
-        val sb = SpannableStringBuilder(text)
+    /**
+     * Remove all of OUR spans, then add fresh ones in a single pass.
+     * The text, the selection and the composition are never modified.
+     */
+    fun applyHighlight(editable: Editable, colors: SyntaxColors) {
+        val length = editable.length
+        // remove only KinSpans — never the IME's or the user's spans
+        for (s in editable.getSpans(0, length, KinSpan::class.java)) {
+            editable.removeSpan(s)
+        }
+
+        val text = editable.toString()
         var i = 0
         val n = text.length
 
         fun span(start: Int, end: Int, color: Int, bold: Boolean = false) {
             if (end <= start) return
-            sb.setSpan(ForegroundColorSpan(color), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            if (bold) sb.setSpan(StyleSpan(Typeface.BOLD), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            editable.setSpan(KinSpan(color, bold), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
         while (i < n) {
@@ -76,7 +101,6 @@ object KinSyntax {
                 else -> i++
             }
         }
-        return sb
     }
 
     data class SyntaxColors(

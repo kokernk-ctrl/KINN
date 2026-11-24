@@ -1,9 +1,45 @@
 /**
- * Studio Next code editor: transparent textarea over a highlighted
- * <pre> overlay (same proven technique as the classic Studio), plus
- * current-line highlighting, a real find bar (match count, next/prev),
- * configurable indent, and a shared-metrics gutter. Syntax highlighting
- * uses the editor-side Kin lexer that mirrors the reference Rust lexer.
+ * Studio Next code editor — single-scroll architecture (0.4.1 fix).
+ *
+ * DOM shape (see next.html / next.css):
+ *
+ *   .nx-editor-wrap                flex row, overflow hidden
+ *   ├─ .nx-gutter                  line numbers, never scrolls itself,
+ *   │                              translated by the one vertical scroll
+ *   └─ .nx-editor-scroll           THE ONLY scrollable element (x + y)
+ *      └─ .nx-editor-sizer         position:relative; sized by the <pre>
+ *         ├─ .nx-active-line       absolute, moves with the content
+ *         ├─ .nx-highlight (pre)   in-flow: it DEFINES the sizer size
+ *         └─ .nx-editor-input      absolute inset:0 — exactly the size of
+ *                                  the <pre>, so it never scrolls inside
+ *
+ * Why this fixes the 0.4.0 symptoms:
+ *
+ *  - The <pre> overlay and the transparent textarea share one containing
+ *    block and one scroller, so the visible (highlighted) text and the
+ *    real text are aligned by construction — no scroll copying, no lag,
+ *    no drift. A tap lands on the character the user sees (cursor fix).
+ *  - The textarea's box is exactly as large as its content, so it never
+ *    has its own scrollbar: exactly one horizontal and one vertical
+ *    scrollbar, at the editor edges (no bars cutting through the code).
+ *  - The gutter is a pure visual mirror driven by the same single
+ *    ScrollState (scrollTop), generated from the exact same line split
+ *    the overlay rendered, with identical metrics (font, line-height,
+ *    padding) — numbers match the real lines at any scroll offset.
+ *  - `render()` only touches the overlay (innerHTML) and the gutter
+ *    (textContent); the textarea's value/selection are never rebuilt,
+ *    so IME composition survives every keystroke (backspace fix).
+ *  - Cursor tracking listens to `selectionchange` (the standard event
+ *    for caret/selection moves, including IME and touch handles).
+ *  - `ensureCaretVisible()` is the web equivalent of a
+ *    BringIntoViewRequester: it scrolls the one scroller (never a
+ *    phantom inner one) to keep the caret on screen.
+ *
+ * The source of truth for the text is ALWAYS `textarea.value`
+ * (getText()); the overlay and the gutter are derived views. Callers
+ * that compile (run/check/build) read getText()/the vfs snapshot that
+ * is saved synchronously on every input event — and main.ts additionally
+ * flushes the editor into the vfs right before compiling.
  */
 
 import { lex } from '../../syntax/lexer';
@@ -18,6 +54,7 @@ export interface CodeEditorCallbacks {
 export interface CodeEditorElements {
   wrap: HTMLElement;
   scroll: HTMLElement;
+  sizer: HTMLElement;
   highlight: HTMLElement;
   gutter: HTMLElement;
   activeLine: HTMLElement;
@@ -29,27 +66,40 @@ export class CodeEditor {
   private findIdx = -1;
   private findQuery = '';
   private lh = 20; // line height px, kept in sync with CSS vars
+  private pad = 10; // vertical padding px, kept in sync with CSS vars
 
   constructor(
     private els: CodeEditorElements,
     private cb: CodeEditorCallbacks,
   ) {
-    const { input } = els;
+    const { input, scroll } = els;
+
+    // text changes: mirror into the overlay + gutter, notify host.
     input.addEventListener('input', () => {
       this.render();
       this.cb.onEdit(input.value);
     });
-    input.addEventListener('scroll', () => this.syncScroll());
-    for (const ev of ['keyup', 'click', 'select'] as const) {
+
+    // THE one scroll: drive the gutter (vertical) from it.
+    scroll.addEventListener('scroll', () => this.syncGutter());
+
+    // cursor/selection tracking: selectionchange is the standard event
+    // and fires for touch drags, IME composition moves and taps.
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === input) this.updateCursor();
+    });
+    // fallbacks for engines without textarea selectionchange
+    for (const ev of ['keyup', 'click', 'select', 'touchend'] as const) {
       input.addEventListener(ev, () => this.updateCursor());
     }
     input.addEventListener('keydown', (e) => this.onKeyDown(e));
+    window.addEventListener('resize', () => this.syncGutter());
   }
 
   setText(text: string): void {
     this.els.input.value = text;
-    this.els.input.scrollTop = 0;
-    this.els.input.scrollLeft = 0;
+    this.els.scroll.scrollTop = 0;
+    this.els.scroll.scrollLeft = 0;
     this.render();
     this.updateCursor();
   }
@@ -76,7 +126,7 @@ export class CodeEditor {
   }
   private indent = 2;
 
-  /** Move the caret to the start of a 1-based line and focus. */
+  /** Move the caret to the start of a 1-based line, focus, scroll it into view. */
   gotoLine(line: number): void {
     const lines = this.els.input.value.split('\n');
     const clamped = Math.max(1, Math.min(line, lines.length));
@@ -84,13 +134,18 @@ export class CodeEditor {
     for (let i = 0; i < clamped - 1; i++) pos += lines[i].length + 1;
     this.els.input.focus();
     this.els.input.setSelectionRange(pos, pos);
-    this.els.input.scrollTop = Math.max(0, (clamped - 4) * this.lh);
-    this.syncScroll();
+    this.els.scroll.scrollTop = Math.max(0, (clamped - 4) * this.lh);
+    this.syncGutter();
     this.updateCursor();
   }
 
   // -- rendering ----------------------------------------------------------------
 
+  /**
+   * Rebuild the visual mirror (overlay + gutter) from the current
+   * textarea value. Never touches the textarea itself: the IME
+   * composition, selection and value stay untouched.
+   */
   private render(): void {
     const { input, highlight, gutter } = this.els;
     const text = input.value;
@@ -99,17 +154,16 @@ export class CodeEditor {
     const lines = text.split('\n');
     highlight.innerHTML = lines.map((line, i) => renderLine(line, segs[i] ?? [])).join('\n') +
       (text.endsWith('\n') || text === '' ? '\n' : '');
+    // The gutter is generated from the SAME line split the overlay just
+    // rendered — they cannot disagree about the line count.
     gutter.textContent = lines.map((_, i) => String(i + 1)).join('\n') + '\n';
-    this.syncScroll();
+    this.syncGutter();
   }
 
-  private syncScroll(): void {
-    const { input, highlight, gutter, activeLine } = this.els;
-    highlight.scrollTop = input.scrollTop;
-    highlight.scrollLeft = input.scrollLeft;
-    gutter.style.transform = `translateY(${-input.scrollTop}px)`;
-    // keep the active-line bar as wide as the scrolled content
-    activeLine.style.width = `${Math.max(highlight.scrollWidth, highlight.clientWidth)}px`;
+  /** Vertical sync of the gutter with the single scroll state. */
+  private syncGutter(): void {
+    const { scroll, gutter } = this.els;
+    gutter.style.transform = `translateY(${-scroll.scrollTop}px)`;
   }
 
   private updateCursor(): void {
@@ -118,12 +172,39 @@ export class CodeEditor {
     const before = input.value.slice(0, pos);
     const line = before.split('\n').length;
     const col = pos - (before.lastIndexOf('\n') + 1) + 1;
-    // current-line backdrop (scrolls with content)
-    activeLine.style.top = `${(line - 1) * this.lh}px`;
+    // current-line backdrop: absolute inside the sizer, offset by the
+    // same top padding the text has, one line-height per logical line.
+    activeLine.style.transform = `translateY(${(line - 1) * this.lh}px)`;
+    this.ensureCaretVisible(line);
     this.cb.onCursor(line, col, input.value.split('\n').length);
   }
 
+  /**
+   * Keep the caret line inside the viewport of the single scroller
+   * (web equivalent of BringIntoViewRequester). Only acts when the line
+   * is fully out of view, so it never fights the browser's own
+   * caret-following scroll.
+   */
+  private ensureCaretVisible(line: number): void {
+    const { scroll } = this.els;
+    // content-space y of the caret line (top padding + line height * index)
+    const top = this.pad + (line - 1) * this.lh;
+    const viewTop = scroll.scrollTop;
+    const viewH = scroll.clientHeight;
+    if (viewH <= 0) return; // not laid out / hidden — nothing to scroll
+    if (top < viewTop) {
+      scroll.scrollTop = top;
+    } else if (top + this.lh > viewTop + viewH) {
+      scroll.scrollTop = top + this.lh - viewH;
+    }
+    this.syncGutter();
+  }
+
   private onKeyDown(e: KeyboardEvent): void {
+    // Never intercept keys while the IME is composing (mobile keyboards):
+    // backspace, delete, enter and friends must reach the textarea
+    // untouched so composition state stays consistent.
+    if (e.isComposing) return;
     const { input } = this.els;
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -225,8 +306,8 @@ export class CodeEditor {
     input.focus();
     input.setSelectionRange(pos, pos + this.findQuery.length);
     const line = input.value.slice(0, pos).split('\n').length;
-    input.scrollTop = Math.max(0, (line - 4) * this.lh);
-    this.syncScroll();
+    this.els.scroll.scrollTop = Math.max(0, (line - 4) * this.lh);
+    this.syncGutter();
     this.updateCursor();
     counter.textContent = `${this.findIdx + 1} / ${this.findMatches.length}`;
   }

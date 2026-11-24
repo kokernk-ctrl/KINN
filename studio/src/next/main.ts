@@ -101,6 +101,7 @@ const editor = new CodeEditor(
   {
     wrap: $('nx-editor-wrap'),
     scroll: $('nx-editor-scroll'),
+    sizer: $('nx-editor-sizer'),
     highlight: $('nx-highlight'),
     gutter: $('nx-gutter'),
     activeLine: $('nx-active-line'),
@@ -268,6 +269,9 @@ function onEdited(text: string): void {
     checkTimer = window.setTimeout(() => {
       const cur = vfs.active;
       if (!cur) return;
+      // Re-read the editor at fire time, not at schedule time: the
+      // check compiles what is on screen when it runs.
+      syncActiveText();
       const result = backend.check(cur.name, vfs.projectFiles());
       problems.render(result.diagnostics, cur.name);
     }, 900);
@@ -312,12 +316,25 @@ function applySettings(): void {
 
 // -- actions (real) --------------------------------------------------------------
 
+/**
+ * Requirement: the compiler always sees exactly what the user sees.
+ * Called right before run/check/build/export — reads the CURRENT
+ * editor value (the single source of truth) and mirrors it into the
+ * vfs, so nothing stale, cached or debounced can reach the compiler.
+ */
+function syncActiveText(): void {
+  const name = vfs.activeName;
+  if (!name) return;
+  vfs.save(name, editor.getText());
+}
+
 function runActive(): void {
   const name = vfs.activeName;
   if (!name) {
     toast('no file open');
     return;
   }
+  syncActiveText();
   terminalFocus('term');
   terminal.exec(`run ${name}`);
 }
@@ -325,6 +342,7 @@ function runActive(): void {
 function checkActive(): void {
   const name = vfs.activeName;
   if (!name) return;
+  syncActiveText();
   terminalFocus('term');
   terminal.exec(`check ${name}`);
 }
@@ -332,6 +350,7 @@ function checkActive(): void {
 function buildWeb(): void {
   const name = vfs.activeName;
   if (!name) return;
+  syncActiveText();
   terminalFocus('term');
   terminal.exec(`build web`);
 }
@@ -339,6 +358,7 @@ function buildWeb(): void {
 function buildAndroidZip(): void {
   const name = vfs.activeName;
   if (!name) return;
+  syncActiveText();
   if (!backend.available) {
     toast('compiler backend not built — build web works with kinn.wasm only');
     return;

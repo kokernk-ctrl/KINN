@@ -221,46 +221,28 @@
                 android:paddingVertical="6dp"
                 android:background="@color/bg_elevated" />
 
-            <HorizontalScrollView
+            <!-- 0.4.1 fix: one component owns the whole editing surface.
+                 CodeEditorView draws its own line numbers (from the real
+                 text layout), scrolls horizontally by itself (no soft
+                 wrap), and highlights via spans on the live Editable —
+                 so there is no HorizontalScrollView, no separate gutter
+                 TextView, and no scrollbar cutting through the code. -->
+            <dev.kinn.studio.CodeEditorView
+                android:id="@+id/editor"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:fillViewport="true">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/gutter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="match_parent"
-                        android:fontFamily="monospace"
-                        android:textSize="13sp"
-                        android:textColor="@color/fg_dim"
-                        android:paddingHorizontal="6dp"
-                        android:paddingVertical="8dp"
-                        android:gravity="top" />
-
-                    <EditText
-                        android:id="@+id/editor"
-                        android:layout_width="wrap_content"
-                        android:layout_height="match_parent"
-                        android:minWidth="260dp"
-                        android:background="@android:color/transparent"
-                        android:fontFamily="monospace"
-                        android:textSize="13sp"
-                        android:textColor="@color/fg"
-                        android:inputType="textMultiLine|textNoSuggestions"
-                        android:gravity="top"
-                        android:paddingHorizontal="4dp"
-                        android:paddingVertical="8dp"
-                        android:importantForAutofill="no"
-                        android:hint="@string/editor_hint"
-                        android:imeOptions="flagNoExtractUi" />
-                </LinearLayout>
-            </HorizontalScrollView>
+                android:background="@android:color/transparent"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:textColor="@color/fg"
+                android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
+                android:gravity="top"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="8dp"
+                android:importantForAutofill="no"
+                android:hint="@string/editor_hint"
+                android:imeOptions="flagNoExtractUi" />
 
             <TextView
                 android:id="@+id/editor_status"

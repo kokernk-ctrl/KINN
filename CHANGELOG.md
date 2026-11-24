@@ -4,6 +4,58 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
+## [Unreleased] — 0.4.1 editor alignment & sync fix
+
+Fixes the six editing symptoms reported on Android phones (tap-to-caret
+offset, backspace deleting the wrong character with visible text
+diverging from compiled text, highlight drifting left on lower lines,
+horizontal scrollbars cutting through the code, background/gutter
+ending mid-file, layout breaking with the keyboard open). Full
+analysis: `docs/EDITOR_SYNC_FIX.md`.
+
+### Fixed — editors rebuilt on a single scroll and a single truth
+
+- **Studio NEXT code editor** (`studio/src/next/ui/codeeditor.ts`,
+  `next.html`, `next.css`): the highlighted `<pre>` is now in-flow and
+  sizes a sizer; the transparent textarea is `absolute inset:0` over
+  it — both share ONE scroller (`.nx-editor-scroll`), so overlay and
+  input are aligned by construction (no scroll copying, no drift, one
+  horizontal + one vertical scrollbar at the edges). The gutter is
+  driven by the single `scrollTop` and generated from the same line
+  split the overlay rendered; metrics (font, line-height, padding,
+  `tab-size`, `white-space: pre`) are shared. Cursor tracking uses the
+  standard `selectionchange` event; `ensureCaretVisible()` scrolls the
+  one scroller to keep the caret on screen. `keydown` handling is
+  IME-safe (never intercepts composing events). `render()` never
+  touches the textarea value/selection.
+- **Classic web editor** (`studio/src/ui/editor.ts`, `index.html`,
+  `theme.css`): same single-scroll architecture; render is now
+  synchronous (no 30 ms window in which the textarea could grow its
+  own transient scrollbar).
+- **Classic native editor** (Android): new `CodeEditorView`
+  (AppCompatEditText) draws its own line numbers in `onDraw` from the
+  real text layout (`Layout.getLineBaseline()`), scrolls horizontally
+  by itself (`setHorizontallyScrolling`, no soft wrap, no
+  HorizontalScrollView, no separate gutter TextView). Syntax
+  highlighting is applied **in place to the live Editable** via
+  `setSpan` (`KinSyntax.applyHighlight` + marker `KinSpan` class) —
+  never `setText()`, so the caret, selection and IME composition are
+  never interrupted. Input type `textVisiblePassword|textNoSuggestions`
+  disables the Gboard autocorrect.
+- **Compilation always sees the current editor value**: run/check/
+  build/export (NEXT, classic web) call `syncActiveText()` (flush of
+  `editor.getText()` into the vfs) right before invoking the compiler;
+  the native `entrySource()` reads `editor.text` directly when the
+  entry is the file on screen.
+
+### Added
+
+- 21 unit tests for the editors (`codeeditor.test.ts`,
+  `editor.test.ts`: mirror offsets, gutter split, IME guards, cursor
+  reports, scroll state, single-scroller invariants).
+- `docs/EDITOR_SYNC_FIX.md` — root-cause analysis per symptom,
+  architecture description, test results, limitations.
+
 ## [Unreleased] — 0.4.0 (Phase 5 implementation started)
 
 Dynamic web applications (owner directive). Design phases 1–4 landed

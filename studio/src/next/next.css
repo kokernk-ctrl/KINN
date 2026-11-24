@@ -366,9 +366,16 @@ body.nx-resizing:has(.nx-handle-h.dragging) { cursor: row-resize; }
   flex: 1;
   min-height: 0;
   display: flex;
+  overflow: hidden;
   --nx-ed-pad: 10px;
 }
 
+/*
+ * Line numbers: never scrolls itself. Same typography as the editor
+ * (font/size/line-height) and the same vertical padding, so each number
+ * sits on the exact baseline of its line. It is translated by the ONE
+ * vertical scroll (see .nx-editor-scroll) — never horizontally.
+ */
 .nx-gutter {
   font-family: var(--mono);
   font-size: var(--nx-ed-font);
@@ -381,30 +388,51 @@ body.nx-resizing:has(.nx-handle-h.dragging) { cursor: row-resize; }
   overflow: hidden;
   user-select: none;
   min-width: 46px;
+  flex: none;
   white-space: pre;
+  will-change: transform;
 }
 
+/* THE one and only scroller of the code area (x and y). */
 .nx-editor-scroll {
-  position: relative;
   flex: 1;
+  min-width: 0;
   overflow: auto;
   background: var(--bg);
 }
 
+/*
+ * The sizer is sized by its in-flow child <pre> (min-width: max-content
+ * makes it as wide as the longest line; min-height: 100% keeps it at
+ * least a viewport tall so taps below the last line still reach the
+ * textarea). The textarea is absolute inset:0 — exactly the same box as
+ * the <pre>, so it NEVER scrolls internally: overlay and input share
+ * this single scroll by construction and cannot drift apart.
+ */
+.nx-editor-sizer {
+  position: relative;
+  min-width: max-content;
+  min-height: 100%;
+}
+
 .nx-active-line {
   position: absolute;
-  top: 0; left: 0;
+  top: var(--nx-ed-pad);
+  left: 0;
   height: var(--nx-ed-lh);
+  width: 100%;
   background: rgba(255, 138, 50, 0.06);
   border-top: 1px solid rgba(255, 138, 50, 0.16);
   border-bottom: 1px solid rgba(255, 138, 50, 0.16);
   pointer-events: none;
 }
 
+/* Shared metrics for the visible text and the input layer. */
 .nx-highlight, .nx-editor-input {
   font-family: var(--mono);
   font-size: var(--nx-ed-font);
   line-height: var(--nx-ed-lh);
+  letter-spacing: normal;
   margin: 0;
   padding: var(--nx-ed-pad) 24px var(--nx-ed-pad) 10px;
   border: 0;
@@ -412,28 +440,25 @@ body.nx-resizing:has(.nx-handle-h.dragging) { cursor: row-resize; }
   tab-size: 4;
 }
 
+/* In-flow: it defines the sizer (and therefore the textarea) size. */
 .nx-highlight {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
+  display: block;
   color: var(--ink);
-  min-width: max-content; /* let horizontal scroll extend the overlay */
-  min-height: max-content;
+  pointer-events: none;
 }
 
+/* Covers the sizer exactly — never has a scrollbar of its own. */
 .nx-editor-input {
-  position: relative;
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-width: 100%;
   height: 100%;
   background: transparent;
   color: transparent;
   caret-color: var(--accent);
   resize: none;
   outline: none;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .tk-kw { color: var(--tk-kw); font-weight: 600; }
