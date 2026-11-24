@@ -60,18 +60,18 @@ jobs:
       - name: Build NSIS installer
         shell: pwsh
         run: |
-          # The Chocolatey community feed intermittently 504s; retry a
-          # few times instead of failing the whole Windows build on an
-          # external gateway timeout.
+          # The Chocolatey community feed intermittently 503/504s and
+          # reports "installed 0/0 packages" WITH exit code 0, so
+          # retries must check for the actual binary, not the exit code.
           $ok = $false
-          foreach ($attempt in 1..3) {
+          foreach ($attempt in 1..4) {
             choco install nsis -y --no-progress
-            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
-            Write-Host "choco attempt $attempt failed (feed flake); retrying in 30s..."
-            Start-Sleep -Seconds 30
+            $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+            if (Get-Command makensis -ErrorAction SilentlyContinue) { $ok = $true; break }
+            Write-Host "choco attempt $attempt did not install nsis (feed flake); retrying in 45s..."
+            Start-Sleep -Seconds 45
           }
           if (-not $ok) { exit 1 }
-          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
           makensis scripts/windows/kinn.nsi
 
       - name: Collect artifacts
