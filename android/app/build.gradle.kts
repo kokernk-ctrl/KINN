@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -113,7 +115,7 @@ val studioWebDir = rootProject.file("../studio/dist")
 val ensureStudioWeb by tasks.registering {
     doLast {
         val required = listOf("next.html", "index.html", "kinn.wasm")
-        val missing = required.filterNot { java.io.File(studioWebDir, it).isFile }
+        val missing = required.filterNot { File(studioWebDir, it).isFile }
         if (!studioWebDir.isDirectory || missing.isNotEmpty()) {
             throw GradleException(
                 "studio/dist is missing or incomplete" +
