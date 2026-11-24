@@ -115,6 +115,16 @@ IndexedDB that reproduces both failure modes. Verified end-to-end:
 create/edit/run a file, reload, the project (files, content, active
 tab) is restored.
 
+### Fixed — classic app: the docs screen was empty (since the app's first release)
+
+`copyDocs` copied the Markdown files flat into the APK assets root,
+while `DocsActivity` has always listed and opened `assets/docs/…` —
+the bundled documentation was unreachable on Android. All generated
+assets now merge under one parent (`generated/webroot`): docs land at
+`assets/docs/` (as DocsActivity expects) and the Studio NEXT bundle at
+`assets/studio-web/` (as NextActivity's asset loader expects); CI
+verifies both paths inside the built APK.
+
 ### Fixed — mobile polish and hardening
 
 - The bottom tab row (TERMINAL/PROBLEMS/OUTPUT + counters + actions)

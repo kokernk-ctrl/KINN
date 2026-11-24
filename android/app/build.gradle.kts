@@ -61,15 +61,17 @@ android {
         viewBinding = false
     }
 
-    // Bundled documentation: copied from docs/ by the copyDocs task below,
-    // so the app always ships the same documents as the repository.
-    // Bundled Studio web app: the built studio/dist (both entries:
-    // next.html — the 0.4.0 default — plus the web classic) copied by
-    // copyStudioWeb, served by NextActivity through WebViewAssetLoader.
+    // Generated assets are merged under ONE parent (build/generated/
+    // webroot): assets.srcDir merges a directory's CONTENTS into the
+    // APK assets root, so the layout on disk is the layout in the APK:
+    //   generated/webroot/docs/*.md        -> assets/docs/*.md
+    //     (what DocsActivity has always read; the flat layout produced
+    //     before 0.4.0 made the docs screen find nothing)
+    //   generated/webroot/studio-web/**    -> assets/studio-web/**
+    //     (what NextActivity serves at /assets/studio-web/next.html)
     sourceSets {
         getByName("main") {
-            assets.srcDir(layout.buildDirectory.dir("generated/docs"))
-            assets.srcDir(layout.buildDirectory.dir("generated/studio-web"))
+            assets.srcDir(layout.buildDirectory.dir("generated/webroot"))
         }
     }
 }
@@ -85,13 +87,13 @@ dependencies {
     implementation("androidx.webkit:webkit:1.11.0")
 }
 
-// Copy the repository documentation into the APK assets.
+// Copy the repository documentation into the APK assets (docs/).
 val copyDocs by tasks.registering(Copy::class) {
     from(rootProject.file("../docs")) {
         include("*.md")
     }
     from(rootProject.file("../README.md"))
-    into(layout.buildDirectory.dir("generated/docs"))
+    into(layout.buildDirectory.dir("generated/webroot/docs"))
 }
 
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
@@ -129,7 +131,7 @@ val ensureStudioWeb by tasks.registering {
 val copyStudioWeb by tasks.registering(Copy::class) {
     dependsOn(ensureStudioWeb)
     from(studioWebDir)
-    into(layout.buildDirectory.dir("generated/studio-web"))
+    into(layout.buildDirectory.dir("generated/webroot/studio-web"))
 }
 
 // Wire like copyDocs (proven pattern): the copy itself runs at

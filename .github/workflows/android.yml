@@ -153,6 +153,8 @@ jobs:
             "assets/studio-web/next.html" \
             "assets/studio-web/index.html" \
             "assets/studio-web/kinn.wasm" \
+            "assets/studio-web/assets/" \
+            "assets/docs/README.md" \
             "lib/arm64-v8a/libkinn_android.so" ; do
             grep -q "$REQUIRED" contents.txt || {
               echo "MISSING IN APK: $REQUIRED"; exit 1; }
