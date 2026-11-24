@@ -58,10 +58,20 @@ jobs:
           Get-FileHash "kinn-0.2.0-x86_64-windows.zip" -Algorithm SHA256 | Format-List
 
       - name: Build NSIS installer
-        shell: cmd
+        shell: pwsh
         run: |
-          choco install nsis -y --no-progress
-          set PATH=C:\Program Files (x86)\NSIS;%PATH%
+          # The Chocolatey community feed intermittently 504s; retry a
+          # few times instead of failing the whole Windows build on an
+          # external gateway timeout.
+          $ok = $false
+          foreach ($attempt in 1..3) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "choco attempt $attempt failed (feed flake); retrying in 30s..."
+            Start-Sleep -Seconds 30
+          }
+          if (-not $ok) { exit 1 }
+          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
           makensis scripts/windows/kinn.nsi
 
       - name: Collect artifacts
