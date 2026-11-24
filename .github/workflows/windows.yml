@@ -57,21 +57,32 @@ jobs:
           Compress-Archive -Path "$out/*" -DestinationPath "kinn-0.2.0-x86_64-windows.zip" -Force
           Get-FileHash "kinn-0.2.0-x86_64-windows.zip" -Algorithm SHA256 | Format-List
 
+      - name: Cache NSIS install (chocolatey feed is flaky)
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files (x86)\NSIS
+          key: nsis-3.13-win
+
       - name: Build NSIS installer
         shell: pwsh
         run: |
           # The Chocolatey community feed intermittently 503/504s and
           # reports "installed 0/0 packages" WITH exit code 0, so
           # retries must check for the actual binary, not the exit code.
-          $ok = $false
-          foreach ($attempt in 1..4) {
-            choco install nsis -y --no-progress
-            $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
-            if (Get-Command makensis -ErrorAction SilentlyContinue) { $ok = $true; break }
-            Write-Host "choco attempt $attempt did not install nsis (feed flake); retrying in 45s..."
-            Start-Sleep -Seconds 45
+          # The cache above lets most builds skip chocolatey entirely.
+          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+          if (Get-Command makensis -ErrorAction SilentlyContinue) {
+            Write-Host "makensis restored from cache"
+          } else {
+            $ok = $false
+            foreach ($attempt in 1..4) {
+              choco install nsis -y --no-progress
+              if (Get-Command makensis -ErrorAction SilentlyContinue) { $ok = $true; break }
+              Write-Host "choco attempt $attempt did not install nsis (feed flake); retrying in 45s..."
+              Start-Sleep -Seconds 45
+            }
+            if (-not $ok) { exit 1 }
           }
-          if (-not $ok) { exit 1 }
           makensis scripts/windows/kinn.nsi
 
       - name: Collect artifacts
