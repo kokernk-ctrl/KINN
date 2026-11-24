@@ -5,7 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
