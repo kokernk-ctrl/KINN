@@ -132,9 +132,12 @@ val copyStudioWeb by tasks.registering(Copy::class) {
     into(layout.buildDirectory.dir("generated/studio-web"))
 }
 
+// Wire like copyDocs (proven pattern): the copy itself runs at
+// preBuild time, so lint-vital and every later consumer see a complete
+// directory and Gradle's implicit-dependency validation is satisfied.
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
     dependsOn(copyStudioWeb)
 }
 tasks.matching { it.name.startsWith("preBuild") }.configureEach {
-    dependsOn(ensureStudioWeb)
+    dependsOn(copyStudioWeb)
 }
