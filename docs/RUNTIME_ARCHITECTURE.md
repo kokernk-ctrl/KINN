@@ -93,3 +93,48 @@ verification belongs to the 0.5 milestone (see
   proper native function table.
 - 0.3: native backend investigation; the KIR format is the contract
   that survives any backend swap.
+
+## The web runtime (0.4.0 S5+S6)
+
+KIR has two execution carriers with one semantics: the Rust stack VM
+above (console programs) and generated JavaScript (dynamic web apps).
+`kinc::backend::webkir` translates each `FuncDef` into a plain ES2020
+function — a threaded `switch` with one case per instruction and
+`//@kinn:file:line` markers — calling the value helpers in
+`kinnrt.js`:
+
+- **Checked i64 through float64.** `k_add/k_sub/k_mul/k_div/k_mod`
+  take an exact fast path within ±2^32 and a BigInt slow path, so the
+  `i64::MIN` edges (negation, `MIN / -1`, `MIN % -1`) raise E4004
+  exactly like the VM's checked ops. Documented limit: literals and
+  results beyond ±2^53 round like every float64; the differential
+  corpus keeps printed values exact and exercises overflow as errors.
+- **`Value::format` parity.** `k_fmt(v, tag)` renders with the tag the
+  code generator computed statically (`"i" | "f" | "b" | "s" | "a"+elem`)
+  — JS cannot tell `2` from `2.0` at runtime, so the tag is decided by
+  a worklist abstract interpretation seeded from the additive
+  `FuncDef.param_kinds`/`ret_kind` fields. Exponent forms are expanded
+  to plain decimals (Rust's Display never emits exponents); `-0.0`,
+  `inf`, `NaN` match.
+- **Differential testing is the contract.** The corpus (examples,
+  error programs, modules, hand-built KIR fixtures for every ISA
+  instruction, overflow/div-zero/float-format edges, app handler and
+  computed drivers) runs both engines under Node and requires stdout
+  and the `[CODE] message (line N)` line to match byte for byte —
+  against the exact minified runtime the dist ships.
+
+`kinnrt.js` (16.2 KB minified, hard 16 KB budget, zero dependencies,
+no `eval`/`new Function`/`innerHTML`) is the reactive layer set the
+generated `app.js` mounts into: State + computed caches over the S4
+static dependency map, a microtask-batched Flush, a Binder that
+patches only changed text/attrs, keyed Lists reconciliation (append /
+remove / reorder, duplicate keys keep the newest, in-place mutation
+detected by fingerprint), one delegated event-listener set per
+document with the handler ABI + event builtins, a single DOM renderer
+(Lifecycle), sessionStorage state transfer for MPA (Hydrator), a
+localStorage store layer with schema-hash guard (Store; language
+surface in S9), class-toggle animation attributes (Anim; visible
+motion waits for S8 CSS; `prefers-reduced-motion` disables the path),
+and the C.7 Reporter (`kinnRuntimeError`/`kinnConsole` postMessage
+envelopes when embedded). The deterministic minifier lives in
+`webkir.rs` and is tested for byte-stable output and the budget.

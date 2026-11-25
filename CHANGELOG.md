@@ -4,6 +4,118 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
+## [Unreleased] — 0.4.0 S5+S6: dynamic web applications (MPA)
+
+The unified dynamic-web feature: **S5** (KIR → JavaScript code
+generation, differentially tested against the Rust VM) and **S6**
+(kinnrt.js, the 16 KB zero-dependency reactive runtime, plus the MPA
+app dist and Studio integration). `app` programs now build and run in
+any browser with JavaScript enabled; `website` dists are untouched and
+byte-identical.
+
+### Added — S5: KIR → JS (C.3, a second execution carrier, same semantics)
+
+- **`compiler/crates/kinc/src/backend/webkir.rs`**: translates KIR
+  functions to plain ES2020 JavaScript — one threaded `switch` per
+  function, one auditable `case` per instruction, `//@kinn:file:line`
+  markers on every case. Type-directed arms come from a worklist
+  abstract interpretation seeded by the new additive `FuncDef`
+  fields `param_kinds`/`ret_kind` (the VM ignores them; JS numbers
+  cannot tell `2` from `2.0`, so `print` tags are chosen statically).
+  Deterministic: same module in, byte-identical JS out (tested).
+- **`kinnrt.js` value helpers** (shipped in every dynamic dist, also
+  used by the console differential harness): checked i64 arithmetic
+  through float64 with BigInt slow paths (E4004/E4001 exactly like the
+  VM, including `i64::MIN` edges), `Value::format` parity (the
+  shortest-round-trip exponent expansion Rust's Display never emits,
+  `-0.0`, `inf`/`NaN`), deep array equality, casts, and the B.10 string
+  natives (`str/upper/lower/trim/contains/split/join`) with
+  Unicode-honest rules (code-point `len`, 1:1 case mapping without
+  expansion, the Rust `White_Space` trim set — U+FEFF is not
+  whitespace, unlike JS `trim`).
+- **`kinrt` (VM) additions**: `NativeId::{Str,Upper,Lower,Trim,
+  Contains,Split,Join}` (app-scope only — console programs can never
+  reach them, 0.2 semantics unchanged), the `(Array, Array) → fresh
+  concat` arm of `Add`, and `ValKind` + `param_kinds`/`ret_kind`.
+- **Differential harness** (`kinc/tests/webkir_diff.rs`, Node-driven,
+  skipped when `node` is absent): every `examples/*.kin`, the
+  runtime-error corpus, the modules pair, hand-built KIR fixtures
+  covering **every ISA instruction**, the overflow/div-zero family,
+  the float-formatting zoo, and app fixtures driving handlers and
+  computeds through generated `main`s — stdout and the
+  `[CODE] message (line N)` error line must match **byte for byte**
+  against `kinrt::run`, running the exact minified runtime the dist
+  ships.
+- **Deterministic minifier** (in webkir.rs): scope-safe identifier
+  renaming + comment/whitespace stripping — the delivered `kinnrt.js`
+  is **16.2 KB** (hard budget 16 KB, CI-asserted), zero dependencies,
+  no `eval`/`new Function`/`innerHTML` (A6/C.6).
+
+### Added — S6: kinnrt.js reactivity + the MPA app dist (C.2/C.5/C.6)
+
+- **`kinnrt.js` layers**: State (+ computed caches over the static dep
+  map), Flush (one microtask batch per event), Binder (re-evaluate
+  dirty slots only, patch changed text/attrs), Lists (keyed
+  reconciliation — append/remove/reorder, duplicate keys keep the
+  newest, in-place mutation detected by fingerprint), Events (ONE
+  delegated listener set per document + `event_value/event_key/
+  event_x/event_y` builtins), Lifecycle (the single DOM renderer),
+  Hydrator (MPA state via sessionStorage, privacy-mode safe), Store
+  (localStorage + schema-hash guard; the language surface is S9), Anim
+  (class toggles only — visible motion waits for S8 CSS;
+  `prefers-reduced-motion` disables the path), Reporter
+  (`window.onerror`/unhandledrejection → E4099 envelopes; embedded
+  previews get `postMessage`).
+- **`backend/webapp.rs`**: the manifest contract (sorted-key JSON:
+  state, computed, handlers with the ABI params, the binding table in
+  the S4 walk order, page/component templates with static literals
+  inlined, routes, stores, animations) and the dist generator —
+  `index.html` + one page per slug + `styles.css` + `app.js` +
+  `kinnrt.js`, keeping 0.3's semantic skeleton (landmarks, skip link,
+  `aria-current`). Handler ABI: params are the read-or-written state
+  fields (sorted) plus event builtins; the return value is the
+  write-back array.
+- **Honest E3071 scope gates**: `navigation spa` → S7;
+  `form`/`field` → S9; `param()`/`store_*`/`json_of`/`save_json` and
+  the `form_valid`/`field_errors` builtins → S7/S9. `tasks_app.kin`
+  stays the grammar showcase (check-only); `todo_app.kin` is the
+  runnable MPA demo.
+- **CLI + FFI**: `kinn build --target web` on an app builds the real
+  dist (was: honest not-implemented guard); `kinn_build_web` in the
+  wasm FFI does the same for Studio. Android still E3070.
+- **Studio (R10 part 1)**: the preview inlines `kinnrt.js` before
+  `app.js`; preview runtime errors land in the Problems panel (both
+  variants, additive — check results are never replaced) and forwarded
+  console output in the terminal/OUTPUT panel via the existing
+  postMessage channels.
+- **Examples**: `examples/web/todo_app.kin` (MPA todo: state, computed,
+  `each` with keys, `when`, input bind + handlers) and
+  `examples/errors/app_div_zero.kin` (handler E4001 → envelope with
+  kinFile/kinLine).
+
+### Fixed
+
+- **Studio preview navigation interceptor** (`studio/src/build/
+  preview.ts`): the injected selector was the corrupted literal
+  `"aref]"` (a DOMException on every click in real browsers; a test
+  pinned the broken value while its DOM-validity guard only ran under
+  node). Now `a[href]`, pinned by a test that actually asserts the
+  literal.
+- Computed values now seed on the first flush after mount (previously
+  the first paint could show stale/empty text until a handler ran).
+
+### Tests
+
+- Compiler: 493 Rust tests (was 457) — full differential corpus, dist
+  determinism + size budget, CLI app-build behavior, new VM native
+  arms.
+- Studio: 179 vitest tests (was 163, all with the real wasm backend):
+  the kinnrt jsdom suite (binding updates, batching, keyed
+  reconciliation incl. dup-key and in-place mutation, event dispatch +
+  builtins, key filters, error envelopes, hydration) and the e2e suites
+  driving the todo and error apps through the real wasm backend + the
+  Studio preview pipeline.
+
 ## [Unreleased] — 0.4.1 editor alignment & sync fix
 
 Fixes the six editing symptoms reported on Android phones (tap-to-caret

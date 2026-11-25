@@ -14,6 +14,6 @@ pub mod listing;
 pub mod value;
 pub mod vm;
 
-pub use kir::{FuncDef, Instr, Module};
+pub use kir::{FuncDef, Instr, Module, NativeId, ValKind};
 pub use value::Value;
 pub use vm::{run, KinError};

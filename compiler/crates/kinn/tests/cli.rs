@@ -338,9 +338,10 @@ fn check_app_example_passes_grammar_and_presence_rules() {
 }
 
 #[test]
-fn build_on_an_app_program_reports_the_honest_guard() {
-    // No pretending: dynamic app builds are not implemented in S2, and
-    // the CLI says exactly that instead of silently ignoring the app.
+fn build_on_an_spa_app_reports_the_honest_e3071_guard() {
+    // No pretending: tasks_app.kin declares `navigation spa` (S7) and
+    // forms/fields (S9) — the S6 runtime rejects exactly that, naming
+    // the roadmap step, instead of emitting a dist it cannot honor.
     let dir = tempdir("appguard");
     let out = kinn(&[
         "build",
@@ -352,8 +353,54 @@ fn build_on_an_app_program_reports_the_honest_guard() {
     ]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("building dynamic apps is not implemented yet"));
-    assert!(stderr.contains("app (\"TaskTrack\")"));
+    assert!(stderr.contains("E3071"), "stderr: {}", stderr);
+    assert!(stderr.contains("spa"));
+}
+
+#[test]
+fn build_on_an_mpa_app_generates_the_dynamic_dist() {
+    // The S6 deliverable: an MPA app builds a real dist — semantic HTML
+    // skeleton per page + the runtime + the generated app.js.
+    let dir = tempdir("appbuild");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/todo_app.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("built web app \"Todo\" (2 pages, MPA)"));
+    assert!(stdout.contains("index.html"));
+    assert!(stdout.contains("app.js"));
+    assert!(stdout.contains("kinnrt.js"));
+    let index = std::fs::read_to_string(format!("{}/index.html", dir.display())).unwrap();
+    assert!(index.contains("data-kpage=\"Home\""));
+    assert!(index.contains("<script src=\"kinnrt.js\" defer></script>"));
+    let about = std::fs::read_to_string(format!("{}/about.html", dir.display())).unwrap();
+    assert!(about.contains("data-kpage=\"About\""));
+    let appjs = std::fs::read_to_string(format!("{}/app.js", dir.display())).unwrap();
+    assert!(appjs.contains("K.mount("));
+    assert!(appjs.contains("app:Home:click:0"));
+    let rt = std::fs::read_to_string(format!("{}/kinnrt.js", dir.display())).unwrap();
+    assert!(rt.contains("KinnRT"));
+    // Deterministic rebuild: byte-identical dist.
+    let dir2 = tempdir("appbuild2");
+    kinn(&[
+        "build",
+        &format!("{}/web/todo_app.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        dir2.to_str().unwrap(),
+    ]);
+    for f in ["index.html", "about.html", "app.js", "kinnrt.js", "styles.css"] {
+        let a = std::fs::read(format!("{}/{}", dir.display(), f)).unwrap();
+        let b = std::fs::read(format!("{}/{}", dir2.display(), f)).unwrap();
+        assert_eq!(a, b, "dist file {} differs across rebuilds", f);
+    }
 }
 
 #[test]

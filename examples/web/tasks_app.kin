@@ -18,10 +18,11 @@
 // Since S4 the app also LOWERS: `Compiled.app` carries the
 // position-free AppModel (component templates, the binding graph with
 // exact static dependency sets, handler KIR function names, routes,
-// animations, store keys). Building dynamic apps (runtime, routing,
-// forms, persistence) arrives with the later 0.4.0 steps — run
-// `kinn build` on it today and it says so honestly (web: the honest
-// guard; android: E3070) instead of pretending.
+// animations, store keys). Since S5+S6 dynamic apps BUILD for real on
+// the web target — this one still declines honestly: it declares
+// `navigation spa` (S7) and uses `form`/`field` + store builtins
+// (S9), so `kinn build` reports E3071 naming the roadmap step. See
+// todo_app.kin for the runnable MPA surface. Android stays E3070.
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin

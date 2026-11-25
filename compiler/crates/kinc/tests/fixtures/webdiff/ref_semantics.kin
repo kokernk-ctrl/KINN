@@ -1,0 +1,17 @@
+// Synthesized edge cases: array reference semantics (ADR-0014).
+*mode = S;
+
+func mutate(xs: [int]) {
+    xs[0] = 99;
+}
+
+func main() {
+    fin a = [1, 2, 3];
+    fin b = a;
+    mutate(b);
+    print(a);    // [99, 2, 3] — mutation is visible through every binding
+    print(b);    // [99, 2, 3]
+    fin nested = [[1], [2]];
+    nested[0][0] = 7;
+    print(nested); // [[7], [2]]
+}

@@ -14,6 +14,7 @@ import { detectMode, quickCheck } from './diagnostics/checks';
 import { backend, type BuildResult, type OutputFile } from './wasm/kinnwasm';
 import { defaultStorage, parseProject } from './storage/storage';
 import { buildPreviewHtml, downloadZip, htmlPages } from './build/preview';
+import { isConsoleEnvelope, isRuntimeErrorEnvelope, runtimeErrorProblem } from './build/preview-events';
 import { zipFiles } from './build/zip';
 
 import helloSample from '../samples/hello.kin?raw';
@@ -147,6 +148,7 @@ function onBuildResult(result: BuildResult, target: 'web' | 'android'): void {
 }
 
 function showPreview(files: OutputFile[]): void {
+  problems.clearRuntime();
   const select = $('preview-page') as HTMLSelectElement;
   const path = select.value || htmlPages(files)[0]?.path;
   if (!path) return;
@@ -157,10 +159,27 @@ $('preview-page').addEventListener('change', () => {
   if (lastWebBuild) showPreview(lastWebBuild.files);
 });
 
-// The previewed page posts a message when an internal link/button is
-// clicked; switch the previewed page instead of fetching a relative URL.
+// The previewed page posts messages: navigation switches the previewed
+// page, and dynamic apps (0.4.0 S6, C.7) post runtime errors (→ the
+// Problems panel) and forwarded console output (→ the terminal).
 window.addEventListener('message', (e: MessageEvent) => {
-  const msg = e.data as { kinnPreviewNav?: boolean; page?: string };
+  const data = e.data as unknown;
+  if (isRuntimeErrorEnvelope(data)) {
+    problems.appendRuntime(runtimeErrorProblem(data));
+    terminal.print(
+      `runtime ${data.kinnRuntimeError.code}: ${data.kinnRuntimeError.message}` +
+        ` (${data.kinnRuntimeError.kinFile || 'app'}:${data.kinnRuntimeError.kinLine})`,
+      'err',
+    );
+    return;
+  }
+  if (isConsoleEnvelope(data)) {
+    const cls =
+      data.kinnConsole.level === 'error' ? 'err' : data.kinnConsole.level === 'warn' ? 'warn' : 'out';
+    terminal.print(`preview ${data.kinnConsole.level}: ${data.kinnConsole.text}`, cls);
+    return;
+  }
+  const msg = data as { kinnPreviewNav?: boolean; page?: string };
   if (!msg || !msg.kinnPreviewNav || !msg.page || !lastWebBuild) return;
   const select = $('preview-page') as HTMLSelectElement;
   if (select.querySelector(`option[value="${msg.page}"]`)) {

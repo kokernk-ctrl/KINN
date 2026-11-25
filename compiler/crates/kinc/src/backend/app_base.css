@@ -1,0 +1,143 @@
+:root {
+  --kinn-bg: #fdfdfc;
+  --kinn-ink: #191c1f;
+  --kinn-muted: #5c646b;
+  --kinn-accent: #d95400;
+  --kinn-accent-ink: #ffffff;
+  --kinn-line: #e4e2de;
+  --kinn-card: #f6f5f3;
+  --kinn-radius: 10px;
+  --kinn-max: 46rem;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.6;
+  color: var(--kinn-ink);
+  background: var(--kinn-bg);
+}
+
+.kinn-skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--kinn-accent);
+  color: var(--kinn-accent-ink);
+  padding: 0.5rem 1rem;
+  border-radius: 0 0 var(--kinn-radius) 0;
+}
+.kinn-skip:focus { left: 0; z-index: 10; }
+
+.kinn-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--kinn-line);
+}
+.kinn-site {
+  font-weight: 700;
+  font-size: 1.15rem;
+  text-decoration: none;
+  color: var(--kinn-ink);
+}
+.kinn-header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+.kinn-header nav a {
+  color: var(--kinn-muted);
+  text-decoration: none;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+.kinn-header nav a:hover { color: var(--kinn-ink); background: var(--kinn-card); }
+.kinn-header nav a[aria-current="page"] {
+  color: var(--kinn-accent);
+  font-weight: 600;
+}
+
+.kinn-main {
+  max-width: var(--kinn-max);
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+.kinn-main h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1.25rem; }
+.kinn-main h2 { font-size: 1.35rem; margin: 2rem 0 0.75rem; }
+.kinn-main p { margin: 0.75rem 0; }
+.kinn-main img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--kinn-radius);
+  margin: 1rem 0;
+}
+.kinn-main hr { border: 0; border-top: 1px solid var(--kinn-line); margin: 2rem 0; }
+
+.kinn-actions { margin: 1.5rem 0; }
+.kinn-button {
+  display: inline-block;
+  background: var(--kinn-accent);
+  color: var(--kinn-accent-ink);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--kinn-radius);
+  border: 0;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.kinn-button:hover { filter: brightness(1.08); }
+.kinn-button:active { filter: brightness(0.95); }
+.kinn-link { color: var(--kinn-accent); }
+
+/* -- dynamic app rules (S6) ------------------------------------------ */
+
+/* `when` visibility patches: hidden branches stay in the DOM. */
+.kinn-when[data-off="1"] { display: none; }
+
+/* `each` lists render as plain block containers. */
+.kinn-each { display: block; }
+.kinn-each > * { margin: 0.5rem 0; }
+
+/* inputs bound to state fields. */
+.kinn-input {
+  font: inherit;
+  color: var(--kinn-ink);
+  background: var(--kinn-card);
+  border: 1px solid var(--kinn-line);
+  border-radius: var(--kinn-radius);
+  padding: 0.5rem 0.75rem;
+  max-width: 100%;
+}
+.kinn-input:focus-visible {
+  outline: 3px solid var(--kinn-accent);
+  outline-offset: 1px;
+}
+
+.kinn-footer {
+  border-top: 1px solid var(--kinn-line);
+  color: var(--kinn-muted);
+  padding: 1rem 1.25rem 2rem;
+  text-align: center;
+}
+.kinn-footer a { color: inherit; }
+
+/* Visible focus for keyboard users, everywhere. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+.kinn-skip:focus-visible {
+  outline: 3px solid var(--kinn-accent);
+  outline-offset: 2px;
+}

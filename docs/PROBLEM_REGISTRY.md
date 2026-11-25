@@ -60,3 +60,21 @@ release that fixed them. This registry is the source for GitHub issues.
 | F-017 | 0.4.0 | P-028: website diagnostics carried the wrong filename in multi-file programs. The pass-0 loop leaves `c.file` at the last project file before `check_website` runs, so every website diagnostic (E3030–E3036 incl. E3032's explicit `file` field, W3035–W3037) was attributed to the last imported module — an entry-file E3032 rendered under `lib.kin`. **Fixed**: the checker restores the entry path before `check_website`, mirroring the app path that S3 slice 1 already had; single-file programs are unchanged (the entry path is the only path). Multi-file regression test asserts file/line/col/len for E3032 and file/line for W3035; **no existing test froze the buggy attribution** (the only other multi-file website test asserts E3037, emitted inside the pass-0 loop itself with correct per-unit attribution). Authorized gate exception per the architect: the "website checking untouched" gate means no regressions, not no bug fixes. 0.3 web dist rebuilt byte-identical |
 | F-018 | 0.4.0 | P-029: no diagnostic code existed for unknown app pages, duplicate app page names or duplicate component names. **Assigned in slice 2 per the architect ruling (2026-11-22)**: the free E3063–E3069 span, with **E3066–E3069 reserved**. **E3063** "unknown app page target" fires at every page-target position — `route "x" -> Missing`, `not_found Missing`, and `open <Page>` on buttons/links in page and component views (nested `when`/`otherwise`/`each`/`form` bodies included); app-scoped sibling of E3032, never reusing it (E3032 is website-scoped and frozen, ADR-0011); hint lists declared pages, and a target naming a component says "'X' is a component; routes target pages". **E3064** duplicate page name, case-insensitive (mirrors E3031 — slugs are lowercased). **E3065** duplicate component name, case-sensitive (identifier semantics, matching function names). Pages and components are **separate namespaces** — a page and a component may share a name (use-site position disambiguates); documented in B.11 + LANGUAGE_SPEC §C2. A MPA `not_found` rejected by E3057 is not further resolved (invalid declarations are not further checked). 12 new tests (10 checker + 2 CLI): every code positive + negative, positions and hints asserted |
 | F-019 | 0.4.0 | ADR-0029 rename needed a diagnostic code: `let` → `fin` is intentionally breaking, so legacy sources must get a positioned migration hint, not a generic syntax error. **Assigned (2026-11-23)**: **E2017** — the first free parser code (0.1/0.2 own E2001–E2015 and E2099; 0.3 owns E2016 and E2030; the app grammar owns E2031–E2039, and E2016–E2029 stayed free between the 0.2 and 0.3 blocks). E2017 fires on the legacy declaration shape only (statement-position `let` immediately followed by an identifier); the declaration then parses as `fin` so each use reports exactly once (no cascade). Outside that pattern `let` is a plain identifier (word-stays-identifier gate). Registered in LANGUAGE_SPEC §C2 + §C1a; frozen by lexer/parser/checker/CLI tests; error corpus gains `examples/errors/legacy_let.kin`. The A2 backwards-compatibility clause is superseded for this keyword only (ADR-0029) |
+
+## P-031 (resolved 2026-11-25) — corrupted anchor selector in the Studio preview interceptor
+
+**Symptom.** The preview's injected navigation interceptor called
+`closest("aref]")` — an invalid selector that throws a DOMException on
+every click inside a real browser, silently breaking in-preview
+navigation for both static and dynamic builds. A regression test
+*pinned the corrupted literal* while its DOM-validity guard only ran
+under the node environment (where `document` is undefined and the
+check is skipped), so the suite stayed green.
+
+**Root cause.** A hand-edit corrupted the selector; the test was
+written to match the corrupted state instead of the contract (the
+comment even described `"aref]"` as the invalid example).
+
+**Fix.** `a[href]` restored (studio/src/build/preview.ts); the pin now
+asserts the valid literal and the validity guard runs in jsdom. Found
+while wiring the S6 dynamic preview, which needs working navigation.

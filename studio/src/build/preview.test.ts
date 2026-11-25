@@ -63,7 +63,7 @@ describe('buildPreviewHtml', () => {
   });
 
   // Regression: the injected interceptor must target anchors with a
-  // VALID selector. A corrupted selector (e.g. "aref]") would throw a
+  // VALID selector. A corrupted selector (e.g. a broken literal) would throw a
   // DOMException on every click and break in-preview navigation while
   // the build itself kept passing — this pins the exact selector.
   it('uses a valid anchor selector in the navigation interceptor', () => {

@@ -1,0 +1,13 @@
+// Synthesized edge cases: unicode strings across both engines.
+*mode = S;
+
+func main() {
+    fin s = "hï𐐀ßİ";
+    print(len(s));
+    fin m = " a b ";
+    print(m + "!");
+    print(s == "hï𐐀ßİ");
+    fin arr = ["é", "è"];
+    print(arr);
+    print("tab\tand\nnewline");
+}

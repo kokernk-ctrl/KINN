@@ -1,0 +1,33 @@
+// runtime-error: E4001
+
+// examples/errors/app_div_zero.kin — an app whose handler fails at
+// runtime with E4001 (division by zero).
+//
+// Used to verify the S6 error pipeline end to end: the kinnrt.js helper
+// throws the Kin-level error with the source line, the Reporter wraps it
+// in the {kinnRuntimeError: {code, message, kinFile, kinLine}} envelope,
+// and KINN Studio surfaces it in the Problems panel (C.7).
+//
+// Build:  kinn build examples/errors/app_div_zero.kin --target web
+// Run:    open the dist, click "Explode" — the browser reports
+//         [E4001] division by zero (line 27).
+
+*mode = B;
+
+app "Divider" {
+    navigation mpa
+
+    state { total: int = 10 parts: int = 0 }
+
+    page Home {
+        title "Divider"
+        text "Click the button to divide by zero."
+
+        button "Explode" {
+            on click {
+                parts = 0;
+                total = total / parts;
+            }
+        }
+    }
+}

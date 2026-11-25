@@ -11,7 +11,7 @@
 //! `Return` can simply truncate back to the frame's base after popping the
 //! return value.
 
-use crate::kir::{CastTarget, Instr, Module, NativeId};
+use crate::kir::{CastTarget, Instr, Module, NativeId, ValKind};
 use crate::value::Value;
 use std::cell::RefCell;
 use std::fmt;
@@ -106,6 +106,16 @@ pub fn run(module: &Module, out: &mut dyn std::io::Write) -> Result<(), KinError
                         let mut s = x;
                         s.push_str(&y);
                         stack.push(Value::Str(s));
+                    }
+                    // 0.4.0 S5 (B.10): array concatenation — a fresh array,
+                    // per the checker's app-scope rule. The checker only
+                    // types `array + array` inside `app` programs, so
+                    // console programs can never reach this arm and the
+                    // 0.2 console semantics are unchanged.
+                    (Value::Array(x), Value::Array(y)) => {
+                        let mut v = x.borrow().clone();
+                        v.extend(y.borrow().iter().cloned());
+                        stack.push(Value::Array(Rc::new(RefCell::new(v))));
                     }
                     (a, b) => return Err(internal("Add", &a, &b, line)),
                 }
@@ -397,7 +407,100 @@ fn exec_native(id: NativeId, stack: &mut Vec<Value>, line: u32) -> Result<Value,
                 (a, b) => Err(internal("max", &a, &b, line)),
             }
         }
+        // 0.4.0 S5 (B.10 string helpers). The checker resolves these
+        // names only in `app` scope, so a console program can never
+        // emit the instructions; the arms exist for the app code
+        // generator and the differential corpus.
+        NativeId::Str => {
+            let v = stack.pop().expect("vm bug: str underflow");
+            match v {
+                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Str(_) => {
+                    Ok(Value::Str(v.format()))
+                }
+                v => Err(internal("str", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Upper => {
+            let v = stack.pop().expect("vm bug: upper underflow");
+            match v {
+                Value::Str(s) => Ok(Value::Str(case_map(&s, true))),
+                v => Err(internal("upper", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Lower => {
+            let v = stack.pop().expect("vm bug: lower underflow");
+            match v {
+                Value::Str(s) => Ok(Value::Str(case_map(&s, false))),
+                v => Err(internal("lower", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Trim => {
+            let v = stack.pop().expect("vm bug: trim underflow");
+            match v {
+                Value::Str(s) => Ok(Value::Str(s.trim().to_string())),
+                v => Err(internal("trim", &v, &Value::Unit, line)),
+            }
+        }
+        NativeId::Contains => {
+            let (a, b) = pop2(stack);
+            match (a, b) {
+                (Value::Str(s), Value::Str(sub)) => Ok(Value::Bool(s.contains(&sub))),
+                (a, b) => Err(internal("contains", &a, &b, line)),
+            }
+        }
+        NativeId::Split => {
+            let (a, b) = pop2(stack);
+            match (a, b) {
+                (Value::Str(s), Value::Str(sep)) => {
+                    let pieces: Vec<Value> = if sep.is_empty() {
+                        s.chars().map(|c| Value::Str(c.to_string())).collect()
+                    } else {
+                        s.split(sep.as_str()).map(|p| Value::Str(p.to_string())).collect()
+                    };
+                    Ok(Value::Array(Rc::new(RefCell::new(pieces))))
+                }
+                (a, b) => Err(internal("split", &a, &b, line)),
+            }
+        }
+        NativeId::Join => {
+            let (a, b) = pop2(stack);
+            match (a, b) {
+                (Value::Array(arr), Value::Str(sep)) => {
+                    let parts: Vec<String> = arr
+                        .borrow()
+                        .iter()
+                        .map(|v| match v {
+                            Value::Str(s) => s.clone(),
+                            v => {
+                                // The checker guarantees [string]; this
+                                // arm exists for hand-built KIR honesty.
+                                v.format()
+                            }
+                        })
+                        .collect();
+                    Ok(Value::Str(parts.join(&sep)))
+                }
+                (a, b) => Err(internal("join", &a, &b, line)),
+            }
+        }
     }
+}
+
+/// One-to-one Unicode case mapping: each code point whose case mapping
+/// expands to several characters keeps its original form (no expansion —
+/// deterministic and portable across engines; the JS runtime implements
+/// the identical rule).
+fn case_map(s: &str, to_upper: bool) -> String {
+    s.chars()
+        .map(|c| {
+            let mapped: String = if to_upper {
+                c.to_uppercase().collect()
+            } else {
+                c.to_lowercase().collect()
+            };
+            if mapped.chars().count() == 1 { mapped } else { c.to_string() }
+        })
+        .collect()
 }
 
 fn as_num_pair(op: &str, a: Value, b: Value, line: u32) -> Result<NumPair, KinError> {
@@ -452,7 +555,15 @@ mod tests {
     }
 
     fn func(name: &str, nparams: u16, nlocals: u16, code: Vec<Instr>, lines: Vec<u32>) -> FuncDef {
-        FuncDef { name: name.to_string(), nparams, nlocals, code, lines }
+        FuncDef {
+            name: name.to_string(),
+            nparams,
+            nlocals,
+            code,
+            lines,
+            param_kinds: Vec::new(),
+            ret_kind: ValKind::Unit,
+        }
     }
 
     /// Build a `main`-only module from `code` plus the epilogue.
@@ -824,5 +935,107 @@ mod tests {
             Instr::Print,
         ]);
         assert_eq!(run_module(&m).unwrap(), format!("{}\n", i64::MAX));
+    }
+
+    // -- 0.4.0 S5: array concatenation and the B.10 string helpers ------
+
+    #[test]
+    fn array_concat_makes_a_fresh_array() {
+        let a = Value::Array(Rc::new(RefCell::new(vec![Value::Int(1)])));
+        let b = Value::Array(Rc::new(RefCell::new(vec![Value::Int(2)])));
+        let m = module(vec![
+            Instr::Const(a.clone()),
+            Instr::Const(b.clone()),
+            Instr::Add,
+            Instr::Print,
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "[1, 2]\n");
+        // The operands are untouched (fresh result, not a mutation).
+        assert_eq!(a.format(), "[1]");
+        assert_eq!(b.format(), "[2]");
+    }
+
+    #[test]
+    fn str_native_formats_like_print() {
+        let m = module(vec![
+            Instr::Const(Value::Float(2.0)),
+            Instr::Native(NativeId::Str),
+            Instr::Print, // 2.0
+            Instr::Const(Value::Int(-7)),
+            Instr::Native(NativeId::Str),
+            Instr::Print, // -7
+            Instr::Const(Value::Bool(false)),
+            Instr::Native(NativeId::Str),
+            Instr::Print, // false
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "2.0\n-7\nfalse\n");
+    }
+
+    #[test]
+    fn upper_lower_are_one_to_one() {
+        let m = module(vec![
+            Instr::Const(Value::Str("Kin Ä ß 𐐨".to_string())),
+            Instr::Native(NativeId::Upper),
+            Instr::Print, // KIN Ä ß 𐐀 (ß expands, stays; 𐐨 maps 1:1)
+            Instr::Const(Value::Str("İNFO".to_string())),
+            Instr::Native(NativeId::Lower),
+            Instr::Print, // İnfo (İ expands, stays; NFO lower)
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "KIN Ä ß 𐐀\nİnfo\n");
+    }
+
+    #[test]
+    fn trim_uses_unicode_whitespace_not_bom() {
+        let m = module(vec![
+            Instr::Const(Value::Str(" \u{a0}x\u{feff}\t".to_string())),
+            Instr::Native(NativeId::Trim),
+            Instr::Print, // "x\u{feff}" — U+FEFF is not White_Space
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "x\u{feff}\n");
+    }
+
+    #[test]
+    fn split_empty_separator_yields_code_points() {
+        let m = module(vec![
+            Instr::Const(Value::Str("hï".to_string())),
+            Instr::Const(Value::Str(String::new())),
+            Instr::Native(NativeId::Split),
+            Instr::Print, // [h, ï]
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "[h, ï]\n");
+    }
+
+    #[test]
+    fn split_keeps_empty_pieces_and_join_round_trips() {
+        let m = module(vec![
+            Instr::Const(Value::Str("a,,b".to_string())),
+            Instr::Const(Value::Str(",".to_string())),
+            Instr::Native(NativeId::Split),
+            Instr::Print, // [a, , b]
+        ]);
+        assert_eq!(run_module(&m).unwrap(), "[a, , b]\n");
+    }
+
+    #[test]
+    fn contains_and_join_work() {
+        let m = module_nl(
+            vec![
+                Instr::Const(Value::Str("Kin".to_string())),
+                Instr::Const(Value::Str("in".to_string())),
+                Instr::Native(NativeId::Contains),
+                Instr::Print, // true
+                Instr::Const(Value::Str("a".to_string())),
+                Instr::Const(Value::Str("b".to_string())),
+                Instr::Const(Value::Str("c".to_string())),
+                Instr::ArrNew(3),
+                Instr::Store(0),
+                Instr::Load(0),
+                Instr::Const(Value::Str("-".to_string())),
+                Instr::Native(NativeId::Join),
+                Instr::Print, // a-b-c
+            ],
+            1,
+        );
+        assert_eq!(run_module(&m).unwrap(), "true\na-b-c\n");
     }
 }

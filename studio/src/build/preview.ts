@@ -1,7 +1,8 @@
 /**
  * In-Studio preview of a generated web build.
  *
- * The generated dist is a plain multi-page site. To preview it inside
+ * The generated dist is a plain multi-page site — static (0.3) or
+ * dynamic (0.4 S6: kinnrt.js + app.js). To preview it inside
  * Studio (which has no filesystem), each page is rendered
  * self-contained: the stylesheet and the generated app.js are inlined
  * and internal navigation is intercepted, so clicking a link or button
@@ -33,6 +34,7 @@ export function buildPreviewHtml(files: OutputFile[], pagePath: string): string 
   const page = files.find((f) => f.path === pagePath);
   if (!page) throw new Error(`no generated page named '${pagePath}'`);
   const css = files.find((f) => f.path === 'styles.css')?.content ?? '';
+  const rt = files.find((f) => f.path === 'kinnrt.js')?.content ?? '';
   const js = files.find((f) => f.path === 'app.js')?.content ?? '';
 
   let html = page.content;
@@ -40,6 +42,15 @@ export function buildPreviewHtml(files: OutputFile[], pagePath: string): string 
     html = html.replace(
       /<link rel="stylesheet" href="styles.css">/,
       `<style>\n${css}\n</style>`,
+    );
+  }
+  // Dynamic apps only: the runtime loads before the generated module
+  // (which reads globalThis.KinnRT at its IIFE call). Static 0.3 sites
+  // have no kinnrt.js tag and are untouched.
+  if (rt) {
+    html = html.replace(
+      /<script src="kinnrt\.js" defer><\/script>/,
+      `<script>\n${rt}\n</script>`,
     );
   }
   if (js) {

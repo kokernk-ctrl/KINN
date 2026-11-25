@@ -1,0 +1,25 @@
+// Synthesized edge cases: sibling scopes reuse slots (P-003); the type
+// analysis must join, not assert.
+*mode = S;
+
+func pick(f: bool) -> float {
+    if f {
+        var t = 1;
+        print(t);
+    } else {
+        var u = 2.5;
+        print(u);
+    }
+    return 3.5;
+}
+
+func main() {
+    print(pick(true));
+    print(pick(false));
+    if 1 < 2 {
+        var t = "str";
+        print(t);
+    }
+    var t = 7;
+    print(t);
+}

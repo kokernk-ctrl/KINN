@@ -363,39 +363,69 @@ fn build_command(args: &[String]) -> ExitCode {
         }
     };
 
-    let site = match &compiled.site {
-        Some(s) => s,
-        None => {
-            if let Some(app) = &compiled.app {
-                // E3070 (C.9): the android target consumes a SiteModel —
-                // an app program never silently passes through it as if
-                // dynamic application support existed.
-                if target == "android" {
-                    let err = kinc::backend::android_gate(compiled.site.as_ref(), Some(app))
-                        .expect_err("an app program is always rejected for android");
-                    eprintln!("error[{}]: {}", err.code, err.message);
-                    if let Some(h) = &err.hint {
-                        eprintln!("hint: {}", h);
-                    }
-                    return ExitCode::from(1);
+    // App programs: the dynamic web dist (0.4.0 S6) — the android gate
+    // stays (E3070, C.9).
+    if compiled.site.is_none() {
+        if let Some(app) = &compiled.app {
+            if target == "android" {
+                let err = kinc::backend::android_gate(compiled.site.as_ref(), Some(app))
+                    .expect_err("an app program is always rejected for android");
+                eprintln!("error[{}]: {}", err.code, err.message);
+                if let Some(h) = &err.hint {
+                    eprintln!("hint: {}", h);
                 }
-                eprintln!(
-                    "error: `{}` declares an app (\"{}\"), but building dynamic apps is not implemented yet",
-                    file, app.name
-                );
-                eprintln!(
-                    "  the 0.4.0 dynamic pipeline is under construction (S4 lowering is in; KIR→JS/runtime arrive next);"
-                );
-                eprintln!("  the {} target currently builds `website` declarations — see docs/BACKEND_WEB.md", target);
                 return ExitCode::from(1);
             }
-            eprintln!(
-                "error: `{}` declares no `website`; the {} target builds website declarations",
-                file, target
+            let entry_dir = Path::new(&file)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            let out_dir = out
+                .map(PathBuf::from)
+                .unwrap_or_else(|| entry_dir.join("build").join("web"));
+            let generated = match kinc::backend::webapp::generate_app(app, &compiled.module, &file) {
+                Ok(files) => {
+                    let mut files = files;
+                    copy_assets(&entry_dir, &out_dir, &mut files);
+                    files
+                }
+                Err(d) => {
+                    eprint!("{}", render_diags(&[d], Some(&compiled), src.as_str(), &file));
+                    return ExitCode::from(1);
+                }
+            };
+            if let Err(e) = write_files(&generated, &out_dir) {
+                eprintln!("error: cannot write output: {}", e);
+                return ExitCode::from(2);
+            }
+            println!(
+                "built web app \"{}\" ({} page{}, MPA) → {}{}",
+                app.name,
+                app.pages.len(),
+                if app.pages.len() == 1 { "" } else { "s" },
+                out_dir.display(),
+                project_note,
             );
-            eprintln!("  see docs/BACKEND_WEB.md for the web module syntax");
-            return ExitCode::from(1);
+            for f in &generated {
+                println!("  {} ({} B)", f.path, f.data.len());
+            }
+            println!(
+                "open {}/index.html in a browser — it needs JavaScript enabled (the dynamic runtime)",
+                out_dir.display()
+            );
+            return ExitCode::SUCCESS;
         }
+        eprintln!(
+            "error: `{}` declares no `website` and no `app`; the {} target builds website or app declarations",
+            file, target
+        );
+        eprintln!("  see docs/BACKEND_WEB.md for the web module syntax");
+        return ExitCode::from(1);
+    }
+
+    let site = match &compiled.site {
+        Some(s) => s,
+        None => unreachable!("app programs returned above"),
     };
     if compiled.module.find("main").is_some() {
         eprintln!("note: `func main()` is not part of the {} build (it runs on the VM with `kinn run`).", target);

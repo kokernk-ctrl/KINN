@@ -1,0 +1,91 @@
+// examples/web/todo_app.kin — the 0.4.0 S6 dynamic app demo (MPA).
+//
+// A todo list as a multi-page dynamic application: state, a computed
+// value, `each` with keys, `when` branches, an input bound to state and
+// click/input handlers. Runs in any browser with JavaScript enabled; the
+// compiled dist is plain HTML + CSS + the 16 KB kinnrt.js runtime +
+// generated app.js (KIR-JS functions + manifest).
+//
+// Build:  kinn build examples/web/todo_app.kin --target web
+//         → build/web/ (index.html, done.html, styles.css, app.js, kinnrt.js)
+//
+// Scope note (honest): forms/fields, stores and route params are later
+// 0.4.0 steps (S9/S7) — this demo uses the S6 surface only.
+
+*mode = B;
+
+func remaining_count(items: [string], done: [bool]) -> int {
+    var n = 0;
+    var i = 0;
+    while i < len(items) {
+        if done[i] {
+            n = n + 1;
+        }
+        i = i + 1;
+    }
+    return len(items) - n;
+}
+
+app "Todo" {
+    navigation mpa
+
+    theme {
+        accent "#2563eb"
+        radius "8px"
+        max_width "560px"
+    }
+
+    state {
+        items: [string] = []
+        done: [bool] = []
+        draft: string = ""
+    }
+
+    computed remaining = remaining_count(items, done)
+    computed total = len(items)
+
+    page Home {
+        title "Todo"
+        heading "Things to do"
+
+        text "Open: " + str(remaining) + " of " + str(total)
+
+        input bind draft {
+            on input { draft = event_value; }
+        }
+
+        button "Add" {
+            on click {
+                if len(draft) > 0 {
+                    items = items + [draft];
+                    done = done + [false];
+                    draft = "";
+                }
+            }
+        }
+
+        when total == 0 {
+            text "Nothing here yet — add your first task above."
+        }
+
+        each items as item key item {
+            text item
+        }
+
+        when remaining == 0 {
+            text "All done!"
+        }
+        otherwise {
+            text "Keep going."
+        }
+
+        link "About this app" open About
+    }
+
+    page About {
+        title "About"
+        heading "About Todo"
+        text "Built with the KINN 0.4.0 dynamic web backend: one Kin source, a static semantic HTML skeleton per page, and the kinnrt.js runtime driving state, bindings and events."
+        link "Back to the list" open Home
+    }
+}

@@ -1,0 +1,15 @@
+// Synthesized edge cases: deep structural equality with nesting.
+*mode = S;
+
+func main() {
+    fin a = [[1, 2], [3, 4]];
+    fin b = [[1, 2], [3, 4]];
+    fin c = [[1, 2], [3, 5]];
+    print(a == b);      // true — deep, distinct allocations
+    print(a == c);      // false
+    print(a != c);      // true
+    print(len(a));
+    print(a[1][0]);     // 3
+    fin strs = ["ab", "cd"];
+    print(strs == ["ab", "cd"]);
+}

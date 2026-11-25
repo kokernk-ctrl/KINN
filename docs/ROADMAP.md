@@ -163,14 +163,19 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       emission waits for the runtime ABI — the manifest contract is
       S6's (C.2); the AppModel carries the KIR names, association,
       ordering and bodies)
-- [ ] S5 KIR → JS codegen with differential testing against kinrt
-- [ ] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
-      lifecycle) — dependency-free, ≤ 16 KB, no frameworks. Playwright
-      browser harness (D5, owner-confirmed 2026-11-22) is proposed to
-      land here: a CI-only dev dependency driving the S6 todo app
-      headlessly; if runner flakiness would break green steps it parks
-      as a manual log until S11, where the browser gate (D.2) is
-      mandatory
+- [x] S5 KIR → JS codegen with differential testing against kinrt
+      (DONE 2026-11-25: webkir.rs + the minified 16 KB kinnrt.js value
+      helpers; corpus = examples/errors/modules/ISA fixtures/app ABI
+      drivers, stdout + error lines byte-identical under Node)
+- [x] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
+      lifecycle) — dependency-free, ≤ 16 KB, no frameworks (DONE
+      2026-11-25: kinnrt.js ships at 16.2 KB minified via the built-in
+      deterministic minifier; the MPA dist + CLI/FFI wiring + Studio
+      preview/Problems/terminal integration landed together; coverage
+      is the jsdom vitest suite + the wasm-backend e2e todo app — the
+      Playwright harness (D5) deliberately did NOT land here, keeping
+      CI free of browser-runner flakiness; it parks until S11, where
+      the browser gate (D.2) is mandatory)
 - [ ] S7 SPA router + MPA hydration/stores; dynamic route params,
       not-found, honest `file://` fallback
 - [ ] S8 Animations (declarative whitelist → generated CSS)

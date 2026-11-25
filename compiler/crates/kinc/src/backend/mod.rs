@@ -8,6 +8,8 @@
 
 pub mod android;
 pub mod web;
+pub mod webapp;
+pub mod webkir;
 
 use crate::appmodel::AppModel;
 use crate::diagnostics::Diagnostic;

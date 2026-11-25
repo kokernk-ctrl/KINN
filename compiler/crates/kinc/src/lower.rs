@@ -261,6 +261,23 @@ fn lower_func(
         nlocals: fl.max_slots,
         code: fl.code,
         lines: fl.lines,
+        param_kinds: f.params.iter().map(|p| val_kind(&p.ty)).collect(),
+        ret_kind: val_kind(&f.ret),
+    }
+}
+
+/// Map a declared Kin type to the runtime's static value kind. The
+/// JS code generator (S5) seeds its type analysis from this; the VM
+/// ignores it. `Error` never survives the checker.
+fn val_kind(t: &Type) -> kinrt::kir::ValKind {
+    match t {
+        Type::Int => kinrt::kir::ValKind::Int,
+        Type::Float => kinrt::kir::ValKind::Float,
+        Type::Bool => kinrt::kir::ValKind::Bool,
+        Type::Str => kinrt::kir::ValKind::Str,
+        Type::Void => kinrt::kir::ValKind::Unit,
+        Type::Array(e) => kinrt::kir::ValKind::Array(Box::new(val_kind(e))),
+        Type::Error => kinrt::kir::ValKind::Any,
     }
 }
 

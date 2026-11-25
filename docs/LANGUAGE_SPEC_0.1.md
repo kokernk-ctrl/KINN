@@ -820,6 +820,24 @@ E3045, duplicate handlers for one event name on one element are
 E3046 (compared by the word after `on`; key filters do not
 disambiguate), and `while` inside a handler warns W3040 (legal,
 never fatal). **Slice 5 completes the app semantics** (the §C2
+
+**S5+S6 execution (2026-11-25).** The app surface above now *executes*
+on the web target: `kinn build --target web` emits the MPA dist
+(semantic HTML skeleton per page, styles.css, generated app.js =
+manifest + KIR-JS functions, and kinnrt.js — the 16 KB zero-dependency
+reactive runtime). The B.10 string helpers and `array + array`
+concatenation are implemented in both engines (VM natives + JS
+helpers) with identical, differentially-tested semantics (§C2 rulings:
+1:1 case mapping without expansion; the Rust `White_Space` trim set;
+code-point `len`; empty separator splits code points). The app-scope
+builtins `param()`, `store_save/store_load/store_clear`, `json_of`,
+`save_json`, and the `form_valid`/`field_errors` event builtins are
+**E3071** on the web target (S7/S9 scope, named in the hint) — as is
+`navigation spa` (S7) and any `form`/`field` element (S9). Handler
+ABI: params are the read-or-written state fields (sorted) plus the
+event builtins used (`event_value`, `event_key`, `event_x`,
+`event_y`), and the return value is the write-back array; runtime
+errors surface with the Kin source line (§C7 envelopes).
 slice-5 rulings): computed dependency cycles are E3044 (computed
 values type in dependency order — forward references no longer
 poison), component recursion is E3053, the 32-level composition cap

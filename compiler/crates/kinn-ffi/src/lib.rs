@@ -417,11 +417,29 @@ pub unsafe extern "C" fn kinn_build_web(src_ptr: *const u8, src_len: usize, entr
                     let files = kinc::backend::web::generate(&site);
                     build_result_json(true, Some(&site), &files, &diags, &sources, mode)
                 }
-                None => {
-                    let mut ds = diags.clone();
-                    ds.push(no_site_diagnostic());
-                    build_result_json(false, None, &[], &ds, &sources, mode)
-                }
+                None => match &c.app {
+                    // 0.4.0 S6: dynamic MPA apps build for real; the
+                    // honest E3071 scope gates (spa/forms/host-builtins)
+                    // report inside `generate_app`.
+                    Some(app) => {
+                        let entry = if entry.is_empty() { "main.kin".to_string() } else { entry.clone() };
+                        match kinc::backend::webapp::generate_app(app, &c.module, &entry) {
+                            Ok(files) => {
+                                build_result_json(true, None, &files, &diags, &sources, mode)
+                            }
+                            Err(d) => {
+                                let mut ds = diags.clone();
+                                ds.push(d);
+                                build_result_json(false, None, &[], &ds, &sources, mode)
+                            }
+                        }
+                    }
+                    None => {
+                        let mut ds = diags.clone();
+                        ds.push(no_site_diagnostic());
+                        build_result_json(false, None, &[], &ds, &sources, mode)
+                    }
+                },
             },
         }
     })

@@ -1,11 +1,13 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-24, release 0.3.0 + 0.4.0 S1–S4 complete
-(all app semantics checked, AppModel lowering landed, E3070 gating
-android) + Studio NEXT interface promoted to the default Android
-launcher (0.4.0 APK).** Update this file after significant milestones.
-Keep it between 500 and 900 words.
+**Last updated: 2026-11-25, 0.4.0 S1–S6 complete: dynamic web
+applications ship — KIR→JS codegen differentially tested byte-for-byte
+against the VM, the 16 KB kinnrt.js reactive runtime, the MPA app dist
+(CLI + wasm FFI), and Studio preview/Problems/terminal integration.
+`website` dists remain byte-identical; android stays E3070.** Update
+this file after significant milestones. Keep it between 500 and 900
+words.
 
 ## What KINN is
 
@@ -15,10 +17,32 @@ Android ARM64 ships real on-device compilation. The project rule that
 matters most: never claim untested functionality works. Distinguish
 implemented / experimental / planned / unsupported everywhere.
 
-## Actual implementation status (0.3.0)
+## Actual implementation status (0.3.0 + 0.4.0 S1–S6)
 
 Everything from 0.2.0 is preserved (the full 0.2 suite keeps passing;
 backwards compatibility is tested, including contextual keywords).
+
+- **Dynamic web apps (0.4.0 S5+S6, complete)**: `app` programs build to
+  a real MPA dist — semantic HTML skeleton per page, `styles.css`, the
+  generated `app.js` (manifest + KIR-JS functions) and `kinnrt.js`
+  (16.2 KB minified, zero deps, hard 16 KB budget asserted in tests).
+  The JS is translated from the same KIR the VM runs
+  (`backend/webkir.rs`), type-directed by a worklist analysis seeded
+  from the additive `FuncDef.param_kinds`/`ret_kind`; the differential
+  corpus (examples, errors, modules, every ISA instruction, overflow
+  and float-format edges, app handler/computed drivers) requires
+  stdout + error lines byte-identical to `kinrt::run`, running the
+  shipped minified runtime. kinnrt.js implements State/Flush/Binder/
+  Lists/Events/Lifecycle/Hydrator/Store/Anim/Reporter: microtask
+  batching over the S4 static dependency map, keyed list
+  reconciliation, one delegated listener set per document,
+  sessionStorage state transfer, and the C.7 postMessage envelopes
+  (kinnRuntimeError/kinnConsole) Studio consumes into Problems and the
+  terminal. Scope is honest: SPA → E3071/S7, forms/fields and store
+  builtins → E3071/S9, param() → E3071/S7; visible animation waits for
+  S8 CSS. `examples/web/todo_app.kin` is the runnable demo (also the
+  Studio e2e test); `examples/errors/app_div_zero.kin` exercises the
+  error path end to end.
 
 - **Kin 0.2 language + compiler pipeline** (unchanged): modules,
   arrays, `for`, casts, natives; multi-error parser recovery;

@@ -1,0 +1,11 @@
+// Synthesized edge cases: truncated division and remainder signs.
+*mode = S;
+
+func main() {
+    print(-7 / 2);  // -3 (trunc toward zero)
+    print(7 / -2);  // -3
+    print(-7 % 2);  // -1 (sign of dividend)
+    print(7 % -2);  // 1
+    print(-7 / -2); // 3
+    print(-7 % -2); // -1
+}

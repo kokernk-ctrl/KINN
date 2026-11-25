@@ -1,0 +1,21 @@
+// Synthesized edge cases: integers at the exact-float64 boundary.
+// (Values beyond ±2^53 are only exercised through overflow errors
+// elsewhere — printing them would hit the documented precision limit.)
+*mode = S;
+
+func main() {
+    // Largest exactly-printable ints.
+    fin big = 9007199254740991; // 2^53 - 1
+    print(big);
+    print(big - 1);
+    fin neg = -9007199254740991;
+    print(neg);
+    print(neg + 1);
+
+    // Checked slow-path arithmetic that stays in range.
+    fin a = 4611686018427387904; // 2^62
+    fin b = 1152921504606846976; // 2^60
+    print(a / b);        // 4
+    print(a % b);        // 0
+    print(b * 8);        // 2^63 — overflow
+}

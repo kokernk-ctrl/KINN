@@ -138,6 +138,29 @@ $('nx-output').addEventListener('nx-output-action', (e) => {
 });
 
 const preview = new PreviewOverlay($('nx-preview'));
+// Dynamic previews (S6, C.7) surface runtime errors in the Problems
+// panel and console output in the terminal + OUTPUT log.
+preview.setRuntimeCallbacks({
+  onRuntimeError: (e) => {
+    problems.appendRuntime({
+      severity: 'error',
+      code: e.kinnRuntimeError.code,
+      message: e.kinnRuntimeError.message,
+      line: e.kinnRuntimeError.kinLine,
+      col: 1,
+      file: e.kinnRuntimeError.kinFile || undefined,
+    });
+    const line = `runtime ${e.kinnRuntimeError.code}: ${e.kinnRuntimeError.message} (${e.kinnRuntimeError.kinFile || 'app'}:${e.kinnRuntimeError.kinLine})`;
+    terminal.print(line, 'err');
+    output.log(line, 'err');
+  },
+  onConsole: (c) => {
+    const line = `preview ${c.kinnConsole.level}: ${c.kinnConsole.text}`;
+    terminal.print(line, c.kinnConsole.level === 'error' ? 'err' : c.kinnConsole.level === 'warn' ? 'warn' : 'out');
+    output.log(line, 'out');
+  },
+  onClear: () => problems.clearRuntime(),
+});
 
 const settingsModal = new SettingsModal(
   $('nx-settings'),

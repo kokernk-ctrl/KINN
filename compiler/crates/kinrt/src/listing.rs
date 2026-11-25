@@ -93,6 +93,8 @@ mod tests {
                 nlocals: 0,
                 code,
                 lines: vec![1, 2, 3],
+                param_kinds: Vec::new(),
+                ret_kind: crate::kir::ValKind::Unit,
             }],
             consts: Vec::new(),
         };
