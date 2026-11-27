@@ -123,7 +123,9 @@ function — a threaded `switch` with one case per instruction and
   and the `[CODE] message (line N)` line to match byte for byte —
   against the exact minified runtime the dist ships.
 
-`kinnrt.js` (16.2 KB minified, hard 16 KB budget, zero dependencies,
+`kinnrt.js` (the checked-in minified build artifact of the readable
+`kinnrt.src.js` source: 16,351 B, hard 16,384 B budget asserted by
+tests and the dedicated `kinnrt-size-gate` CI job, zero dependencies,
 no `eval`/`new Function`/`innerHTML`) is the reactive layer set the
 generated `app.js` mounts into: State + computed caches over the S4
 static dependency map, a microtask-batched Flush, a Binder that

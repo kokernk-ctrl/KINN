@@ -169,8 +169,10 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       drivers, stdout + error lines byte-identical under Node)
 - [x] S6 KINN Web Runtime v1 (reactivity, events, keyed lists,
       lifecycle) — dependency-free, ≤ 16 KB, no frameworks (DONE
-      2026-11-25: kinnrt.js ships at 16.2 KB minified via the built-in
-      deterministic minifier; the MPA dist + CLI/FFI wiring + Studio
+      2026-11-25; size gate corrected 2026-11-27: `kinnrt.js` is the
+      checked-in minified artifact — 16,351 B, byte-identical to
+      `js_minify(kinnrt.src.js)` by test, guarded by the dedicated
+      `kinnrt-size-gate` CI job; the MPA dist + CLI/FFI wiring + Studio
       preview/Problems/terminal integration landed together; coverage
       is the jsdom vitest suite + the wasm-backend e2e todo app — the
       Playwright harness (D5) deliberately did NOT land here, keeping

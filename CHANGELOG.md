@@ -46,10 +46,15 @@ byte-identical.
   `[CODE] message (line N)` error line must match **byte for byte**
   against `kinrt::run`, running the exact minified runtime the dist
   ships.
-- **Deterministic minifier** (in webkir.rs): scope-safe identifier
-  renaming + comment/whitespace stripping — the delivered `kinnrt.js`
-  is **16.2 KB** (hard budget 16 KB, CI-asserted), zero dependencies,
-  no `eval`/`new Function`/`innerHTML` (A6/C.6).
+- **Deterministic minifier + checked-in artifact** (in webkir.rs):
+  scope-safe identifier renaming + comment/whitespace stripping.
+  `kinnrt.js` is a **checked-in build artifact** — the exact bytes are
+  `js_minify(kinnrt.src.js)`, where `kinnrt.src.js` is the readable
+  hand-written source. Current artifact: **16,351 B** (hard budget
+  16,384 B, asserted in tests AND a dedicated CI job), zero
+  dependencies, no `eval`/`new Function`/`innerHTML` (A6/C.6).
+  Regenerate after editing the source with `KINNRT_WRITE=1 cargo test
+  -p kinc kinnrt`; the byte-identity test fails CI on drift.
 
 ### Added — S6: kinnrt.js reactivity + the MPA app dist (C.2/C.5/C.6)
 
@@ -103,14 +108,27 @@ byte-identical.
   literal.
 - Computed values now seed on the first flush after mount (previously
   the first paint could show stale/empty text until a handler ran).
+- **Size-budget delivery correction (post-33c9eee, 2026-11-27)**: the
+  original S5+S6 delivery report claimed "kinnrt.js delivered size:
+  16,354 ≤ 16,384 B" — that number was real for the bytes the dist
+  embedded, but the file checked into the repository
+  (`compiler/crates/kinc/src/backend/kinnrt.js`) was the unminified
+  30,926 B readable source, so the delivered-file claim was false as
+  verified against GitHub. **Fixed**: `kinnrt.js` is now the minified
+  artifact itself (16,351 B) and the readable source moved to
+  `kinnrt.src.js`; a byte-identity test (`kinnrt.js ==
+  js_minify(kinnrt.src.js)`, bless-style via `KINNRT_WRITE=1`) and a
+  dedicated `kinnrt-size-gate` CI job fail the build on size overrun
+  or artifact/source drift. Recorded as P-032/F-020.
 
 ### Tests
 
-- Compiler: 493 Rust tests (was 457) — full differential corpus, dist
-  determinism + size budget, CLI app-build behavior, new VM native
-  arms.
-- Studio: 179 vitest tests (was 163, all with the real wasm backend):
-  the kinnrt jsdom suite (binding updates, batching, keyed
+- Compiler: 494 Rust tests (was 457) — full differential corpus, dist
+  determinism + size budget + artifact byte-identity, CLI app-build
+  behavior, new VM native arms.
+- Studio: 177 vitest tests with the real wasm backend (verified count
+  2026-11-27; this section previously claimed 179 — corrected): the
+  kinnrt jsdom suite (binding updates, batching, keyed
   reconciliation incl. dup-key and in-place mutation, event dispatch +
   builtins, key filters, error envelopes, hydration) and the e2e suites
   driving the todo and error apps through the real wasm backend + the

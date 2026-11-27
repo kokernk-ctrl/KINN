@@ -60,6 +60,7 @@ release that fixed them. This registry is the source for GitHub issues.
 | F-017 | 0.4.0 | P-028: website diagnostics carried the wrong filename in multi-file programs. The pass-0 loop leaves `c.file` at the last project file before `check_website` runs, so every website diagnostic (E3030–E3036 incl. E3032's explicit `file` field, W3035–W3037) was attributed to the last imported module — an entry-file E3032 rendered under `lib.kin`. **Fixed**: the checker restores the entry path before `check_website`, mirroring the app path that S3 slice 1 already had; single-file programs are unchanged (the entry path is the only path). Multi-file regression test asserts file/line/col/len for E3032 and file/line for W3035; **no existing test froze the buggy attribution** (the only other multi-file website test asserts E3037, emitted inside the pass-0 loop itself with correct per-unit attribution). Authorized gate exception per the architect: the "website checking untouched" gate means no regressions, not no bug fixes. 0.3 web dist rebuilt byte-identical |
 | F-018 | 0.4.0 | P-029: no diagnostic code existed for unknown app pages, duplicate app page names or duplicate component names. **Assigned in slice 2 per the architect ruling (2026-11-22)**: the free E3063–E3069 span, with **E3066–E3069 reserved**. **E3063** "unknown app page target" fires at every page-target position — `route "x" -> Missing`, `not_found Missing`, and `open <Page>` on buttons/links in page and component views (nested `when`/`otherwise`/`each`/`form` bodies included); app-scoped sibling of E3032, never reusing it (E3032 is website-scoped and frozen, ADR-0011); hint lists declared pages, and a target naming a component says "'X' is a component; routes target pages". **E3064** duplicate page name, case-insensitive (mirrors E3031 — slugs are lowercased). **E3065** duplicate component name, case-sensitive (identifier semantics, matching function names). Pages and components are **separate namespaces** — a page and a component may share a name (use-site position disambiguates); documented in B.11 + LANGUAGE_SPEC §C2. A MPA `not_found` rejected by E3057 is not further resolved (invalid declarations are not further checked). 12 new tests (10 checker + 2 CLI): every code positive + negative, positions and hints asserted |
 | F-019 | 0.4.0 | ADR-0029 rename needed a diagnostic code: `let` → `fin` is intentionally breaking, so legacy sources must get a positioned migration hint, not a generic syntax error. **Assigned (2026-11-23)**: **E2017** — the first free parser code (0.1/0.2 own E2001–E2015 and E2099; 0.3 owns E2016 and E2030; the app grammar owns E2031–E2039, and E2016–E2029 stayed free between the 0.2 and 0.3 blocks). E2017 fires on the legacy declaration shape only (statement-position `let` immediately followed by an identifier); the declaration then parses as `fin` so each use reports exactly once (no cascade). Outside that pattern `let` is a plain identifier (word-stays-identifier gate). Registered in LANGUAGE_SPEC §C2 + §C1a; frozen by lexer/parser/checker/CLI tests; error corpus gains `examples/errors/legacy_let.kin`. The A2 backwards-compatibility clause is superseded for this keyword only (ADR-0029) |
+| F-020 | 0.4.0 | P-032: the S5+S6 delivery report claimed the delivered `kinnrt.js` was 16,354 B ≤ the 16,384 B budget, but the checked-in file was the unminified 30,926 B readable source — the number described the dist bytes, not the delivered file. **Fixed**: `kinnrt.js` is now the checked-in minified artifact (16,351 B) regenerated deterministically from the readable `kinnrt.src.js` via the in-tree `js_minify`; gates: the `kinnrt_artifact_byte_identity` test (bless-style `KINNRT_WRITE=1` regeneration, plain CI runs fail on drift), the `kinnrt_dist_size_budget` test, and the dedicated `kinnrt-size-gate` CI job (checks the actual file: size, minification sanity) |
 
 ## P-031 (resolved 2026-11-25) — corrupted anchor selector in the Studio preview interceptor
 
@@ -78,3 +79,49 @@ comment even described `"aref]"` as the invalid example).
 **Fix.** `a[href]` restored (studio/src/build/preview.ts); the pin now
 asserts the valid literal and the validity guard runs in jsdom. Found
 while wiring the S6 dynamic preview, which needs working navigation.
+
+## P-032 (resolved 2026-11-27) — kinnrt.js size-budget claim did not match the delivered file
+
+**Symptom.** The S5+S6 delivery report (commit 33c9eee) claimed
+"kinnrt.js delivered size: 16,354 bytes <= 16,384 (hard budget,
+tested)". GitHub verification showed the checked-in file
+`compiler/crates/kinc/src/backend/kinnrt.js` is 30,926 bytes and is
+NOT minified (full comments, spaces, long variable names). The claim
+was therefore false for the file the project ships.
+
+**Root cause.** The number was real for a different object: the
+minifier (`js_minify` in webkir.rs, genuinely deterministic and
+dependency-free) ran at dist-build time, and the 16,354 B described
+the bytes each generated site embedded — not the repository file.
+The delivery report conflated the two and asserted the budget was
+met "as delivered". Compounding it, no gate checked the repo file
+itself, and the prose around the number ("kinnrt.js delivered size")
+invited exactly the wrong reading. This is a reporting-integrity
+failure in the same family as F-016: a true fact attached to the
+wrong object, presented as if the gate had been met.
+
+**Fix.** The delivered file is now the artifact, and the artifact is
+gated directly:
+
+- `kinnrt.js` (checked in) is the **minified build artifact** —
+  16,351 bytes, single line, no comments.
+- The readable hand-written source moved to `kinnrt.src.js`
+  (30,926 bytes, kept reviewable and diffable; it is never shipped).
+- `js_minify` stays in-tree, dependency-free, and is now the
+  *generator*: `kinnrt.js == js_minify(kinnrt.src.js)` is asserted
+  byte-for-byte by `dist_tests::kinnrt_artifact_byte_identity`
+  (bless-style — `KINNRT_WRITE=1 cargo test -p kinc kinnrt`
+  regenerates; plain CI runs only assert and fail on drift).
+- `dist_tests::kinnrt_dist_size_budget` asserts the checked-in
+  artifact ≤ 16,384 B; the differential corpus (webkir_diff.rs)
+  and the Studio e2e suites continue to execute these exact bytes.
+- New dedicated CI job `kinnrt-size-gate` fails the build if the
+  file exceeds 16,384 B, is not smaller than the source, still
+  contains block comments, or spans many lines.
+
+**Verification.** 494 Rust tests green (26 differential cases run
+the artifact under Node); 177 Studio vitest tests green with the
+real wasm backend (todo + error apps e2e through the dist bytes);
+`node --check` on the artifact; 0.3 website dist rebuilt
+SHA256-identical; artifact size measured with `wc -c` = 16,351 and
+via the GitHub contents API after push.

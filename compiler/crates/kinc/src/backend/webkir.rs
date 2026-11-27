@@ -3,7 +3,8 @@
 //!
 //! A second execution carrier without a second semantics: the same KIR
 //! the Rust VM executes is translated to plain ES2020 JavaScript that
-//! calls the helpers in `kinnrt.js` (shipped alongside this generator).
+//! calls the helpers in `kinnrt.js` (the shipped build artifact; the
+//! readable source is `kinnrt.src.js`, see `KINNRT_SRC_JS` below).
 //! Checked i64 arithmetic, `Value::format` printing parity, deep array
 //! equality and the B.10 string helpers are differential-tested against
 //! `kinrt::run` — stdout must match byte-for-byte (tests/webkir_diff.rs).
@@ -57,10 +58,24 @@ use kinrt::kir::{CastTarget, Instr, NativeId, ValKind};
 use kinrt::{FuncDef, Module, Value};
 use std::collections::{BTreeSet, HashMap};
 
-/// The runtime asset this generator targets. Shipped verbatim into every
-/// dynamic web dist; the size budget is asserted by test.
+/// The readable runtime source. `kinnrt.src.js` is hand-written and
+/// commented; it is NEVER shipped — it exists so the shipped bytes stay
+/// reviewable and diffable. The build artifact is regenerated from it
+/// with `KINNRT_WRITE=1 cargo test -p kinc kinnrt` (bless-style; the
+/// byte-identity test below is the gate).
+pub const KINNRT_SRC_JS: &str = include_str!("kinnrt.src.js");
+
+/// The shipped runtime: `kinnrt.js` is a **checked-in build artifact** —
+/// the deterministic output of `js_minify(KINNRT_SRC_JS)` (comment/
+/// whitespace removal plus scope-safe identifier renaming). This is the
+/// exact blob the GitHub API reports and the exact file every web dist
+/// embeds; the artifact tests assert byte-identity with the source and
+/// the size budget below.
 pub const KINNRT_JS: &str = include_str!("kinnrt.js");
-/// Hard budget for the delivered runtime (C.6 mobile constraint).
+
+/// Hard budget for the delivered runtime (C.6 mobile constraint),
+/// asserted against the checked-in artifact `kinnrt.js` by test AND by
+/// a dedicated CI job (`.github/workflows/ci.yml: kinnrt-size-gate`).
 pub const KINNRT_BUDGET: usize = 16 * 1024;
 
 // ===========================================================================
@@ -378,20 +393,29 @@ fn elem_kind(k: &ValKind) -> ValKind {
 
 
 // ===========================================================================
-// Deterministic minifier for the shipped kinnrt.js (16 KB budget, C.6)
+// Deterministic minifier: the generator of the shipped kinnrt.js
+// artifact (16 KB budget, C.6)
 // ===========================================================================
 
-/// The kinnrt.js build: comment/whitespace removal plus scope-safe
-/// identifier renaming (every `var` local, function name and parameter
-/// gets a short fresh name that never occurs elsewhere in the source;
-/// property positions and object-literal keys are untouched, so the
-/// manifest contract and the K.* helper names survive). Deterministic:
-/// same source in, same bytes out (tested). The readable source ships in
-/// the repository; the dist embeds this output and the size test guards
-/// the budget.
+/// The bytes every web dist ships and every browser loads: the
+/// checked-in `kinnrt.js` artifact. Kept as a function so consumers have
+/// one entry point; `kinnrt.js == js_minify(kinnrt.src.js)` byte-for-byte
+/// (asserted by `dist_tests::kinnrt_artifact_byte_identity`), so the
+/// minifier is exercised on every CI run without being on the hot path.
 pub fn kinnrt_dist() -> &'static str {
-    static DIST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    DIST.get_or_init(|| js_minify(KINNRT_JS))
+    KINNRT_JS
+}
+
+/// Regenerate the checked-in artifact from the readable source
+/// (bless-style). Run `KINNRT_WRITE=1 cargo test -p kinc kinnrt` from the
+/// repository root after editing `kinnrt.src.js`; plain `cargo test`
+/// (what CI does) only asserts equality and fails on drift.
+fn kinnrt_write_artifact(bytes: &str) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/backend/kinnrt.js");
+    if let Err(e) = std::fs::write(&path, bytes) {
+        panic!("KINNRT_WRITE: cannot write {}: {}", path.display(), e);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2515,20 +2539,48 @@ impl<'a> AppCtx<'a> {
 
 #[cfg(test)]
 mod dist_tests {
+    /// The shipped artifact itself must fit the hard budget: this is the
+    /// exact blob the GitHub API reports for `kinnrt.js`.
     #[test]
     fn kinnrt_dist_size_budget() {
         assert!(
-            super::kinnrt_dist().len() <= super::KINNRT_BUDGET,
-            "minified kinnrt.js is {} bytes, budget is {}",
-            super::kinnrt_dist().len(),
+            super::KINNRT_JS.len() <= super::KINNRT_BUDGET,
+            "checked-in kinnrt.js is {} bytes, budget is {}",
+            super::KINNRT_JS.len(),
             super::KINNRT_BUDGET
         );
     }
 
+    /// `kinnrt.js` must be exactly `js_minify(kinnrt.src.js)` — the
+    /// checked-in artifact may never drift from the readable source.
+    /// Regenerate with `KINNRT_WRITE=1 cargo test -p kinc kinnrt`.
     #[test]
-    fn kinnrt_dist_deterministic() {
-        let a = super::js_minify(super::KINNRT_JS);
-        let b = super::js_minify(super::KINNRT_JS);
+    fn kinnrt_artifact_byte_identity() {
+        let generated = super::js_minify(super::KINNRT_SRC_JS);
+        if generated != super::KINNRT_JS {
+            if std::env::var_os("KINNRT_WRITE").is_some() {
+                super::kinnrt_write_artifact(&generated);
+                eprintln!(
+                    "KINNRT_WRITE: rewrote kinnrt.js ({} bytes)",
+                    generated.len()
+                );
+                return;
+            }
+            panic!(
+                "checked-in kinnrt.js ({:.1} KB) is NOT the deterministic \
+                 minify(kinnrt.src.js) output ({:.1} KB): regenerate with \
+                 KINNRT_WRITE=1 cargo test -p kinc kinnrt",
+                super::KINNRT_JS.len() as f64 / 1024.0,
+                generated.len() as f64 / 1024.0
+            );
+        }
+    }
+
+    /// The minifier is deterministic: same source in, same bytes out.
+    #[test]
+    fn kinnrt_minify_deterministic() {
+        let a = super::js_minify(super::KINNRT_SRC_JS);
+        let b = super::js_minify(super::KINNRT_SRC_JS);
         assert_eq!(a, b);
     }
 }

@@ -8,6 +8,39 @@ on:
   pull_request:
 
 jobs:
+  # 0.4.0 (A6 hard gate): the shipped kinnrt.js build artifact must stay
+  # strictly within the 16 KB mobile budget. The rust-tests job asserts
+  # the same invariant from inside the compiler (byte-identity with
+  # js_minify(kinnrt.src.js) + size); this job makes the failure loud,
+  # early and independent of any test runner.
+  kinnrt-size-gate:
+    name: kinnrt.js size gate (16 KB budget)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert kinnrt.js is minified and <= 16384 bytes
+        run: |
+          F=compiler/crates/kinc/src/backend/kinnrt.js
+          SRC=compiler/crates/kinc/src/backend/kinnrt.src.js
+          test -f "$F" || { echo "::error::missing $F"; exit 1; }
+          test -f "$SRC" || { echo "::error::missing $SRC (readable source)"; exit 1; }
+          SIZE=$(wc -c < "$F")
+          SRC_SIZE=$(wc -c < "$SRC")
+          echo "kinnrt.js: $SIZE bytes; kinnrt.src.js: $SRC_SIZE bytes; budget: 16384"
+          if [ "$SIZE" -gt 16384 ]; then
+            echo "::error::kinnrt.js is $SIZE bytes (budget 16384). Regenerate with KINNRT_WRITE=1 cargo test -p kinc kinnrt and shrink kinnrt.src.js."
+            exit 1
+          fi
+          if [ "$SIZE" -ge "$SRC_SIZE" ]; then
+            echo "::error::kinnrt.js ($SIZE B) is not smaller than kinnrt.src.js ($SRC_SIZE B) — artifact does not look minified."
+            exit 1
+          fi
+          # The artifact must contain no comment blocks or run-newlines.
+          if grep -q '/\*' "$F" || [ "$(wc -l < "$F")" -gt 8 ]; then
+            echo "::error::kinnrt.js still contains block comments or many lines — not the minified artifact."
+            exit 1
+          fi
+
   rust-tests:
     name: rust tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

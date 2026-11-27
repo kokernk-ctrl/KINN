@@ -1,7 +1,8 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-25, 0.4.0 S1–S6 complete: dynamic web
+**Last updated: 2026-11-27, 0.4.0 S1–S6 complete (size-budget
+correction applied): dynamic web
 applications ship — KIR→JS codegen differentially tested byte-for-byte
 against the VM, the 16 KB kinnrt.js reactive runtime, the MPA app dist
 (CLI + wasm FFI), and Studio preview/Problems/terminal integration.
@@ -25,7 +26,10 @@ backwards compatibility is tested, including contextual keywords).
 - **Dynamic web apps (0.4.0 S5+S6, complete)**: `app` programs build to
   a real MPA dist — semantic HTML skeleton per page, `styles.css`, the
   generated `app.js` (manifest + KIR-JS functions) and `kinnrt.js`
-  (16.2 KB minified, zero deps, hard 16 KB budget asserted in tests).
+  (the checked-in **minified build artifact**, 16,351 B — regenerated
+  deterministically from the readable `kinnrt.src.js` (30,926 B) by
+  the in-tree minifier; byte-identity + the 16,384 B budget are
+  asserted by tests and a dedicated CI job; zero deps).
   The JS is translated from the same KIR the VM runs
   (`backend/webkir.rs`), type-directed by a worklist analysis seeded
   from the additive `FuncDef.param_kinds`/`ret_kind`; the differential

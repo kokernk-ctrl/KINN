@@ -6,10 +6,10 @@
  * static dependency map), keyed list reconciliation (append / remove /
  * reorder / duplicate keys), delegated event dispatch with the handler
  * ABI + event builtins, and the C.7 error envelope. The runtime under
- * test is the readable source shipped in the repo; the *minified*
- * artifact (the exact bytes the dist embeds) is exercised end-to-end by
- * kinnrt.e2e.test.ts through the real wasm backend, and byte-for-byte
- * by the compiler-side differential corpus (tests/webkir_diff.rs).
+ * test is the readable `kinnrt.src.js`; the checked-in *minified*
+ * artifact `kinnrt.js` (the exact bytes the dist embeds) is byte-identity
+ * gated by the compiler-side tests and exercised end-to-end by
+ * kinnrt.e2e.test.ts through the real wasm backend.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -19,7 +19,7 @@ import { JSDOM } from 'jsdom';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RUNTIME_SRC = readFileSync(
-  join(here, '../../../compiler/crates/kinc/src/backend/kinnrt.js'),
+  join(here, '../../../compiler/crates/kinc/src/backend/kinnrt.src.js'),
   'utf8',
 )
   .replace('function flushNow() {', 'function flushNow() { console.log("FLUSH recs=", recs.length, "dirty=", JSON.stringify(dirty));')
