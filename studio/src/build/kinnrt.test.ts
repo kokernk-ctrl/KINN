@@ -587,3 +587,169 @@ describe('kinnrt MPA hydration', () => {
     expect(snap).toBe('{"n":7}');
   });
 });
+
+// ===========================================================================
+// Anim (S6 Phase C): enter/exit/hover/press/scroll class coordination
+// against the kinnrt.css contract (the visuals themselves are CSS and
+// are asserted by the compiler-side dist test; jsdom drives the JS
+// coordination only).
+// ===========================================================================
+
+describe('kinnrt animation coordination', () => {
+  it('applies enter, hover and press classes at mount', async () => {
+    const h = mount(
+      manifest({
+        pages: [
+          {
+            name: 'Home',
+            slug: 'home',
+            title: 'Home',
+            view: [
+              {
+                k: 'text',
+                x: 'hi',
+                a: { enter: 'fade', hover: 'pop', press: 'scale' },
+              },
+            ],
+          },
+        ],
+      }),
+      {},
+    );
+    await h.flush();
+    const p = h.main.querySelector('p') as HTMLElement;
+    expect(p.className).toContain('kinn-enter-fade');
+    expect(p.className).toContain('kinn-enter-active-fade');
+    expect(p.className).toContain('kinn-hover-pop');
+    expect(p.className).toContain('kinn-hover-active-pop');
+    expect(p.className).toContain('kinn-press-scale');
+    expect(p.className).toContain('kinn-press-active-scale');
+  });
+
+  it('enter classes land on newly mounted each children', async () => {
+    const m = listManifest();
+    (m.pages as any)[0].view[0].b[0].a = { enter: 'fade' };
+    const h = mount(m, {
+      'app:init': () => [[]],
+      'app:iter': (items: string[]) => items,
+      'app:key': (item: string) => item,
+      'app:b': (item: string) => item,
+      'app:h': (items: string[]) => [items],
+    });
+    await h.flush();
+    setItems(h, ['a'], 1);
+    await h.flush();
+    const item = h.dom.window.document.querySelector('.kinn-item p') as HTMLElement;
+    expect(item.className).toContain('kinn-enter-fade');
+    expect(item.className).toContain('kinn-enter-active-fade');
+  });
+
+  it('exit animations hold the node until animationend, then drop it', async () => {
+    const m = listManifest();
+    (m.pages as any)[0].view[0].b[0].a = { exit: 'fade' };
+    const h = mount(m, {
+      'app:init': () => [[]],
+      'app:iter': (items: string[]) => items,
+      'app:key': (item: string) => item,
+      'app:b': (item: string) => item,
+      'app:h': (items: string[]) => [items],
+    });
+    await h.flush();
+    setItems(h, ['a', 'b'], 1);
+    await h.flush();
+    expect(rowTexts(h)).toEqual(['a', 'b']);
+
+    // Remove one: the exiting row stays in the DOM with the exit
+    // classes while its animation runs.
+    setItems(h, ['a'], 2);
+    await h.flush();
+    const rows = h.dom.window.document.querySelectorAll('.kinn-item');
+    expect(rows.length).toBe(2); // still present: the exit wait
+    const exiting = rows[1] as HTMLElement;
+    expect(exiting.className).toContain('kinn-exit-fade');
+    expect(exiting.className).toContain('kinn-exit-active-fade');
+    // (a) is the surviving row; (b) is the exiting one.
+
+    // animationend finishes the wait without waiting for the timeout.
+    exiting.dispatchEvent(new (h.dom.window as any).Event('animationend'));
+    await h.flush();
+    expect(h.dom.window.document.querySelectorAll('.kinn-item').length).toBe(1);
+    expect(rowTexts(h)).toEqual(['a']);
+  });
+
+  it('the app page transition animates main at boot', async () => {
+    const h = mount(
+      manifest({
+        transition: 'fade',
+        pages: [
+          {
+            name: 'Home',
+            slug: 'home',
+            title: 'Home',
+            view: [{ k: 'text', x: 'hi', a: {} }],
+          },
+        ],
+      }),
+      {},
+    );
+    await h.flush();
+    expect(h.main.className).toContain('kinn-enter-fade');
+    expect(h.main.className).toContain('kinn-enter-active-fade');
+  });
+
+  it('scroll references degrade silently without IntersectionObserver', async () => {
+    // jsdom has no IntersectionObserver: the class is never applied and
+    // the element renders normally (the CSS keeps it hidden ONLY when
+    // the class is present, which requires the observer).
+    const h = mount(
+      manifest({
+        pages: [
+          {
+            name: 'Home',
+            slug: 'home',
+            title: 'Home',
+            view: [{ k: 'text', x: 'hi', a: { scroll: 'scale' } }],
+          },
+        ],
+      }),
+      {},
+    );
+    await h.flush();
+    const p = h.main.querySelector('p') as HTMLElement;
+    expect(p.className).not.toContain('kinn-scroll-scale');
+    expect(p.textContent).toBe('hi');
+  });
+
+  it('prefers-reduced-motion skips every animation class', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><main id="main" data-kpage="Home"></main></body></html>', {
+      runScripts: 'outside-only',
+      url: 'https://kinn.local/index.html',
+    });
+    const w = dom.window as any;
+    // jsdom has no matchMedia: stub it as a reduced-motion user.
+    w.matchMedia = (q: string) => ({ matches: q.indexOf('reduce') !== -1 });
+    w.eval(RUNTIME_SRC);
+    const K = w.KinnRT;
+    K.reg(0, 'app:init', 't.kin', () => []);
+    K.mount(
+      manifest({
+        transition: 'fade',
+        pages: [
+          {
+            name: 'Home',
+            slug: 'home',
+            title: 'Home',
+            view: [{ k: 'text', x: 'hi', a: { enter: 'fade', hover: 'pop' } }],
+          },
+        ],
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const main = w.document.querySelector('main') as HTMLElement;
+    const p = main.querySelector('p') as HTMLElement;
+    expect(main.className).not.toContain('kinn-enter');
+    expect(p.className).not.toContain('kinn-enter');
+    expect(p.className).not.toContain('kinn-hover');
+    expect(p.textContent).toBe('hi');
+  });
+});

@@ -35,9 +35,10 @@ describe.skipIf(!hasWasm)('todo app end to end (real wasm backend)', () => {
     const result = await backend.buildWeb('todo_app.kin', [{ name: 'todo_app.kin', content: TODO_SRC }]);
     expect(result.ok).toBe(true);
 
-    // The dynamic dist: semantic HTML skeleton + runtime + app.js.
+    // The dynamic dist: semantic HTML skeleton + runtime + app.js + the
+    // predefined animation sheet (S6 Phase C).
     const paths = result.files.map((f) => f.path).sort();
-    expect(paths).toEqual(['about.html', 'app.js', 'index.html', 'kinnrt.js', 'styles.css']);
+    expect(paths).toEqual(['about.html', 'app.js', 'index.html', 'kinnrt.css', 'kinnrt.js', 'styles.css']);
 
     // Studio's preview: self-contained page, scripts inlined in order.
     const preview = buildPreviewHtml(result.files, 'index.html');
@@ -104,6 +105,14 @@ describe.skipIf(!hasWasm)('todo app end to end (real wasm backend)', () => {
     expect(items()).toEqual(['write the report', 'ship the release']);
     expect(text()).toContain('Open: 2 of 2');
     expect(text()).not.toContain('Nothing here yet');
+
+    // S6 Phase C: the added items carry the predefined fade enter
+    // classes (the visuals come from the inlined kinnrt.css).
+    const lastItem = w.document.querySelectorAll('.kinn-each .kinn-item p');
+    expect((lastItem[lastItem.length - 1] as HTMLElement).className).toContain('kinn-enter-fade');
+    expect((lastItem[lastItem.length - 1] as HTMLElement).className).toContain(
+      'kinn-enter-active-fade',
+    );
 
     // The state snapshot (MPA transfer) landed in sessionStorage.
     const snap = JSON.parse(w.sessionStorage.getItem('kinn:Todo') || '{}');

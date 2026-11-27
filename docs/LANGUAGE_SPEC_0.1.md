@@ -745,8 +745,21 @@ meanings frozen, tests pin the wording):
   order). Duplicate animation names carry no code in B.11 — the first
   declaration wins and duplicates are not reported (nothing is
   invented; noted honestly here).
+- **Predefined animation visuals ship with the runtime (S6 Phase C,
+  2026-11-28)**: nine names — `fade`, `slide-up`, `slide-down`,
+  `slide-left`, `slide-right`, `scale`, `pop`, `flip-x`, `flip-y` —
+  carry their visuals in `kinnrt.css` (every dynamic dist links it),
+  and the runtime coordinates the classes (`enter` at mount, `exit`
+  holds the node until the animation ends, `hover`/`press` via CSS
+  pseudo-classes, `scroll` via one shared IntersectionObserver, the
+  app-level page `transition` at boot). A reference to a predefined
+  name still REQUIRES declaring it (E3047 is unchanged — one
+  namespace, declared names); the declaration supplies the name and
+  timing values, the predefined visual does the drawing. A declared
+  name that matches no predefined visual renders without visible
+  motion until S8 generates its CSS.
 - **E3048/E3049/E3050 are compile-time data rules**: animations
-  generate static CSS (S8), so `duration`/`delay` must be integer
+  generate static CSS (S8 — for declared names), so `duration`/`delay` must be integer
   literals in milliseconds — duration positive, delay non-negative
   (B.8's "non-positive duration" plus the integer-milliseconds rule) —
   and easing is a named word or `cubic(a, b, c, d)` with four numeric

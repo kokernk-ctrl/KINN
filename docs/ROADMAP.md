@@ -180,7 +180,11 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       the browser gate (D.2) is mandatory)
 - [ ] S7 SPA router + MPA hydration/stores; dynamic route params,
       not-found, honest `file://` fallback
-- [ ] S8 Animations (declarative whitelist → generated CSS)
+- [ ] S8 Animations — declared keyframes/transitions → generated CSS
+      (the S6 Phase C predefined set — fade, the four slides, scale,
+      pop, flip-x, flip-y — already ships in kinnrt.css with runtime
+      coordination: enter/exit/hover/press/scroll + exit waits, DONE
+      2026-11-28; S8 narrows to CSS generation for declared names)
 - [ ] S9 Forms, validation, local persistence + JSON snapshots
       (local-only, never presented as a backend database)
 - [ ] S10 Studio: folder project browser (Vfs v2), SPA preview, runtime

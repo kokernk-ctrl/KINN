@@ -25,7 +25,7 @@
 //!     for (;;) {
 //!       switch (ip) {
 //!       case 0: /*@kinn:f.kin:3*/ S.push(41); ip = 1; break;
-//!       case 1: K.out(K.k_fmt(S.pop(), "i")); ip = 2; break;
+//!       case 1: K.out(K.h[10](S.pop(), "i")); ip = 2; break;
 //!       case 2: return;
 //!       default: throw new K.KinRTError("E4999", "...", 3);
 //!       }
@@ -379,6 +379,11 @@ fn join(a: &ValKind, b: &ValKind) -> ValKind {
         b.clone()
     } else if *b == ValKind::Unit {
         a.clone()
+    } else if let (ValKind::Array(x), ValKind::Array(y)) = (a, b) {
+        // Two arrays join to an array of the joined element kind: the
+        // (Array, Array) concat arm is element-agnostic, so the join
+        // keeps the arithmetic arm precise while widening the element.
+        ValKind::Array(Box::new(join(x, y)))
     } else {
         ValKind::Any
     }
@@ -672,8 +677,16 @@ fn js_decls(toks: &[Tok]) -> Vec<String> {
 }
 
 /// Deterministic short-name mapping (longest names get the shortest
-/// slots); candidates must not appear as any word in the source.
+/// slots); candidates must not appear as any word in the source and
+/// must not be a JavaScript reserved word (the 1–2 character candidate
+/// space contains `do`, `if`, `in` and `of`).
 fn js_name_map(decls: &[String], src: &str) -> std::collections::BTreeMap<String, String> {
+    const RESERVED: [&str; 38] = [
+        "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete",
+        "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if",
+        "import", "in", "instanceof", "let", "new", "null", "return", "static", "super", "switch",
+        "this", "throw", "true", "try", "typeof", "var", "void", "while", "with",
+    ];
     let mut words: Vec<String> = Vec::new();
     let mut cur = String::new();
     for c in src.chars() {
@@ -701,7 +714,9 @@ fn js_name_map(decls: &[String], src: &str) -> std::collections::BTreeMap<String
     }
     let mut cand_i = 0;
     for d in decls_sorted {
-        while cand_i < cands.len() && words.contains(&cands[cand_i]) {
+        while cand_i < cands.len()
+            && (words.contains(&cands[cand_i]) || RESERVED.contains(&cands[cand_i].as_str()))
+        {
             cand_i += 1;
         }
         if cand_i >= cands.len() {
@@ -991,14 +1006,28 @@ fn merge_state(
             true
         }
         Some(existing) => {
-            if existing.stack != incoming.stack {
+            // Stack HEIGHTS at one ip are structural (statement
+            // boundaries keep them equal per the design): different
+            // heights are a real compiler bug. Element KINDS, however,
+            // can legitimately differ between paths — a slot written
+            // through an empty-array literal + concat chain widens to
+            // Array(Any) while the param path still carries Array(Str)
+            // — so kinds join (monotone widening) instead of panicking.
+            if existing.stack.len() != incoming.stack.len() {
                 panic!(
-                    "webkir: stack kind conflict in `{}` at ip {} (from {}): {:?} vs {:?}",
+                    "webkir: stack height conflict in `{}` at ip {} (from {}): {:?} vs {:?}",
                     f.name, ip, from, existing.stack, incoming.stack
                 );
             }
             let mut changed = false;
             let mut merged = existing.clone();
+            for (i, k) in incoming.stack.iter().enumerate() {
+                let j = join(&merged.stack[i], k);
+                if j != merged.stack[i] {
+                    changed = true;
+                    merged.stack[i] = j;
+                }
+            }
             for (i, k) in incoming.slots.iter().enumerate() {
                 if let Some(s) = merged.slots.get_mut(i) {
                     let j = join(s, k);
@@ -1138,13 +1167,13 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             Instr::Add => {
                 let (a, b) = (top(st, 1), top(st, 0));
                 match (a, b) {
-                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.k_add", Some(line), true),
+                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.h[0]", Some(line), true),
                     (ValKind::Float, ValKind::Float) => {
                         binop_raw(&mut body, ip, " + ", false)
                     }
                     (ValKind::Str, ValKind::Str) => binop_raw(&mut body, ip, " + ", false),
                     (ValKind::Array(_), ValKind::Array(_)) => {
-                        binop(&mut body, ip, "K.k_acat", None, false)
+                        binop(&mut body, ip, "K.h[12]", None, false)
                     }
                     _ => panic!(
                         "webkir: ambiguous operand kinds for Add at `{}:{}` ip {} — \
@@ -1156,7 +1185,7 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             Instr::Sub => {
                 let (a, b) = (top(st, 1), top(st, 0));
                 match (a, b) {
-                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.k_sub", Some(line), false),
+                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.h[1]", Some(line), false),
                     (ValKind::Float, ValKind::Float) => {
                         binop_raw(&mut body, ip, " - ", false)
                     }
@@ -1166,7 +1195,7 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             Instr::Mul => {
                 let (a, b) = (top(st, 1), top(st, 0));
                 match (a, b) {
-                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.k_mul", Some(line), true),
+                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.h[2]", Some(line), true),
                     (ValKind::Float, ValKind::Float) => {
                         binop_raw(&mut body, ip, " * ", false)
                     }
@@ -1176,31 +1205,31 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             Instr::Div => {
                 let (a, b) = (top(st, 1), top(st, 0));
                 match (a, b) {
-                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.k_div", Some(line), false),
+                    (ValKind::Int, ValKind::Int) => binop(&mut body, ip, "K.h[3]", Some(line), false),
                     (ValKind::Float, ValKind::Float) => {
-                        binop(&mut body, ip, "K.k_fdiv", Some(line), false)
+                        binop(&mut body, ip, "K.h[9]", Some(line), false)
                     }
                     _ => panic!("webkir: ambiguous kinds for Div at `{}:{}` ip {}", f.name, file, ip),
                 }
             }
             Instr::Mod => {
-                binop(&mut body, ip, "K.k_mod", Some(line), false);
+                binop(&mut body, ip, "K.h[4]", Some(line), false);
             }
             Instr::Lt => cmp_js(&mut body, ip, "<"),
             Instr::Gt => cmp_js(&mut body, ip, ">"),
             Instr::Le => cmp_js(&mut body, ip, "<="),
             Instr::Ge => cmp_js(&mut body, ip, ">="),
-            Instr::Eq => binop(&mut body, ip, "K.k_eq", None, false),
+            Instr::Eq => binop(&mut body, ip, "K.h[11]", None, false),
             Instr::Ne => {
                 body.push_str(&format!(
-                    "var b{i} = S.pop(), a{i} = S.pop(); S.push(!K.k_eq(a{i}, b{i}));",
+                    "var b{i} = S.pop(), a{i} = S.pop(); S.push(!K.h[11](a{i}, b{i}));",
                     i = ip
                 ));
             }
             Instr::Neg => {
                 let k = top(st, 0);
                 if k == ValKind::Int {
-                    body.push_str(&format!("S.push(K.k_neg(S.pop(), {}));", line));
+                    body.push_str(&format!("S.push(K.h[5](S.pop(), {}));", line));
                 } else if k == ValKind::Float {
                     body.push_str("S.push(-S.pop());");
                 } else {
@@ -1248,7 +1277,7 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             Instr::Print => {
                 let tag = top(st, 0);
                 body.push_str(&format!(
-                    "K.out(K.k_fmt(S.pop(), {}));",
+                    "K.out(K.h[10](S.pop(), {}));",
                     js_str(&tag.tag())
                 ));
             }
@@ -1264,13 +1293,13 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
             }
             Instr::ArrGet => {
                 body.push_str(&format!(
-                    "var i{i} = S.pop(); S.push(K.k_aget(S.pop(), i{i}, {l}));",
+                    "var i{i} = S.pop(); S.push(K.h[13](S.pop(), i{i}, {l}));",
                     i = ip, l = line
                 ));
             }
             Instr::ArrSet => {
                 body.push_str(&format!(
-                    "var v{i} = S.pop(), i{i} = S.pop(); K.k_aset(S.pop(), i{i}, v{i}, {l});",
+                    "var v{i} = S.pop(), i{i} = S.pop(); K.h[14](S.pop(), i{i}, v{i}, {l});",
                     i = ip, l = line
                 ));
             }
@@ -1285,11 +1314,11 @@ fn gen_func(module: &Module, idx: usize, file: &str) -> String {
                         body.push_str("/* int→float: identity */");
                     }
                     (CastTarget::Int, ValKind::Float) => {
-                        body.push_str("S.push(K.k_f2i(S.pop()));");
+                        body.push_str("S.push(K.h[22](S.pop()));");
                     }
                     (CastTarget::Str, _) => {
                         body.push_str(&format!(
-                            "S.push(K.k_fmt(S.pop(), {}));",
+                            "S.push(K.h[10](S.pop(), {}));",
                             js_str(&k.tag())
                         ));
                     }
@@ -1364,14 +1393,14 @@ fn gen_native(
             if matches!(k0, ValKind::Array(_)) {
                 body.push_str("S.push(S.pop().length);");
             } else if k0 == ValKind::Str {
-                body.push_str("S.push(K.k_len(S.pop()));");
+                body.push_str("S.push(K.h[15](S.pop()));");
             } else {
                 panic!("webkir: ambiguous kind for len at `{}:{}` ip {}", fname, file, ip);
             }
         }
         NativeId::Abs => {
             if k0 == ValKind::Int {
-                body.push_str(&format!("S.push(K.k_iabs(S.pop(), {}));", line));
+                body.push_str(&format!("S.push(K.h[6](S.pop(), {}));", line));
             } else if k0 == ValKind::Float {
                 body.push_str("S.push(Math.abs(S.pop()));");
             } else {
@@ -1385,7 +1414,7 @@ fn gen_native(
                     i = ip
                 ));
             } else if k1 == ValKind::Float {
-                binop(body, ip, "K.k_fmin", None, true);
+                binop(body, ip, "K.h[7]", None, true);
             } else {
                 panic!("webkir: ambiguous kind for min at `{}:{}` ip {}", fname, file, ip);
             }
@@ -1397,23 +1426,23 @@ fn gen_native(
                     i = ip
                 ));
             } else if k1 == ValKind::Float {
-                binop(body, ip, "K.k_fmax", None, true);
+                binop(body, ip, "K.h[8]", None, true);
             } else {
                 panic!("webkir: ambiguous kind for max at `{}:{}` ip {}", fname, file, ip);
             }
         }
         NativeId::Str => {
             body.push_str(&format!(
-                "S.push(K.k_fmt(S.pop(), {}));",
+                "S.push(K.h[10](S.pop(), {}));",
                 js_str(&k0.tag())
             ));
         }
-        NativeId::Upper => body.push_str("S.push(K.k_upper(S.pop()));"),
-        NativeId::Lower => body.push_str("S.push(K.k_lower(S.pop()));"),
-        NativeId::Trim => body.push_str("S.push(K.k_trim(S.pop()));"),
-        NativeId::Contains => binop(body, ip, "K.k_contains", None, false),
-        NativeId::Split => binop(body, ip, "K.k_split", None, false),
-        NativeId::Join => binop(body, ip, "K.k_join", None, false),
+        NativeId::Upper => body.push_str("S.push(K.h[16](S.pop()));"),
+        NativeId::Lower => body.push_str("S.push(K.h[17](S.pop()));"),
+        NativeId::Trim => body.push_str("S.push(K.h[18](S.pop()));"),
+        NativeId::Contains => binop(body, ip, "K.h[19]", None, false),
+        NativeId::Split => binop(body, ip, "K.h[20]", None, false),
+        NativeId::Join => binop(body, ip, "K.h[21]", None, false),
     }
 }
 

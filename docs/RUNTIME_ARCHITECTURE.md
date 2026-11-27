@@ -124,7 +124,7 @@ function — a threaded `switch` with one case per instruction and
   against the exact minified runtime the dist ships.
 
 `kinnrt.js` (the checked-in minified build artifact of the readable
-`kinnrt.src.js` source: 16,351 B, hard 16,384 B budget asserted by
+`kinnrt.src.js` source: 16,370 B, hard 16,384 B budget asserted by
 tests and the dedicated `kinnrt-size-gate` CI job, zero dependencies,
 no `eval`/`new Function`/`innerHTML`) is the reactive layer set the
 generated `app.js` mounts into: State + computed caches over the S4
@@ -135,8 +135,16 @@ detected by fingerprint), one delegated event-listener set per
 document with the handler ABI + event builtins, a single DOM renderer
 (Lifecycle), sessionStorage state transfer for MPA (Hydrator), a
 localStorage store layer with schema-hash guard (Store; language
-surface in S9), class-toggle animation attributes (Anim; visible
-motion waits for S8 CSS; `prefers-reduced-motion` disables the path),
-and the C.7 Reporter (`kinnRuntimeError`/`kinnConsole` postMessage
-envelopes when embedded). The deterministic minifier lives in
-`webkir.rs` and is tested for byte-stable output and the budget.
+surface in S9), the Anim coordination layer (S6 Phase C, 2026-11-28:
+enter/hover/press/scroll classes at mount, exit animations hold the
+node until `animationend`/timeout, the app-level page transition
+animates `main` at boot, one shared IntersectionObserver marks
+scroll-revealed elements — the predefined visuals for fade, the four
+slides, scale, pop, flip-x and flip-y ship in `kinnrt.css`, linked
+from every dynamic page; `prefers-reduced-motion` disables the JS
+path and the CSS together), and the C.7 Reporter
+(`kinnRuntimeError`/`kinnConsole` postMessage envelopes when
+embedded). The deterministic minifier lives in `webkir.rs` and is
+tested for byte-stable output and the budget; generated code reaches
+the value helpers through the numeric `K.h[i]` table (fixed order,
+documented in `webkir.rs`).

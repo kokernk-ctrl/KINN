@@ -623,11 +623,17 @@ app "…" { transition "fade" }                // page/route transitions (SPA)
   property E3048; bad easing E3049; non-positive duration E3050.
 - **Element attributes**: `enter`, `exit`, `hover`, `press`, `scroll`,
   `transition` (page-level). `hover`/`press` compile to pure CSS
-  (`:hover`/`:active`) — zero runtime cost. `enter` fires on mount and on
-  `when`-block appearance; `exit` delays DOM removal until the
-  transition ends (`transitionend` + timeout fallback). `scroll` uses one
-  shared `IntersectionObserver` (C.6). All of it degrades silently under
-  `prefers-reduced-motion` (0.3 stylesheet already ships the media query).
+  (`:hover`/`:active`) — zero runtime cost. `enter` fires on mount (and on
+  `when`-block appearance — S6 Phase C ships mount + list-entry);
+  `exit` delays DOM removal until the animation ends
+  (`animationend` + a 450ms timeout fallback — **implemented
+  2026-11-28**). `scroll` uses one shared `IntersectionObserver`
+  (C.6; **implemented** — elements without the observer never get
+  the class). The nine predefined visuals (fade, the four slides,
+  scale, pop, flip-x, flip-y) ship in `kinnrt.css`, linked from every
+  dynamic page; `hover`/`press` are pure CSS pseudo-class rules. All
+  of it degrades silently under `prefers-reduced-motion` (the JS
+  path skips and the CSS disables).
 - **State-driven animation** is `when` + `enter`/`exit` (B.5): no
   imperative animation API is exposed — animations are declarations the
   runtime coordinates (C.5), never user-written JavaScript.

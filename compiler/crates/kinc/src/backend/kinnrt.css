@@ -1,0 +1,174 @@
+/* kinnrt.css — predefined KINN runtime animations (0.4.0 S6 Phase C).
+   Shipped with every dynamic app dist (linked after styles.css).
+
+   Class contract (the kinnrt.js Anim layer applies these; names come
+   from the app's `animation` declarations — the nine names below are
+   the predefined set and carry their visuals here):
+
+     .kinn-enter-<name>          element mounts (base + -active both
+     .kinn-enter-active-<name>   applied in one frame; the animation
+                                 lives on the base class)
+     .kinn-exit-<name>           element is being removed — the runtime
+     .kinn-exit-active-<name>    waits ~450ms before dropping the node
+     .kinn-hover-<name>          :hover (the name's in-animation)
+     .kinn-press-<name>          :active (the in-animation, shorter)
+     .kinn-scroll-<name>         starts hidden, plays the in-animation
+     .kinn-scroll-<name>.kinn-in once the shared IntersectionObserver
+                                 has seen it (browsers without one
+                                 never get the class, so they render)
+
+   Declared (non-predefined) names ride the manifest; the compiler
+   generates their CSS in the later S8 step — until then a declared
+   name without CSS simply renders without visible motion (the S6
+   status quo, honestly gated).
+
+   Mobile rules (C.6): only transform and opacity animate. The
+   predefined timings are fixed (300ms in / 250ms out); declared
+   duration/easing values are validated (E3049/E3050) and used by the
+   S8 generator. prefers-reduced-motion disables everything and the
+   runtime's JS path skips entirely; :focus-visible outlines live in
+   styles.css and are never touched here.
+
+   Copyright (c) KINN contributors — same license as the compiler. */
+
+/* -- keyframes: the "in" animation of every predefined name -------- */
+
+@keyframes kinn-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes kinn-slide-up-in {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-slide-down-in {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-slide-left-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-slide-right-in {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-scale-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-pop-in {
+  0% { transform: scale(0.94); opacity: 0; }
+  60% { transform: scale(1.04); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes kinn-flip-x-in {
+  from { transform: perspective(400px) rotateX(90deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kinn-flip-y-in {
+  from { transform: perspective(400px) rotateY(90deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* Slides exit in the OPPOSITE direction they enter from, so they need
+   their own out keyframes; the other names reuse their in keyframes
+   with `animation-direction: reverse`. */
+
+@keyframes kinn-slide-up-out {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(-20px); opacity: 0; }
+}
+@keyframes kinn-slide-down-out {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(20px); opacity: 0; }
+}
+@keyframes kinn-slide-left-out {
+  from { transform: none; opacity: 1; }
+  to { transform: translateX(-20px); opacity: 0; }
+}
+@keyframes kinn-slide-right-out {
+  from { transform: none; opacity: 1; }
+  to { transform: translateX(20px); opacity: 0; }
+}
+
+/* -- enter / exit ---------------------------------------------------- */
+
+.kinn-enter-fade { animation: kinn-fade-in 300ms ease-out both; }
+.kinn-exit-fade { animation: kinn-fade-in 250ms ease-in reverse both; }
+
+.kinn-enter-slide-up { animation: kinn-slide-up-in 300ms ease-out both; }
+.kinn-exit-slide-up { animation: kinn-slide-up-out 250ms ease-in both; }
+.kinn-enter-slide-down { animation: kinn-slide-down-in 300ms ease-out both; }
+.kinn-exit-slide-down { animation: kinn-slide-down-out 250ms ease-in both; }
+.kinn-enter-slide-left { animation: kinn-slide-left-in 300ms ease-out both; }
+.kinn-exit-slide-left { animation: kinn-slide-left-out 250ms ease-in both; }
+.kinn-enter-slide-right { animation: kinn-slide-right-in 300ms ease-out both; }
+.kinn-exit-slide-right { animation: kinn-slide-right-out 250ms ease-in both; }
+
+.kinn-enter-scale { animation: kinn-scale-in 300ms ease-out both; }
+.kinn-exit-scale { animation: kinn-scale-in 250ms ease-in reverse both; }
+.kinn-enter-pop { animation: kinn-pop-in 300ms ease-out both; }
+.kinn-exit-pop { animation: kinn-pop-in 250ms ease-in reverse both; }
+.kinn-enter-flip-x { animation: kinn-flip-x-in 300ms ease-out both; }
+.kinn-exit-flip-x { animation: kinn-flip-x-in 250ms ease-in reverse both; }
+.kinn-enter-flip-y { animation: kinn-flip-y-in 300ms ease-out both; }
+.kinn-exit-flip-y { animation: kinn-flip-y-in 250ms ease-in reverse both; }
+
+/* -- hover / press: the name's in-animation on the pseudo-class ------ */
+
+.kinn-hover-fade:hover { animation: kinn-fade-in 250ms ease-out; }
+.kinn-hover-slide-up:hover { animation: kinn-slide-up-in 250ms ease-out; }
+.kinn-hover-slide-down:hover { animation: kinn-slide-down-in 250ms ease-out; }
+.kinn-hover-slide-left:hover { animation: kinn-slide-left-in 250ms ease-out; }
+.kinn-hover-slide-right:hover { animation: kinn-slide-right-in 250ms ease-out; }
+.kinn-hover-scale:hover { animation: kinn-scale-in 250ms ease-out; }
+.kinn-hover-pop:hover { animation: kinn-pop-in 300ms ease-out; }
+.kinn-hover-flip-x:hover { animation: kinn-flip-x-in 250ms ease-out; }
+.kinn-hover-flip-y:hover { animation: kinn-flip-y-in 250ms ease-out; }
+
+.kinn-press-fade:active { animation: kinn-fade-in 150ms ease-out; }
+.kinn-press-slide-up:active { animation: kinn-slide-up-in 150ms ease-out; }
+.kinn-press-slide-down:active { animation: kinn-slide-down-in 150ms ease-out; }
+.kinn-press-slide-left:active { animation: kinn-slide-left-in 150ms ease-out; }
+.kinn-press-slide-right:active { animation: kinn-slide-right-in 150ms ease-out; }
+.kinn-press-scale:active { animation: kinn-scale-in 150ms ease-out; }
+.kinn-press-pop:active { animation: kinn-pop-in 150ms ease-out; }
+.kinn-press-flip-x:active { animation: kinn-flip-x-in 150ms ease-out; }
+.kinn-press-flip-y:active { animation: kinn-flip-y-in 150ms ease-out; }
+
+/* -- scroll: hidden until the shared observer marks it .kinn-in ----- */
+
+.kinn-scroll-fade { opacity: 0; }
+.kinn-scroll-fade.kinn-in { animation: kinn-fade-in 300ms ease-out both; }
+.kinn-scroll-slide-up { opacity: 0; }
+.kinn-scroll-slide-up.kinn-in { animation: kinn-slide-up-in 300ms ease-out both; }
+.kinn-scroll-slide-down { opacity: 0; }
+.kinn-scroll-slide-down.kinn-in { animation: kinn-slide-down-in 300ms ease-out both; }
+.kinn-scroll-slide-left { opacity: 0; }
+.kinn-scroll-slide-left.kinn-in { animation: kinn-slide-left-in 300ms ease-out both; }
+.kinn-scroll-slide-right { opacity: 0; }
+.kinn-scroll-slide-right.kinn-in { animation: kinn-slide-right-in 300ms ease-out both; }
+.kinn-scroll-scale { opacity: 0; }
+.kinn-scroll-scale.kinn-in { animation: kinn-scale-in 300ms ease-out both; }
+.kinn-scroll-pop { opacity: 0; }
+.kinn-scroll-pop.kinn-in { animation: kinn-pop-in 300ms ease-out both; }
+.kinn-scroll-flip-x { opacity: 0; }
+.kinn-scroll-flip-x.kinn-in { animation: kinn-flip-x-in 300ms ease-out both; }
+.kinn-scroll-flip-y { opacity: 0; }
+.kinn-scroll-flip-y.kinn-in { animation: kinn-flip-y-in 300ms ease-out both; }
+
+/* -- accessibility: disable every animation, keep content visible ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="kinn-enter-"],
+  [class*="kinn-exit-"],
+  [class*="kinn-hover-"],
+  [class*="kinn-press-"],
+  [class*="kinn-scroll-"] {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

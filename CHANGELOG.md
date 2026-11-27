@@ -98,6 +98,83 @@ byte-identical.
   `examples/errors/app_div_zero.kin` (handler E4001 → envelope with
   kinFile/kinLine).
 
+### Added — S6 Phase C: predefined animations (kinnrt.css)
+
+- **`backend/kinnrt.css`**: the predefined animation stylesheet shipped
+  in every dynamic app dist (linked after `styles.css`). Nine names —
+  `fade`, `slide-up`, `slide-down`, `slide-left`, `slide-right`,
+  `scale`, `pop`, `flip-x`, `flip-y` — each as enter/exit class pairs
+  (`.kinn-enter-<name>` / `.kinn-exit-<name>`, keyframe-driven, the
+  `-active` twins are the two-class-pattern hooks), plus
+  `.kinn-hover-<name>:hover`, `.kinn-press-<name>:active` and the
+  `.kinn-scroll-<name>.kinn-in` scroll-reveal pair. Only transform and
+  opacity animate (C.6 mobile rules); `prefers-reduced-motion: reduce`
+  disables everything and restores visible content; `:focus-visible`
+  outlines (styles.css) are untouched.
+- **Anim layer completed in `kinnrt.js`**: enter/hover/press classes at
+  mount (element `a` attrs from the manifest templates), exit
+  coordination on list removal (the exiting row keeps its node with
+  the exit classes until `animationend` or a 450ms timeout, so the
+  animation is actually visible), the app-level page `transition`
+  animates `main` at boot, and one shared `IntersectionObserver`
+  marks scroll-revealed elements `.kinn-in` (browsers without it never
+  get the class, so content renders). `prefers-reduced-motion` skips
+  the entire JS path.
+- **Name resolution is unchanged** (honest): an app still *declares* the
+  names it references (`animation { transition "fade" { … } }` — E3047
+  checks every reference against the declared namespace, frozen by the
+  existing tests). The declaration supplies the name and the timing
+  values; the predefined *visuals* come from `kinnrt.css`. Declared
+  keyframes ride the manifest for the S8 generated-CSS step — a
+  declared name without a predefined visual renders without visible
+  motion until then.
+- **`kinnrt.js` stays inside the hard 16,384 B budget at 16,370 B**
+  (was 16,351): the Anim coordination is paid for by a size campaign —
+  the value-helper ABI between generated code and the runtime moved
+  from named `K.k_add` exports to the numeric table `K.h[i]` (the
+  fixed index order is documented in `webkir.rs`; the
+  `//@kinn:file:line` source comments still carry the debugging
+  context), hot DOM method names ride string locals
+  (`node[SA](…)`), and a dozen small refactors (joined report path,
+  `addSlot` signature, inlined headless guard). The differential
+  corpus re-verified the new ABI byte-for-byte.
+- **`webapp.rs`**: emits `kinnrt.css` into the dist and links it from
+  every page; the Studio preview (`preview.ts`) inlines it next to
+  `styles.css`. Website (0.3) dists are untouched and byte-identical.
+- **Examples**: `todo_app.kin` now fades list items in and out; new
+  `examples/web/anim_app.kin` exercises the full predefined surface
+  (page transition, enter/exit with a remove button, hover/press,
+  scroll-reveal).
+- **Tests**: Rust +2 (`webdiff_app_concat_built_arrays_join_kinds` —
+  the regression below — and `webapp_dist_ships_kinnrt_css_and_links_it`),
+  Studio +6 (animation-coordination describe: enter/hover/press classes,
+  enter on new items, exit wait + `animationend` finish, page
+  transition, no-IntersectionObserver degradation, reduced-motion skip)
+  and the todo e2e asserts the fade classes on added items.
+
+### Fixed — compiler (found by S6 Phase C)
+
+- **Minifier reserved-word bug** (latent): the deterministic short-name
+  pool could assign a JavaScript reserved word (`do`, `if`, `in`,
+  `of`) to a renamed declaration — the added Anim functions exhausted
+  the single-letter pool and produced a syntactically invalid artifact
+  (`function x(do)`). The candidate filter now skips the reserved
+  word set; `node --check` on the regenerated artifact is part of the
+  verification.
+- **Worklist type analysis panic** on concat-built arrays: a handler
+  that rebuilds an array through an empty literal + `+` concat chain
+  inside a loop (`var next: [string] = []; next = next + [rows[i]]`)
+  widened the slot to `Array(Any)` while the param path carried
+  `Array(Str)`; the merge asserted stack-kind equality and panicked.
+  Merges now join element kinds (monotone widening, array-aware —
+  `Array(Str) ⊔ Array(Any) = Array(Any)`, keeping the concat arm
+  precise) and only stack-*height* mismatches panic (those remain a
+  real compiler bug). Documented precision limit: an array whose
+  element kind widens to `Any` prints elements with the untyped
+  fallback — exact for strings/ints/bools, `2` instead of `2.0` for
+  floats; unreachable for console programs (array `+` is app-only)
+  and not exercised by any corpus program.
+
 ### Fixed
 
 - **Studio preview navigation interceptor** (`studio/src/build/

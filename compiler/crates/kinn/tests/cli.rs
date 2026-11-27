@@ -386,6 +386,10 @@ fn build_on_an_mpa_app_generates_the_dynamic_dist() {
     assert!(appjs.contains("app:Home:click:0"));
     let rt = std::fs::read_to_string(format!("{}/kinnrt.js", dir.display())).unwrap();
     assert!(rt.contains("KinnRT"));
+    // S6 Phase C: the predefined animation sheet ships and is linked.
+    let animcss = std::fs::read_to_string(format!("{}/kinnrt.css", dir.display())).unwrap();
+    assert!(animcss.contains(".kinn-enter-fade"));
+    assert!(index.contains("<link rel=\"stylesheet\" href=\"kinnrt.css\">"));
     // Deterministic rebuild: byte-identical dist.
     let dir2 = tempdir("appbuild2");
     kinn(&[
@@ -396,7 +400,7 @@ fn build_on_an_mpa_app_generates_the_dynamic_dist() {
         "--out",
         dir2.to_str().unwrap(),
     ]);
-    for f in ["index.html", "about.html", "app.js", "kinnrt.js", "styles.css"] {
+    for f in ["index.html", "about.html", "app.js", "kinnrt.js", "kinnrt.css", "styles.css"] {
         let a = std::fs::read(format!("{}/{}", dir.display(), f)).unwrap();
         let b = std::fs::read(format!("{}/{}", dir2.display(), f)).unwrap();
         assert_eq!(a, b, "dist file {} differs across rebuilds", f);

@@ -1,7 +1,9 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-27, 0.4.0 S1–S6 complete (size-budget
+**Last updated: 2026-11-28, 0.4.0 S1–S6 complete (S6 Phase C:
+predefined animations in kinnrt.css + real Anim coordination,
+16,370 B; size-budget
 correction applied): dynamic web
 applications ship — KIR→JS codegen differentially tested byte-for-byte
 against the VM, the 16 KB kinnrt.js reactive runtime, the MPA app dist
@@ -27,7 +29,7 @@ backwards compatibility is tested, including contextual keywords).
   a real MPA dist — semantic HTML skeleton per page, `styles.css`, the
   generated `app.js` (manifest + KIR-JS functions) and `kinnrt.js`
   (the checked-in **minified build artifact**, 16,351 B — regenerated
-  deterministically from the readable `kinnrt.src.js` (30,926 B) by
+  deterministically from the readable `kinnrt.src.js` by
   the in-tree minifier; byte-identity + the 16,384 B budget are
   asserted by tests and a dedicated CI job; zero deps).
   The JS is translated from the same KIR the VM runs

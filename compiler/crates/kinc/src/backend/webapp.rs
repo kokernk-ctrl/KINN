@@ -4,9 +4,11 @@
 //!
 //! S6 scope, honestly gated with E3071: **MPA only** (SPA routing is
 //! S7), **no forms/fields** (S9), and the host builtins `param` and
-//! `store_*`/`json_of`/`save_json` are rejected (S7/S9). Visible motion
-//! waits for S8's CSS: animation names ride in the templates, the
-//! runtime's Anim layer toggles classes only.
+//! `store_*`/`json_of`/`save_json` are rejected (S7/S9). Animation
+//! names ride in the templates and the runtime's Anim layer
+//! coordinates the `kinn-enter/exit/hover/press/scroll-<name>` classes
+//! against `kinnrt.css` (the nine predefined visuals shipped in the
+//! dist); compiler-generated CSS for declared names is the S8 step.
 //!
 //! The dist keeps 0.3's semantic skeleton (landmarks, skip link,
 //! `aria-current`) and renders dynamic content at mount **from the
@@ -723,7 +725,7 @@ fn kinc_version() -> String {
 
 /// Generate the dynamic web distribution for a validated MPA app.
 /// Files: `index.html` + `<slug>.html` per extra page + `styles.css` +
-/// `app.js` + `kinnrt.js`.
+/// `kinnrt.css` (predefined animations) + `app.js` + `kinnrt.js`.
 pub fn generate_app(app: &AppModel, module: &Module, file: &str) -> Result<Vec<OutputFile>, Diagnostic> {
     let mut bindings = Vec::new();
     let manifest = manifest_json(app, &[], module, file, &mut bindings)?;
@@ -739,10 +741,15 @@ pub fn generate_app(app: &AppModel, module: &Module, file: &str) -> Result<Vec<O
         files.push(OutputFile::text(&path, &page_html(app, &p.name, i)));
     }
     files.push(OutputFile::text("styles.css", &app_styles(app)));
+    files.push(OutputFile::text("kinnrt.css", KINNRT_CSS));
     files.push(OutputFile::text("app.js", &app_js));
     files.push(OutputFile::text("kinnrt.js", webkir::kinnrt_dist()));
     Ok(files)
 }
+
+/// The predefined animation stylesheet (S6 Phase C): one checked-in
+/// file, shipped verbatim in every dynamic app dist.
+const KINNRT_CSS: &str = include_str!("kinnrt.css");
 
 /// One MPA page: the 0.3 semantic skeleton with an empty `<main>` that
 /// the runtime fills at mount (data-kpage tells it which page this is).
@@ -777,6 +784,7 @@ fn page_html(app: &AppModel, page: &str, index: usize) -> String {
 <meta name=\"generator\" content=\"KINN 0.4.0 dynamic web backend\">\n\
 <title>{} · {}</title>\n\
 <link rel=\"stylesheet\" href=\"styles.css\">\n\
+<link rel=\"stylesheet\" href=\"kinnrt.css\">\n\
 </head>\n\
 <body>\n\
 <a class=\"kinn-skip\" href=\"#main\">Skip to content</a>\n\

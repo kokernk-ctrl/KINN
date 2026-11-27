@@ -2,12 +2,16 @@
 //
 // A todo list as a multi-page dynamic application: state, a computed
 // value, `each` with keys, `when` branches, an input bound to state and
-// click/input handlers. Runs in any browser with JavaScript enabled; the
-// compiled dist is plain HTML + CSS + the 16 KB kinnrt.js runtime +
-// generated app.js (KIR-JS functions + manifest).
+// click/input handlers — and, since S6 Phase C, predefined fade
+// animations on the list items (enter when added, exit when removed,
+// the visuals shipped in kinnrt.css). Runs in any browser with
+// JavaScript enabled; the compiled dist is plain HTML + CSS + the
+// 16 KB kinnrt.js runtime + generated app.js (KIR-JS functions +
+// manifest).
 //
 // Build:  kinn build examples/web/todo_app.kin --target web
-//         → build/web/ (index.html, done.html, styles.css, app.js, kinnrt.js)
+//         → build/web/ (index.html, done.html, styles.css, kinnrt.css,
+//           app.js, kinnrt.js)
 //
 // Scope note (honest): forms/fields, stores and route params are later
 // 0.4.0 steps (S9/S7) — this demo uses the S6 surface only.
@@ -28,6 +32,10 @@ func remaining_count(items: [string], done: [bool]) -> int {
 
 app "Todo" {
     navigation mpa
+
+    animation {
+        transition "fade" { duration 300 }
+    }
 
     theme {
         accent "#2563eb"
@@ -69,7 +77,7 @@ app "Todo" {
         }
 
         each items as item key item {
-            text item
+            text item enter "fade" exit "fade"
         }
 
         when remaining == 0 {

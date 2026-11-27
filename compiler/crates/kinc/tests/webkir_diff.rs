@@ -902,6 +902,84 @@ app "Loop" {
     driver_computed("app: computed derived", &c, "app:computed:derived");
 }
 
+#[test]
+fn webdiff_app_concat_built_arrays_join_kinds() {
+    // Regression (S6 Phase C): a handler that rebuilds an array through
+    // an empty literal + concat chain inside a `for` loop, wrapped in an
+    // `if`. The empty literal widens the slot to Array(Any) while the
+    // param path carries Array(Str): the worklist analysis must JOIN the
+    // kinds (monotone widening, array-aware) instead of panicking — and
+    // the generated JS must still produce byte-identical output to the
+    // VM through the shared concat arm.
+    let src = r#"*mode = B;
+app "Rebuild" {
+    state { rows: [string] = ["a", "b", "c"] }
+    page Home {
+        button "Drop last" {
+            on click {
+                if len(rows) > 0 {
+                    var next: [string] = [];
+                    for i in 0..len(rows) - 1 {
+                        next = next + [rows[i]];
+                    }
+                    rows = next;
+                }
+            }
+        }
+    }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    driver_diff("app: concat-built array joins kinds", &c, "app:Home:click:0", &["rows"]);
+}
+
+#[test]
+fn webapp_dist_ships_kinnrt_css_and_links_it() {
+    // S6 Phase C: the dynamic dist carries the predefined animation
+    // stylesheet, links it from every page, and the animation attrs ride
+    // the manifest templates.
+    let src = r#"*mode = B;
+app "Anim" {
+    animation {
+        transition "fade" { duration 300 }
+        transition "scale" { duration 300 }
+        keyframes "pop" { from { opacity 0 } to { opacity 1 } duration 300 }
+    }
+    transition "fade"
+    state { rows: [string] = ["a"] }
+    page Home {
+        title "Anim"
+        text "hi" enter "fade" exit "fade"
+        button "B" hover "pop" {
+            on click { rows = rows + ["x"]; }
+        }
+        each rows as row key row {
+            text row scroll "scale"
+        }
+    }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let files = kinc::backend::webapp::generate_app(app, &c.module, "anim.kin").expect("dist");
+    let text = |name: &str| {
+        let f = files.iter().find(|f| f.path == name).unwrap_or_else(|| panic!("{} emitted", name));
+        String::from_utf8_lossy(&f.data).into_owned()
+    };
+    let css = text("kinnrt.css");
+    assert!(css.contains(".kinn-enter-fade"));
+    assert!(css.contains(".kinn-exit-slide-up"));
+    assert!(css.contains(".kinn-hover-pop:hover"));
+    assert!(css.contains(".kinn-scroll-scale.kinn-in"));
+    assert!(css.contains("prefers-reduced-motion"));
+    let index = text("index.html");
+    assert!(index.contains("<link rel=\"stylesheet\" href=\"kinnrt.css\">"));
+    let js = text("app.js");
+    assert!(js.contains("\"enter\":\"fade\""));
+    assert!(js.contains("\"exit\":\"fade\""));
+    assert!(js.contains("\"scroll\":\"scale\""));
+    // The app-level page transition rides the manifest.
+    assert!(js.contains("\"transition\":\"fade\""));
+}
+
 // ===========================================================================
 // Corpus: synthesized .kin edge cases in tests/fixtures/webdiff/
 // ===========================================================================

@@ -9,6 +9,7 @@
   var B_MIN = -9223372036854775808n;
   var B_MAX = 9223372036854775807n;
   var FAST = 4294967296; /* operands within ±2^32: exact float64 math */
+  function sm(x) { return x > -FAST && x < FAST; }
 
   /* -- errors (C.7): Kin-level runtime errors map back to .kin lines -- */
   function KinRTError(code, message, line) {
@@ -21,7 +22,6 @@
     this.kin = true;
   }
   KinRTError.prototype = Object.create(Error.prototype);
-  KinRTError.prototype.constructor = KinRTError;
   function err(code, msg, line) { throw new KinRTError(code, msg, line); }
 
   /* -- checked i64 arithmetic through float64/BigInt (C.3) --
@@ -30,19 +30,19 @@
      Documented limit: literals/results beyond ±2^53 round like every
      f64 — the differential corpus keeps printed values exact. */
   function k_add(a, b, l) {
-    if (a > -FAST && a < FAST && b > -FAST && b < FAST) return a + b;
+    if (sm(a) && sm(b)) return a + b;
     var r = BigInt(a) + BigInt(b);
     if (r > B_MAX || r < B_MIN) err("E4004", "integer overflow in `+`", l);
     return Number(r);
   }
   function k_sub(a, b, l) {
-    if (a > -FAST && a < FAST && b > -FAST && b < FAST) return a - b;
+    if (sm(a) && sm(b)) return a - b;
     var r = BigInt(a) - BigInt(b);
     if (r > B_MAX || r < B_MIN) err("E4004", "integer overflow in `-`", l);
     return Number(r);
   }
   function k_mul(a, b, l) {
-    if (a > -FAST && a < FAST && b > -FAST && b < FAST) {
+    if (sm(a) && sm(b)) {
       var r0 = a * b;
       /* Products of two <2^32 operands can still exceed i64; for
          in-range products the float64 product is exact. */
@@ -55,14 +55,14 @@
   }
   function k_div(a, b, l) {
     if (b === 0) err("E4001", "division by zero", l);
-    if (a > -FAST && a < FAST && b > -FAST && b < FAST) return MT(a / b);
+    if (sm(a) && sm(b)) return MT(a / b);
     var r = BigInt(a) / BigInt(b);
     if (r > B_MAX || r < B_MIN) err("E4004", "integer overflow in `/`", l);
     return Number(r);
   }
   function k_mod(a, b, l) {
     if (b === 0) err("E4001", "modulo by zero", l);
-    if (a > -FAST && a < FAST && b > -FAST && b < FAST) return a % b;
+    if (sm(a) && sm(b)) return a % b;
     if (a === I64_MIN && b === -1) err("E4004", "integer overflow in `%`", l);
     return Number(BigInt(a) % BigInt(b));
   }
@@ -206,9 +206,8 @@
     depth: 0,           /* entered KIR-JS frames (E4002 parity, 1024) */
     files: {},          /* fn name → .kin file label (C.7 envelopes) */
     out: function (t) { /* output sink; replaced per host */
-      if (typeof g.process !== "undefined" && g.process && g.process.stdout) {
-        g.process.stdout.write(t + "\n");
-      }
+      var p = g.process;
+      if (p && p.stdout) p.stdout.write(t + "\n");
     },
     call: function (name, args) {
       var f = K.fns[name];
@@ -245,35 +244,44 @@
     }
   }
 
+  /* Post an envelope to the embedder, or console.error it standalone. */
+  function post(o, line) {
+    if (W && W.parent && W.parent !== W) {
+      W.parent.postMessage(o, "*");
+    } else if (g.console && g.console.error) {
+      g.console.error(line);
+    }
+  }
+
   /* -- error reporting (C.7): envelope for embedders, console otherwise - */
   K.__report = function (e) {
     if (e && e.kin) {
-      var env = {
-        kinnRuntimeError: { code: e.code, message: e.message, kinFile: e.kinFile || "", kinLine: e.line }
-      };
-      if (typeof W !== "undefined" && W.parent && W.parent !== W) {
-        W.parent.postMessage(env, "*");
-      } else {
-        var fn = g.console && g.console.error ? g.console.error.bind(g.console) : function () {};
-        fn("[" + e.code + "] " + e.message + " (line " + e.line + ")");
-      }
+      post(
+        {
+          kinnRuntimeError: { code: e.code, message: e.message, kinFile: e.kinFile || "", kinLine: e.line }
+        },
+        "[" + e.code + "] " + e.message + " (line " + e.line + ")"
+      );
       return;
     }
     var raw = e && e.message ? e.message : String(e);
-    if (typeof W !== "undefined" && W.parent && W.parent !== W) {
-      W.parent.postMessage({ kinnRuntimeError: { code: "E4099", message: raw, kinFile: "", kinLine: 0 } }, "*");
-    } else if (g.console && g.console.error) {
-      g.console.error("[E4099] " + raw);
-    }
+    post(
+      { kinnRuntimeError: { code: "E4099", message: raw, kinFile: "", kinLine: 0 } },
+      "[E4099] " + raw
+    );
   };
 
   /* Exported helper surface: the generated app.js/console module reads
-     these off K (K.k_add, …) so no globals leak beyond KinnRT. */
+     these off K (K.h[i] below, K.k_call) so no globals leak beyond
+     KinnRT. */
   K.KinRTError = KinRTError;
   K.k_call = k_call;
-  var X = [k_add, k_sub, k_mul, k_div, k_mod, k_neg, k_iabs, k_fmin, k_fmax, k_fdiv, k_fmt, k_eq, k_acat, k_aget, k_aset, k_len, k_upper, k_lower, k_trim, k_contains, k_split, k_join, k_f2i];
-  var XN = "k_add k_sub k_mul k_div k_mod k_neg k_iabs k_fmin k_fmax k_fdiv k_fmt k_eq k_acat k_aget k_aset k_len k_upper k_lower k_trim k_contains k_split k_join k_f2i".split(" ");
-  for (var xi = 0; xi < X.length; xi++) K[XN[xi]] = X[xi];
+  /* Value-helper table (the generated-code ABI): `K.h[i]` — the index
+     order is fixed and documented in backend/webkir.rs (k_add=0 …
+     k_f2i=22). Numeric slots keep the minified runtime small; the
+     `//@kinn:file:line` comments in the generated code carry the
+     debugging context instead of helper names. */
+  K.h = [k_add, k_sub, k_mul, k_div, k_mod, k_neg, k_iabs, k_fmin, k_fmax, k_fdiv, k_fmt, k_eq, k_acat, k_aget, k_aset, k_len, k_upper, k_lower, k_trim, k_contains, k_split, k_join, k_f2i];
 
   /* -- S6: the reactive core (C.2/C.5/C.6) --------------------------------
      Layers: State (values + computed caches), Flush (microtask batch over
@@ -282,13 +290,18 @@
      delegated listener set + builtins), Lifecycle (mount/patch — the ONE
      DOM renderer), Hydrator (MPA state via sessionStorage), Store
      (localStorage + schema-hash guard; language surface is S9), Anim
-     (class toggles only — visible motion waits for S8 CSS), Reporter
-     (already above). prefers-reduced-motion disables the JS animation
-     path entirely. */
+     (S6 Phase C class coordination: enter/exit/hover/press/scroll via
+     kinnrt.css's predefined animations; declared-name CSS is S8).
+     prefers-reduced-motion disables the JS animation path entirely. */
   var HOP = Object.prototype.hasOwnProperty;
   var AI = Array.isArray;
   var MT = Math.trunc;
   var W = g.window, D = g.document;
+  /* Hot DOM method names ride string locals: the minifier keeps member
+     names verbatim, so a repeated `node[SA](...)` (setAttribute) or
+     `parent[AP](node)` (appendChild) minifies far smaller than the
+     spelled-out member access. */
+  var SA = "setAttribute", AE = "addEventListener", AP = "appendChild";
   var JSS = JSON.stringify, JSP = JSON.parse;
   var M = null;      /* manifest */
   var st = {};       /* state values (name → value) */
@@ -298,8 +311,7 @@
   var flushQ = false;
   var dirty = {};    /* state name → changed since last flush */
   var REDUCED = false;
-
-  function nowin() { return !W; }
+  var IO = null;       /* shared IntersectionObserver (scroll anims) */
 
   function resolve(name, env) {
     for (var e = env; e; e = e.p) {
@@ -333,7 +345,7 @@
       if (r.l !== s) { r.l = s; r.nd.data = s; }
     } else if (r.kind === "attr") {
       var t = k_fmt(v, r.t);
-      if (r.l !== t) { r.l = t; r.el.setAttribute(r.at, t); }
+      if (r.l !== t) { r.l = t; r.el[SA](r.at, t); }
     } else if (r.kind === "input") {
       var u = k_fmt(v, r.t);
       if (r.l !== u) { r.l = u; r.el.value = u; }
@@ -348,8 +360,8 @@
       if (r.l === on) return;
       r.l = on;
       setLive(r.tA, on); setLive(r.oA, !on && r.ho);
-      r.tEl.setAttribute("data-off", on ? "0" : "1");
-      if (r.ho) r.oEl.setAttribute("data-off", on ? "1" : "0");
+      r.tEl[SA]("data-off", on ? "0" : "1");
+      if (r.ho) r.oEl[SA]("data-off", on ? "1" : "0");
     } else if (r.kind === "each") {
       reconcile(r, v);
     }
@@ -423,19 +435,39 @@
   }
 
   function removeChild(r, child) {
-    for (var i = 0; i < child.nodes.length; i++) {
-      if (child.nodes[i].parentNode) child.nodes[i].parentNode.removeChild(child.nodes[i]);
-    }
+    /* Binding records die now; the DOM nodes wait for the exit
+       animation (Anim, S6 Phase C) when the template declared one.
+       The 450ms timeout is the honest fallback — transitionend /
+       animationend fire first when they fire at all. */
     for (var j = 0; j < child.recs.length; j++) {
       var idx = recs.indexOf(child.recs[j]);
       if (idx >= 0) recs.splice(idx, 1);
+    }
+    var nodes = child.nodes;
+    if (child.ex && !REDUCED && nodes[0].classList) {
+      kac(nodes[0], "exit", child.ex);
+      var fin = function () {
+        if (fin.d) return;
+        fin.d = 1;
+        dropNodes(nodes);
+      };
+      setTimeout(fin, 450);
+      nodes[0][AE]("animationend", fin);
+    } else {
+      dropNodes(nodes);
+    }
+  }
+
+  function dropNodes(nodes) {
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
     }
   }
 
   /* Flush (C.5): one microtask; recompute dirty computeds in declaration
      order, re-evaluate dirty bindings (static dep map + force), patch. */
   function flush() {
-    if (nowin()) { flushNow(); return; }
+    if (!W) { flushNow(); return; }
     if (flushQ) return;
     flushQ = true;
     Promise.resolve().then(function () { flushQ = false; flushNow(); });
@@ -480,13 +512,13 @@
   }
 
   function hydrateSave() {
-    if (nowin() || !M) return;
+    if (!W || !M) return;
     try { W.sessionStorage.setItem("kinn:" + M.name, JSS(st)); }
     catch (e) { /* privacy mode: state is simply not persisted */ }
   }
 
   function hydrateRestore() {
-    if (nowin() || !M) return;
+    if (!W || !M) return;
     try {
       var raw = W.sessionStorage.getItem("kinn:" + M.name);
       if (!raw) return;
@@ -500,7 +532,7 @@
 
   /* Store layer (present; the language surface arrives with S9). */
   function storeLoad(name, keys, tags) {
-    if (nowin()) return;
+    if (!W) return;
     try {
       var raw = W.localStorage.getItem("kinn:store:" + name);
       if (!raw) return;
@@ -516,6 +548,35 @@
   }
   K.storeLoad = storeLoad;
 
+  /* -- Anim (S6 Phase C): class coordination --------------------------
+     Names map to kinn-enter/exit/hover/press/scroll-<name> classes;
+     kinnrt.css ships the predefined visuals, S8 will generate the
+     declared ones. The runtime applies base + -active together and the
+     CSS carries the motion (keyframes on the base class); removal
+     waits ~450ms (removeChild). prefers-reduced-motion skips it all. */
+  function kac(node, kind, name) {
+    if (REDUCED) return;
+    var pre = "kinn-" + kind + "-";
+    node.classList.add(pre + name, pre + "active-" + name);
+  }
+
+  function animIn(node, a) {
+    if (a.enter) kac(node, "enter", a.enter);
+    if (a.hover) kac(node, "hover", a.hover);
+    if (a.press) kac(node, "press", a.press);
+    if (a.scroll && W.IntersectionObserver) {
+      kac(node, "scroll", a.scroll);
+      if (!IO) {
+        IO = new W.IntersectionObserver(function (es) {
+          for (var i = 0; i < es.length; i++) {
+            if (es[i].isIntersecting) es[i].target.classList.add("kinn-in");
+          }
+        });
+      }
+      IO.observe(node);
+    }
+  }
+
   /* -- Lifecycle: the ONE DOM renderer (C.2/C.6) --------------------------
      createElement/textContent/setAttribute/insertBefore only; static
      strings are already inlined in templates. `env` is the scope chain
@@ -526,27 +587,27 @@
     return e;
   }
 
-  function addSlot(x, into, kind, extra) {
+  function addSlot(x, into, kind, env, el, attr) {
     /* x = literal string | {b: bindingIndex}; returns a text node or the
        binding record's target once evaluated. */
     if (typeof x === "string") {
       var t = D.createTextNode(x);
-      into.appendChild(t);
+      into[AP](t);
       return null;
     }
     var b = M.bindings[x.b];
     var r = {
       kind: kind, fn: b.fn, p: b.p, d: b.d, t: b.t,
-      env: extra.env, li: true, fo: true, l: undefined,
+      env: env, li: true, fo: true, l: undefined,
     };
     if (kind === "text") {
       var node = D.createTextNode("");
       r.nd = node;
-      into.appendChild(node);
+      into[AP](node);
     } else if (kind === "attr") {
-      r.el = extra.el; r.at = extra.at;
+      r.el = el; r.at = attr;
     } else if (kind === "input") {
-      r.el = extra.el;
+      r.el = el;
     }
     recs.push(r);
     return r;
@@ -558,24 +619,24 @@
     var node;
     if (k === "title" || k === "h" || k === "text") {
       node = el(k === "title" ? "h1" : k === "h" ? "h2" : "p", k === "title" ? "kinn-title" : null);
-      addSlot(n.x, node, "text", { env: env });
+      addSlot(n.x, node, "text", env);
     } else if (k === "button" || k === "link") {
       node = el(k === "button" ? "button" : "a", k === "button" ? "kinn-button" : "kinn-link");
       if (k === "button") node.type = "button";
-      if (n.o) node.setAttribute("href", n.o + ".html");
-      addSlot(n.x, node, "text", { env: env });
+      if (n.o) node[SA]("href", n.o + ".html");
+      addSlot(n.x, node, "text", env);
       attachHandlers(node, n.h, env);
     } else if (k === "image") {
       node = el("img", null);
-      addSlot(n.s, node, "attr", { env: env, el: node, attr: "src" });
-      addSlot(n.l, node, "attr", { env: env, el: node, attr: "alt" });
+      addSlot(n.s, node, "attr", env, node, "src");
+      addSlot(n.l, node, "attr", env, node, "alt");
       attachHandlers(node, n.h, env);
     } else if (k === "hr") {
       node = el("hr", null);
     } else if (k === "input") {
       node = el("input", "kinn-input");
-      node.setAttribute("data-kb", n.n);
-      var r = addSlot(n.x, node, "input", { env: env, el: node });
+      node[SA]("data-kb", n.n);
+      var r = addSlot(n.x, node, "input", env, node);
       if (r) r.t = r.t || "s";
       attachHandlers(node, n.h, env);
     } else if (k === "when") {
@@ -584,7 +645,7 @@
       var tRecs = renderView(n.t, tEl, env);
       var hasO = n.o && n.o.length;
       var oRecs = hasO ? renderView(n.o, oEl, env) : [];
-      node.appendChild(tEl); node.appendChild(oEl);
+      node[AP](tEl); node[AP](oEl);
       var b = M.bindings[n.c.b];
       var rec = {
         kind: "when", fn: b.fn, p: b.p, d: b.d, t: b.t,
@@ -592,7 +653,7 @@
         tEl: tEl, oEl: oEl, tA: tRecs, oA: oRecs, ho: hasO,
       };
       setLive(oRecs, false);
-      oEl.setAttribute("data-off", "1");
+      oEl[SA]("data-off", "1");
       recs.push(rec);
     } else if (k === "each") {
       node = el("div", "kinn-each");
@@ -608,13 +669,10 @@
     } else if (k === "comp") {
       node = instantiate(n, parent, env);
     }
-    if (n.a && n.a.enter && !REDUCED && node) {
-      /* Anim (S6): class toggle only — visible motion waits for S8 CSS. */
-      node.setAttribute("data-ka", n.a.enter);
-    }
+    if (n.a && node && node.classList) animIn(node, n.a);
     if (node) {
       if (node.nodeType === 1 && env && env.inst) node.__kenv = env;
-      parent.appendChild(node);
+      parent[AP](node);
     }
     return node;
   }
@@ -637,8 +695,17 @@
     var recsBefore = recs.length;
     renderView(listRec.tp, holder, env);
     var childRecs = recs.slice(recsBefore);
-    listRec.el.appendChild(holder);
-    return { key: key, ks: ks, env: env, nodes: [holder], recs: childRecs };
+    listRec.el[AP](holder);
+    /* The exit name (top-level template node, first found) rides the
+       child so removal can animate the whole row. */
+    var ex = null;
+    for (var i = 0; i < listRec.tp.length; i++) {
+      if (listRec.tp[i].a && listRec.tp[i].a.exit) {
+        ex = listRec.tp[i].a.exit;
+        break;
+      }
+    }
+    return { key: key, ks: ks, env: env, nodes: [holder], recs: childRecs, ex: ex };
   }
 
   function instantiate(n, parent, parentEnv) {
@@ -696,9 +763,7 @@
 
   function attachHandlers(node, hIdxs, env) {
     if (!hIdxs || !hIdxs.length) return;
-    var s = "";
-    for (var i = 0; i < hIdxs.length; i++) s += (i ? " " : "") + hIdxs[i];
-    node.setAttribute("data-kh", s);
+    node[SA]("data-kh", hIdxs.join(" "));
     if (env && env.inst) node.__kenv = env;
   }
 
@@ -775,7 +840,7 @@
        mount's state (tests, re-mounts). */
     M = manifest;
     st = {}; cv = {}; cdirty = {}; recs = []; dirty = {}; flushQ = false;
-    if (nowin()) return; /* headless (tests) — nothing to render */
+    if (!W) return; /* headless (tests) — nothing to render */
     
     REDUCED = W.matchMedia && W.matchMedia("(prefers-reduced-motion: reduce)").matches;
     /* State defaults from `app:init`. */
@@ -797,29 +862,32 @@
       if (M.pages[p].name === pname) { page = M.pages[p]; break; }
     }
     if (main) renderView(page.view, main, null);
+    /* Page transition (app `transition "name"`): the in-animation on
+       the main element at boot. */
+    if (main && typeof M.transition === "string") kac(main, "enter", M.transition);
     /* Delegated listeners (one set per document). */
     var evs = "click input change submit keydown keyup".split(" ");
     for (var e = 0; e < evs.length; e++) {
-      D.addEventListener(evs[e], dispatch);
+      D[AE](evs[e], dispatch);
     }
     /* Reporter: browser errors become envelopes. */
-    W.addEventListener("error", function (ev) {
+    W[AE]("error", function (ev) {
       K.__report(ev.error || new Error(ev.message || "script error"));
     });
-    W.addEventListener("unhandledrejection", function (ev) {
+    W[AE]("unhandledrejection", function (ev) {
       K.__report(ev.reason instanceof Error ? ev.reason : new Error(String(ev.reason)));
     });
     /* console.* forwarding (embedded only). */
     if (W.parent && W.parent !== W) {
       var fwd = function (level) {
-        var orig = W.console[level].bind(W.console);
+        var orig = W.console[level];
         W.console[level] = function () {
           var parts = [];
           for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));
           try {
             W.parent.postMessage({ kinnConsole: { level: level, text: parts.join(" ") } }, "*");
           } catch (e) {}
-          orig.apply(null, arguments);
+          orig.apply(W.console, arguments);
         };
       };
       var levels = "log info warn error".split(" ");
@@ -832,4 +900,4 @@
   };
 
   g.KinnRT = K;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(globalThis);

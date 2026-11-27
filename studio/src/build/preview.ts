@@ -2,12 +2,13 @@
  * In-Studio preview of a generated web build.
  *
  * The generated dist is a plain multi-page site — static (0.3) or
- * dynamic (0.4 S6: kinnrt.js + app.js). To preview it inside
- * Studio (which has no filesystem), each page is rendered
- * self-contained: the stylesheet and the generated app.js are inlined
- * and internal navigation is intercepted, so clicking a link or button
- * switches the previewed page instead of trying to fetch a relative
- * URL. `download .zip` gives the real multi-page dist for hosting.
+ * dynamic (0.4 S6: kinnrt.js + kinnrt.css + app.js). To preview it
+ * inside Studio (which has no filesystem), each page is rendered
+ * self-contained: the stylesheets and the generated app.js are
+ * inlined and internal navigation is intercepted, so clicking a link
+ * or button switches the previewed page instead of trying to fetch a
+ * relative URL. `download .zip` gives the real multi-page dist for
+ * hosting.
  */
 
 import type { OutputFile } from '../wasm/kinnwasm';
@@ -34,6 +35,7 @@ export function buildPreviewHtml(files: OutputFile[], pagePath: string): string 
   const page = files.find((f) => f.path === pagePath);
   if (!page) throw new Error(`no generated page named '${pagePath}'`);
   const css = files.find((f) => f.path === 'styles.css')?.content ?? '';
+  const animCss = files.find((f) => f.path === 'kinnrt.css')?.content ?? '';
   const rt = files.find((f) => f.path === 'kinnrt.js')?.content ?? '';
   const js = files.find((f) => f.path === 'app.js')?.content ?? '';
 
@@ -42,6 +44,14 @@ export function buildPreviewHtml(files: OutputFile[], pagePath: string): string 
     html = html.replace(
       /<link rel="stylesheet" href="styles.css">/,
       `<style>\n${css}\n</style>`,
+    );
+  }
+  // Dynamic apps only (S6 Phase C): the predefined animation sheet.
+  // Static 0.3 sites have no kinnrt.css link and are untouched.
+  if (animCss) {
+    html = html.replace(
+      /<link rel="stylesheet" href="kinnrt\.css">/,
+      `<style>\n${animCss}\n</style>`,
     );
   }
   // Dynamic apps only: the runtime loads before the generated module
