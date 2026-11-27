@@ -1043,31 +1043,61 @@ Estimates are ordering and dependency statements, not dates.
   works end-to-end in the preview; DOM mutation count per update ==
   expected minimal set (asserted in tests); all Studio tests green.
 
-### S7 — Router (SPA) + hydration (MPA)
+### S7 — Router (SPA) + hydration (MPA) — IMPLEMENTED 2026-11-28
 
 - Scope: Router (history + hash fallback, params, not_found, title/
-  focus/aria-current, transitions) and Hydrator/Store (sessionStorage
-  snapshots, localStorage stores with schema hash, `file://` fallback
-  reporting) — B.9/B.10/C.5.
-- Tests: routing table tests (push/replace/back/forward/unknown),
-  param access, not-found rendering, transition sequencing; hydration
-  round-trip (MPA page A → page B state visibility; corrupted snapshot
-  → clean reset); schema-hash migration test.
-- **Acceptance:** SPA navigation never reloads the document (test
-  asserts singleton document); `file://` simulation uses hash fallback;
-  MPA passes state across pages through the documented channel only.
+  aria-current, transitions) and the MPA Hydrator (sessionStorage
+  snapshots) — B.9/B.10/C.5. The STORE hydration layer moved to S9
+  with its language surface (nothing could write `kinn:store:` keys
+  yet; the manifest `stores` key stays) — a size-campaign decision
+  recorded in PROBLEM_REGISTRY P-033.
+- Shape: kinnrt.js carries the router CORE (route matching on
+  compile-time anchored regexes, `param()` via K.h[23], `K.route`
+  push/replace/none, the page swap the MPA mount shares); app.js
+  carries the compiler-GENERATED URL adapter (history/hash writes,
+  base-path recovery for rewritten deep links, popstate/hashchange,
+  sessionStorage route save/restore, the `[data-open]` click
+  interceptor, title + aria-current truthing) behind the public
+  K.onurl/K.onboot/K.onpage hooks.
+- Tests: routing (deep link, back/forward, unknown → notFound, hash
+  mode), `param()` values (URL, empty via links, malformed-% guard),
+  route save/restore, base recovery under a path prefix, idempotent
+  re-route, MPA untouched; e2e through the real wasm backend.
+- **Acceptance:** SPA navigation never reloads the document (the dist
+  is a single index.html — asserted); `file://`-style origins route
+  through the hash; MPA state crosses pages through the hydrator.
+  Deviations from the B.9 sketch, honestly: route paths are RELATIVE
+  (frozen S2 grammar), MPA route params stay query-style in the sketch
+  but MPA dists do not synthesize per-route files (0.4 MPA ships one
+  file per page; `open` navigates files) — the SPA surface carries the
+  dynamic segments; `open <Page>` follows the page's canonical route
+  with `:segs` resolving to "" (real values arrive with S9's
+  `navigate(path)`); no scroll-position restoration yet (S9+).
 
-### S8 — Animations
+### S8 — Animations — IMPLEMENTED 2026-11-28 (CSS generation)
 
-- Scope: CSS generation for keyframes/transitions/hover/press; Anim
-  coordinator (enter/exit waits, scroll observer); reduced-motion
-  behavior (C.6).
-- Tests: generated-CSS golden tests; enter/exit sequencing (exit waits
-  for transitionend or timeout); scroll-once reveal; reduced-motion
-  disables JS animation paths.
-- **Acceptance:** no layout-thrash pattern in the runtime (asserted by
-  batching tests); animations are pure declarations in source; 0.3
-  static stylesheet byte-identical.
+- Scope: CSS generation for declared keyframes/transitions (the S6
+  Phase C runtime coordination — enter/exit waits, scroll observer,
+  reduced-motion — shipped earlier and is unchanged).
+- Shape: every declared keyframes emits `@keyframes kinn-<name>-in`
+  (step props → `opacity`, `filter: blur()`, ONE chained `transform`:
+  perspective, translateZ, x, y, rotate_x, rotate_y, rotate_z, scale,
+  rotate — 3D is pure CSS, no JS animation loop) plus the five
+  trigger rules with the declared duration/delay/easing and a
+  per-name reduced-motion block; declared transitions retime the
+  predefined visual of the same name; generated CSS appends after the
+  predefined sheet (a colliding declared name wins by cascade; first
+  declaration wins on duplicates). E3068 (name shape) and E3069
+  (literal values, 0..100 step percents) keep the generated CSS
+  compile-time data.
+- Tests: generated-CSS golden tests (3D chain order, timing, cascade
+  override, string units); the anim_app e2e; reduced-motion blocks.
+- **Acceptance:** no layout-thrash pattern in the runtime; animations
+  are pure declarations in source; 0.3 static stylesheet
+  byte-identical. Deviation from the B.8 sketch: a RESTING 3D pose
+  (the sketch's `card { transform { … } }`) is not in the frozen
+  grammar — the honest equivalent is a keyframes `to { rotate_y 25deg }`
+  with an `enter` trigger (fill-mode `both` keeps the pose).
 
 ### S9 — Forms, validation, stores, JSON
 

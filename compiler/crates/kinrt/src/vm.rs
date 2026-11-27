@@ -483,6 +483,23 @@ fn exec_native(id: NativeId, stack: &mut Vec<Value>, line: u32) -> Result<Value,
                 (a, b) => Err(internal("join", &a, &b, line)),
             }
         }
+        // 0.4.0 S7 (app scope only): the route table lives in the WEB
+        // runtime (kinnrt.js reads the current URL); the plain VM has no
+        // router to consult. Console programs can never reach this arm
+        // (the checker resolves `param` only inside `app` programs, and
+        // app code is translated by the web backend, not executed here),
+        // so refusing honestly beats inventing a host.
+        NativeId::Param => {
+            let v = stack.pop().expect("vm bug: param underflow");
+            match v {
+                Value::Str(_) => Err(KinError::new(
+                    "E4000",
+                    "param() is a web-router builtin — this host has no route context".to_string(),
+                    line,
+                )),
+                v => Err(internal("param", &v, &Value::Unit, line)),
+            }
+        }
     }
 }
 

@@ -124,7 +124,7 @@ function — a threaded `switch` with one case per instruction and
   against the exact minified runtime the dist ships.
 
 `kinnrt.js` (the checked-in minified build artifact of the readable
-`kinnrt.src.js` source: 16,370 B, hard 16,384 B budget asserted by
+`kinnrt.src.js` source: 16,307 B, hard 16,384 B budget asserted by
 tests and the dedicated `kinnrt-size-gate` CI job, zero dependencies,
 no `eval`/`new Function`/`innerHTML`) is the reactive layer set the
 generated `app.js` mounts into: State + computed caches over the S4
@@ -133,9 +133,14 @@ patches only changed text/attrs, keyed Lists reconciliation (append /
 remove / reorder, duplicate keys keep the newest, in-place mutation
 detected by fingerprint), one delegated event-listener set per
 document with the handler ABI + event builtins, a single DOM renderer
-(Lifecycle), sessionStorage state transfer for MPA (Hydrator), a
-localStorage store layer with schema-hash guard (Store; language
-surface in S9), the Anim coordination layer (S6 Phase C, 2026-11-28:
+(Lifecycle), sessionStorage state transfer for MPA (Hydrator), the
+Router core (S7, 2026-11-28: route matching against the manifest's
+compile-time anchored regexes — first route wins, `:name` captures
+decoded with a malformed-`%` guard; `param()` as the K.h[23] value
+helper; `K.route(path, mode)` with push/replace/URL-already-right
+modes and `:name` segments resolving to `""`; the page swap the SPA
+router and the MPA mount share), the Anim coordination layer (S6
+Phase C, 2026-11-28:
 enter/hover/press/scroll classes at mount, exit animations hold the
 node until `animationend`/timeout, the app-level page transition
 animates `main` at boot, one shared IntersectionObserver marks
@@ -148,3 +153,20 @@ embedded). The deterministic minifier lives in `webkir.rs` and is
 tested for byte-stable output and the budget; generated code reaches
 the value helpers through the numeric `K.h[i]` table (fixed order,
 documented in `webkir.rs`).
+
+**The SPA URL adapter is GENERATED, not shipped** (S7): the
+document-specific half of the router — history `pushState`/
+`replaceState` with the `#/…` hash fallback for non-http documents
+(`file://`, `about:srcdoc`, `blob:`), the base-path analysis (the
+document directory, or the shortest pathname prefix whose remainder
+matches a route — what a server-rewritten deep link looks like), the
+`popstate`/`hashchange` listeners, the sessionStorage route
+save/restore, the `[data-open]` click interceptor and the
+title/`aria-current` truthing — is emitted by the compiler into each
+SPA app's `app.js` behind three public hooks (`K.onurl`, `K.onboot`,
+`K.onpage`) plus `K.route`/`K.match`. Per-app code (like binding
+functions) carries what is per-document; the runtime keeps only what
+every app shares — the 16 KB budget stays honest. The localStorage
+store layer moved to S9 with its language surface (a size-campaign
+decision recorded in PROBLEM_REGISTRY P-033; the manifest `stores`
+key stays).

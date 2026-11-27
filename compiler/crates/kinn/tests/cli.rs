@@ -338,10 +338,11 @@ fn check_app_example_passes_grammar_and_presence_rules() {
 }
 
 #[test]
-fn build_on_an_spa_app_reports_the_honest_e3071_guard() {
-    // No pretending: tasks_app.kin declares `navigation spa` (S7) and
-    // forms/fields (S9) — the S6 runtime rejects exactly that, naming
-    // the roadmap step, instead of emitting a dist it cannot honor.
+fn build_on_tasks_app_reports_the_honest_e3071_guard() {
+    // No pretending: SPA routing is IMPLEMENTED (S7), but tasks_app.kin
+    // still declares `form`/`field` + store builtins (S9) — the runtime
+    // rejects exactly that, naming the roadmap step, instead of
+    // emitting a dist it cannot honor.
     let dir = tempdir("appguard");
     let out = kinn(&[
         "build",
@@ -354,7 +355,76 @@ fn build_on_an_spa_app_reports_the_honest_e3071_guard() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E3071"), "stderr: {}", stderr);
-    assert!(stderr.contains("spa"));
+    assert!(stderr.contains("form"), "stderr: {}", stderr);
+}
+
+#[test]
+fn build_spa_app_emits_single_document_dist() {
+    // S7: `navigation spa` builds for real — ONE index.html (the router
+    // owns the URL), the generated URL adapter inside app.js, the
+    // effective route table + paths + notFound in the manifest, and a
+    // byte-identical rebuild.
+    let dir = tempdir("spadist");
+    let out = kinn(&[
+        "build",
+        &format!("{}/web/spa_app.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("SPA"), "stdout: {}", stdout);
+    let files = |d: &std::path::Path| {
+        let mut names: Vec<String> = std::fs::read_dir(d)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(
+        files(&dir),
+        vec![
+            "app.js".to_string(),
+            "index.html".to_string(),
+            "kinnrt.css".to_string(),
+            "kinnrt.js".to_string(),
+            "styles.css".to_string(),
+        ]
+    );
+    let index = std::fs::read_to_string(dir.join("index.html")).unwrap();
+    assert!(index.contains("data-nav=\"Home\""));
+    assert!(index.contains("data-open=\"item/:id\""));
+    let app_js = std::fs::read_to_string(dir.join("app.js")).unwrap();
+    assert!(app_js.contains("K.onurl ="));
+    assert!(app_js.contains("K.onboot ="));
+    assert!(app_js.contains("K.onpage ="));
+    assert!(app_js.contains("\"navigation\":\"spa\""));
+    assert!(app_js.contains("\"notFound\":\"Missing\""));
+    assert!(app_js.contains("\"re\":\"^item/([^/]*)$\""));
+    assert!(app_js.contains("\"paths\":{\"Home\":\"\",\"ItemDetail\":\"item/:id\""));
+    // The declared keyframes CSS (S8) rides kinnrt.css.
+    let css = std::fs::read_to_string(dir.join("kinnrt.css")).unwrap();
+    assert!(css.contains("@keyframes kinn-fade-in"));
+    assert!(css.contains(".kinn-enter-fade { animation: kinn-fade-in 200ms ease-out both; }"));
+
+    // Determinism: a rebuild is byte-identical.
+    let dir2 = tempdir("spadist2");
+    kinn(&[
+        "build",
+        &format!("{}/web/spa_app.kin", EXAMPLES),
+        "--target",
+        "web",
+        "--out",
+        dir2.to_str().unwrap(),
+    ]);
+    for f in ["index.html", "app.js", "kinnrt.css", "kinnrt.js", "styles.css"] {
+        let a = std::fs::read(dir.join(f)).unwrap();
+        let b = std::fs::read(dir2.join(f)).unwrap();
+        assert_eq!(a, b, "dist file {} differs across rebuilds", f);
+    }
 }
 
 #[test]

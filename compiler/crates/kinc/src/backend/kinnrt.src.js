@@ -18,7 +18,6 @@
     this.message = message;
     this.line = line;
     this.kinLine = line;
-    this.kinFile = "";
     this.kin = true;
   }
   KinRTError.prototype = Object.create(Error.prototype);
@@ -156,13 +155,9 @@
   /* -- strings: B.10 helpers, Unicode-honest --------------------------- */
   /* Code-point length (Rust chars().count(), not UTF-16 units). */
   function k_len(s) {
-    var n = 0;
-    for (var i = 0; i < s.length; i++) {
-      var c = s.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff) i++;
-      n++;
-    }
-    return n;
+    /* String iteration yields code points — exactly the VM's
+       `s.chars().count()`. */
+    return [...s].length;
   }
   /* One-to-one case mapping: a code point whose mapping expands to
      several code points keeps its original form (same rule as the VM). */
@@ -185,7 +180,7 @@
     while (b > a && WS.test(s.charAt(b - 1))) b--;
     return s.slice(a, b);
   }
-  function k_contains(s, sub) { return s.indexOf(sub) !== -1; }
+  function k_contains(s, sub) { return s.includes(sub); }
   function k_split(s, sep) {
     return sep === "" ? Array.from(s) : s.split(sep);
   }
@@ -201,13 +196,11 @@
 
   /* -- module table and call discipline ---------------------------------- */
   var K = {
-    version: "0.4.0",
     fns: {},            /* name → function (and numeric index → same) */
     depth: 0,           /* entered KIR-JS frames (E4002 parity, 1024) */
     files: {},          /* fn name → .kin file label (C.7 envelopes) */
-    out: function (t) { /* output sink; replaced per host */
-      var p = g.process;
-      if (p && p.stdout) p.stdout.write(t + "\n");
+    out: function (t) { /* output sink; console.log writes stdout in Node */
+      if (g.console && g.console.log) g.console.log(t);
     },
     call: function (name, args) {
       var f = K.fns[name];
@@ -224,7 +217,7 @@
       K.files[name] = file;
       fn.kinn_name = name;
       return fn;
-    }
+    },
   };
 
   function k_call(f, args, l) {
@@ -278,10 +271,10 @@
   K.k_call = k_call;
   /* Value-helper table (the generated-code ABI): `K.h[i]` — the index
      order is fixed and documented in backend/webkir.rs (k_add=0 …
-     k_f2i=22). Numeric slots keep the minified runtime small; the
-     `//@kinn:file:line` comments in the generated code carry the
-     debugging context instead of helper names. */
-  K.h = [k_add, k_sub, k_mul, k_div, k_mod, k_neg, k_iabs, k_fmin, k_fmax, k_fdiv, k_fmt, k_eq, k_acat, k_aget, k_aset, k_len, k_upper, k_lower, k_trim, k_contains, k_split, k_join, k_f2i];
+     k_f2i=22, k_param=23). Numeric slots keep the minified runtime
+     small; the `//@kinn:file:line` comments in the generated code
+     carry the debugging context instead of helper names. */
+  K.h = [k_add, k_sub, k_mul, k_div, k_mod, k_neg, k_iabs, k_fmin, k_fmax, k_fdiv, k_fmt, k_eq, k_acat, k_aget, k_aset, k_len, k_upper, k_lower, k_trim, k_contains, k_split, k_join, k_f2i, k_param];
 
   /* -- S6: the reactive core (C.2/C.5/C.6) --------------------------------
      Layers: State (values + computed caches), Flush (microtask batch over
@@ -328,14 +321,9 @@
     return k_call(K.fns[r.fn], args, 0);
   }
 
-  function same(a, b) {
-    var aa = AI(a), ba = AI(b);
-    if (aa !== ba) return false;
-    if (!aa) return a === b;
-    if (a.length !== b.length) return false;
-    for (var i = 0; i < a.length; i++) if (!same(a[i], b[i])) return false;
-    return true;
-  }
+  /* `same` (the patch comparator) is exactly `k_eq` (the generated `==`
+     helper, K.h[11]): arrays deep, scalars ===. One body, two names. */
+  var same = k_eq;
 
   /* Patch one record (Binder). `r.kind`: text, attr, input, when, each,
      prop (component prop slots re-evaluate at instantiation only). */
@@ -530,23 +518,96 @@
     } catch (e) { /* corrupted snapshot: defaults win */ }
   }
 
-  /* Store layer (present; the language surface arrives with S9). */
-  function storeLoad(name, keys, tags) {
-    if (!W) return;
-    try {
-      var raw = W.localStorage.getItem("kinn:store:" + name);
-      if (!raw) return;
-      var obj = JSP(raw);
-      /* Schema-hash guard: the key set must match exactly. */
-      var ok = keys.length === Object.keys(obj).length;
-      for (var i = 0; ok && i < keys.length; i++) {
-        if (!HOP.call(obj, keys[i])) ok = false;
-      }
-      if (!ok) { W.localStorage.removeItem("kinn:store:" + name); return; }
-      for (var j = 0; j < keys.length; j++) st[keys[j]] = obj[keys[j]];
-    } catch (e) {}
+  /* -- Router core (S7): route matching + the page swap --------------
+     The runtime owns route matching (the manifest's pre-compiled
+     regexes), `param()`, and swapping the page view. The document's
+     URL adapter — history API vs hash fallback, the base-path
+     analysis, popstate/hashchange listeners, the sessionStorage route
+     save/restore, the click interceptor, and the title/aria-current
+     truthing — is the GENERATED SPA glue the compiler emits into
+     app.js behind the public K.onurl / K.onboot / K.onpage hooks
+     (per-app code has no size budget; the 16 KB runtime keeps only
+     what every app shares). A route change re-mounts the page view:
+     app state survives, element `enter` animations replay, `param()`
+     reads the fresh values. `:name` segments resolve to "" (real
+     values arrive with S9's navigate()). */
+  var SPA = false, ROUTE = null, RP = {};
+
+  function k_param(n) {
+    return HOP.call(RP, n) ? RP[n] : "";
   }
-  K.storeLoad = storeLoad;
+
+  /* Malformed %-escapes must not break navigation (a typed URL is
+     runtime data): the raw segment wins when decoding fails. */
+  function dUC(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
+  /* Match a path against the route table (first route wins); returns
+     [page, params] or null. The regex compiles per call — route
+     tables are tiny and this never runs in a loop. */
+  function rm(path) {
+    for (var i = 0; i < M.routes.length; i++) {
+      var r = M.routes[i];
+      var m = RegExp(r.re).exec(path);
+      if (m) {
+        var v = {};
+        for (var j = 0; j < r.params.length; j++) v[r.params[j]] = dUC(m[j + 1] || "");
+        return [r.target, v];
+      }
+    }
+    return null;
+  }
+
+  /* Public: does a route match this path? (The generated glue probes
+     candidate base paths at boot.) */
+  K.match = rm;
+
+  /* Public: navigate to a route path. `mode`: 1 = push a history
+     entry, 2 = replace the URL, 0 = the URL already carries this
+     route (popstate, hashchange, deep link). */
+  K.route = function (path, mode) {
+    if (path.includes(":")) {
+      var segs = path.split("/");
+      for (var i = 0; i < segs.length; i++) {
+        if (segs[i].charAt(0) === ":") segs[i] = "";
+      }
+      path = segs.join("/");
+    }
+    if (path === ROUTE) return;
+    ROUTE = path;
+    if (K.onurl) K.onurl(path, mode);
+    var m = rm(path);
+    RP = m ? m[1] : {};
+    showPage(m ? m[0] : (M.notFound || M.pages[0].name));
+  };
+
+  /* URL adapter + page hooks (the generated SPA glue): K.onurl writes
+     the URL and saves the route, K.onboot runs once at mount (base
+     analysis + listeners + the first route), K.onpage truths the
+     document title and aria-current after every swap. All lazy —
+     undefined until an SPA app's glue registers them. */
+  /* Swap the page view: the old records and DOM die, the new view
+     renders, the app-level transition restarts on main (remove the
+     class, force one reflow, re-apply), and a flush evaluates the
+     fresh bindings against the current route params. The MPA mount
+     shares this (its document renders exactly one page). */
+  function showPage(name) {
+    var main = D.querySelector("[data-kpage]");
+    if (!main) return;
+    var page = M.pages.find(function (p) { return p.name === name; }) || M.pages[0];
+    main.textContent = "";
+    recs.length = 0;
+    main[SA]("data-kpage", page.name);
+    renderView(page.view, main, null);
+    if (typeof M.transition === "string" && !REDUCED) {
+      main.classList.remove("kinn-enter-" + M.transition);
+      main.offsetWidth; /* restart the animation (forces a reflow) */
+      kac(main, "enter", M.transition);
+    }
+    if (K.onpage) K.onpage(page);
+    flush();
+  }
 
   /* -- Anim (S6 Phase C): class coordination --------------------------
      Names map to kinn-enter/exit/hover/press/scroll-<name> classes;
@@ -598,7 +659,7 @@
     var b = M.bindings[x.b];
     var r = {
       kind: kind, fn: b.fn, p: b.p, d: b.d, t: b.t,
-      env: env, li: true, fo: true, l: undefined,
+      env: env, li: true, fo: true,
     };
     if (kind === "text") {
       var node = D.createTextNode("");
@@ -623,7 +684,14 @@
     } else if (k === "button" || k === "link") {
       node = el(k === "button" ? "button" : "a", k === "button" ? "kinn-button" : "kinn-link");
       if (k === "button") node.type = "button";
-      if (n.o) node[SA]("href", n.o + ".html");
+      /* `o` is the FINAL href from the compiler: `<slug>.html` in MPA
+         (natural navigation), the canonical route pattern in SPA
+         (semantic href — the interceptor owns the actual navigation,
+         and [data-open] marks router-owned targets). */
+      if (n.o) {
+        node[SA]("href", n.o);
+        if (SPA) node[SA]("data-open", n.o);
+      }
       addSlot(n.x, node, "text", env);
       attachHandlers(node, n.h, env);
     } else if (k === "image") {
@@ -649,7 +717,7 @@
       var b = M.bindings[n.c.b];
       var rec = {
         kind: "when", fn: b.fn, p: b.p, d: b.d, t: b.t,
-        env: env, li: true, fo: true, l: undefined,
+        env: env, li: true, fo: true,
         tEl: tEl, oEl: oEl, tA: tRecs, oA: oRecs, ho: hasO,
       };
       setLive(oRecs, false);
@@ -661,7 +729,7 @@
       var kb = n.y ? M.bindings[n.y.b] : null;
       var rec2 = {
         kind: "each", fn: eb.fn, p: eb.p, d: eb.d, t: eb.t,
-        env: env, li: true, fo: true, l: undefined,
+        env: env, li: true, fo: true,
         el: node, var: n.v, tp: n.b, cd: [],
         kf: kb ? function (item) { return k_call(K.fns[kb.fn], [item], 0); } : null,
       };
@@ -834,41 +902,40 @@
     for (var j = 0; j < M.computed.length; j++) cdirty[M.computed[j].name] = true;
   }
 
-  /* -- mount (C.4): boot an MPA document ------------------------------- */
+  /* -- mount (C.4): boot an MPA document or the SPA router (S7) ------ */
   K.mount = function (manifest) {
     /* A mounted document is a fresh app instance: clear any previous
-       mount's state (tests, re-mounts). */
+       mount's state (tests, re-mounts) — router state included. */
     M = manifest;
     st = {}; cv = {}; cdirty = {}; recs = []; dirty = {}; flushQ = false;
+    SPA = false; ROUTE = null; RP = {};
     if (!W) return; /* headless (tests) — nothing to render */
-    
+
     REDUCED = W.matchMedia && W.matchMedia("(prefers-reduced-motion: reduce)").matches;
     /* State defaults from `app:init`. */
     var defaults = K.fns["app:init"] ? k_call(K.fns["app:init"], [], 0) : [];
     for (var i = 0; i < M.state.length; i++) st[M.state[i].name] = defaults[i];
     /* Seed computed caches on the first flush (declaration order). */
     for (var ci = 0; ci < M.computed.length; ci++) cdirty[M.computed[ci].name] = true;
-    /* Hydrate (MPA state transfer) + store layers. */
+    /* Hydrate (MPA state transfer). */
     hydrateRestore();
-    for (var s = 0; s < M.stores.length; s++) {
-      storeLoad(M.stores[s].name, M.stores[s].keys, M.state);
-    }
     /* Computed caches seed lazily on first read. */
-    /* Which page is this document? */
-    var main = D.querySelector("[data-kpage]");
-    var pname = main ? main.getAttribute("data-kpage") : M.pages[0].name;
-    var page = M.pages[0];
-    for (var p = 0; p < M.pages.length; p++) {
-      if (M.pages[p].name === pname) { page = M.pages[p]; break; }
-    }
-    if (main) renderView(page.view, main, null);
-    /* Page transition (app `transition "name"`): the in-animation on
-       the main element at boot. */
-    if (main && typeof M.transition === "string") kac(main, "enter", M.transition);
-    /* Delegated listeners (one set per document). */
-    var evs = "click input change submit keydown keyup".split(" ");
+    /* Delegated listeners (one set per document; router-owned clicks
+       ride the generated SPA glue — after `dispatch`, so user click
+       handlers run before the view re-mounts). */
+    var evs = "click input change keydown keyup".split(" ");
     for (var e = 0; e < evs.length; e++) {
       D[AE](evs[e], dispatch);
+    }
+    /* SPA boots through the generated glue (K.onboot: base analysis,
+       listeners, the first route); MPA renders the document's one
+       page — both through showPage. */
+    if (M.navigation === "spa") {
+      SPA = true;
+      if (K.onboot) K.onboot();
+    } else {
+      var main = D.querySelector("[data-kpage]");
+      if (main) showPage(main.getAttribute("data-kpage") || M.pages[0].name);
     }
     /* Reporter: browser errors become envelopes. */
     W[AE]("error", function (ev) {
@@ -893,9 +960,8 @@
       var levels = "log info warn error".split(" ");
       for (var L = 0; L < levels.length; L++) fwd(levels[L]);
     }
-    /* print output in the browser flows through console.log → the
+    /* print output flows through the default K.out (console.log) → the
        forwarding above carries it to the host terminal. */
-    K.out = function (t) { W.console.log(t); };
     flush();
   };
 

@@ -4,6 +4,126 @@ All notable changes to KINN are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning once there is a stable language surface.
 
+## [Unreleased] — 0.4.0 S7+S8: SPA router + declared animations
+
+Client-side routing (S7) and the animation runtime completion (S8).
+`navigation spa` apps build as ONE document whose router owns the URL;
+declared animations generate real CSS, 3D transforms included. kinnrt.js
+stays within the 16 KB budget (16,307 B). MPA behavior and the 0.3
+website dists are unchanged (byte-identical rebuilds).
+
+### Added — S7: the router
+
+- **`kinnrt.js` router core**: route matching against the manifest's
+  pre-compiled anchored regexes (first route wins; `:name` captures
+  decode with a malformed-`%` guard), `param()` as the K.h[23] value
+  helper, `K.route(path, mode)` (mode 1 push / 2 replace / 0
+  URL-already-right; `:name` segments resolve to `""` until S9's
+  `navigate()`), `K.match(path)` (public probe), and `showPage` —
+  the page swap both the SPA router and the MPA mount share (records
+  die, the view re-renders, the app-level transition restarts on
+  `main` through remove → reflow → re-apply, one flush evaluates the
+  fresh bindings against the live route params).
+- **The generated URL adapter (S7)**: `webkir.rs` emits a fixed SPA
+  glue block into app.js behind three public hooks — `K.onurl`
+  (pushState/replaceState in history mode, `#/…` hash writes for
+  non-http documents: `file://`, `about:srcdoc`, `blob:`; the
+  sessionStorage route save rides the same call), `K.onboot`
+  (base-path resolution — the document directory, or the shortest
+  pathname prefix whose remainder matches a route, which is what a
+  server-rewritten deep link looks like; popstate/hashchange
+  listeners; deep-link-wins-over-saved-route boot), and `K.onpage`
+  (document title + shell-nav `aria-current` truthing). The click
+  interceptor navigates `[data-open]` targets (links, buttons, shell
+  nav) through the router after the user's own click handler ran.
+  Per-app code carries the per-document adapter; the runtime keeps
+  only what every app shares — the 16 KB budget honest.
+- **`NativeId::Param`** (kinrt): `param(e)` lowers to
+  `Instr::Native(Param)`; the JS side reads the router's current
+  params (K.h[23], never errors — E3058 already caught literal
+  misspellings); the plain VM answers with an honest refusal (no
+  route context on that host). `param` left the E3071 gate; the
+  store/JSON set stays.
+- **`webapp.rs` route table**: the SPA manifest carries the EFFECTIVE
+  routes (declared routes in order, then one implicit route per
+  unrouted page — the first page IS the document root `""`), each
+  pattern pre-compiled to a regex string, plus `paths` (the canonical
+  pattern every `open <Page>` resolves to; MPA keeps `slug.html`
+  hrefs, now compiler-suffixed) and `notFound`. The SPA dist is ONE
+  `index.html`; the shell nav carries `data-nav`/`data-open`.
+- **CLI**: `kinn build --target web` reports `SPA`/`MPA` honestly;
+  `examples/web/spa_app.kin` exercises routes, `param()`, the 404
+  page, state-across-swaps and the declared fade keyframe.
+
+### Added — S8: declared animations generate CSS
+
+- **`webapp.rs` CSS generation**: every declared keyframes emits
+  `@keyframes kinn-<name>-in` (step props → `opacity`, `filter:
+  blur()` and ONE chained `transform` in the fixed order
+  perspective, translateZ, x, y, rotate_x, rotate_y, rotate_z,
+  scale, rotate — 3D is pure CSS, no JS animation loop) plus the
+  five trigger rules (enter/exit/hover/press/scroll) with the
+  declared duration/delay/easing (defaults 300ms, ease-out in /
+  ease-in out) and a per-name `prefers-reduced-motion` block.
+  Declared transitions retime the predefined visual of the same
+  name. Generated CSS appends to kinnrt.css AFTER the predefined
+  sheet, so a declared name that collides with a predefined one
+  wins by cascade order; first declaration wins on duplicates
+  (the E3047 rule). Numbers take CSS units (px/deg); strings pass
+  verbatim (`x "20vw"`); negated literals keep the sign.
+- **3D keyframe props**: `rotate_x`, `rotate_y`, `rotate_z`,
+  `translate_z`, `perspective` join the E3048 whitelist.
+- **E3068** (reserved → active): animation names must match
+  `[A-Za-z0-9-]+` — they become CSS class fragments.
+- **E3069** (reserved → active): keyframe property values must be
+  number/string literals (negated numbers allowed) and `step`
+  percents integer literals 0..100 — the generated CSS is
+  compile-time data.
+- **`examples/web/anim_app.kin`** now declares a custom `wobble`
+  keyframe with the full 3D chain and references it.
+
+### Changed — the S7 size campaign (budget discipline)
+
+- kinnrt.js: **16,307 B ≤ 16,384** (77 B slack). The router was paid
+  for by: the store hydration layer moving to S9 (nothing could
+  write `kinn:store:` keys until the language surface exists — the
+  manifest `stores` key stays), `same()` merging into the identical
+  `k_eq` (K.h[11]), `k_len` becoming `[...s].length` (string
+  iteration = code points, the VM's `chars().count()`), `K.out`
+  defaulting to `console.log` (node stdout parity kept; the mount
+  override dropped), the MPA mount branch sharing `showPage` with
+  the router, statement-final `;}` elimination and optional catch
+  bindings in the minifier, and the `K.version` marker retiring
+  (unconsumed; the wasm backend version is the public one).
+- Minifier fix found by the work: **`...` (spread) is now one
+  token** — three separate dots made the renamer treat the following
+  identifier as a property (`.s` member access) and skip its rename
+  (`[...s]` crashed with `s is not defined`).
+- The link/button `open` href is now fully compiler-built (MPA
+  `slug.html`, SPA canonical pattern); the runtime dropped its
+  `.html` concatenation.
+
+### Fixed
+
+- **F-023**: `generate_app` said "MPA" for SPA dists (the CLI banner
+  now reports the navigation mode).
+- **F-024**: the generated animation shorthand dropped the keyframes
+  name (`animation: 200ms ease-out both` — animated nothing) and the
+  delay rendered as `10msms`; both fixed with tests.
+
+### Tests
+
+- Rust 496 → **506** (+4 checker: 3D whitelist, E3068, E3069 values,
+  E3069 percents; +5 webkir_diff: SPA dist/manifest, SPA E3071
+  honesty, param lowering, declared-CSS with 3D, effective-route
+  duplication; +1 CLI: the SPA dist build; the old SPA-refusal test
+  became the tasks_app S9-refusal test).
+- Studio 183 → **191** (+1 SPA e2e through the real wasm backend:
+  mount, navigation, param(), 404, back/forward, deep link, saved
+  route, hash mode; +1 declared-CSS e2e; +6 runtime units: K.match
+  shapes, K.route swap/idempotency/`:seg` resolution, popstate,
+  restore-vs-deep-link, base recovery, MPA untouched).
+
 ## [Unreleased] — 0.4.0 S5+S6: dynamic web applications (MPA)
 
 The unified dynamic-web feature: **S5** (KIR → JavaScript code

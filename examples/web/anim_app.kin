@@ -3,16 +3,23 @@
 // Exercises the predefined animation set shipped in kinnrt.css through
 // the grammar's animation surface (B.8): the app-level page
 // `transition`, element `enter`/`exit`/`hover`/`press`/`scroll`
-// attributes, and an app `animation { … }` block that declares the
-// names it references. Add and remove items to see enter/exit waits
+// attributes, and an app `animation { … }` block whose declared
+// keyframes and transitions now generate REAL CSS (S8): the emitted
+// kinnrt.css carries `@keyframes kinn-<name>-in` plus the five
+// trigger rules with the declared timing, appended after the
+// predefined sheet so a same-named declaration wins. A custom
+// "wobble" keyframe exercises the 3D transform chain
+// (perspective/translateZ/rotate_x/rotate_y — pure CSS, no JS
+// animation loop), and `prefers-reduced-motion` disables all of it,
+// in CSS and in the runtime.
+// Add and remove items to see enter/exit waits
 // (the runtime keeps an exiting row in the DOM until its animation
 // finishes); scroll the list to see the scroll-revealed rows; hover
 // and press the buttons for the CSS-driven emphasis animations.
 //
-// Every name below is one of the nine predefined visuals (fade,
-// slide-up, slide-down, slide-left, slide-right, scale, pop, flip-x,
-// flip-y). prefers-reduced-motion disables all of it, in CSS and in
-// the runtime.
+// The names below are the nine predefined visuals (fade, slide-up,
+// slide-down, slide-left, slide-right, scale, pop, flip-x, flip-y)
+// plus one declared custom keyframe ("wobble").
 //
 // Build:  kinn build examples/web/anim_app.kin --target web
 
@@ -37,6 +44,16 @@ app "Motion" {
             to { opacity 1 scale 1 }
             duration 300
             easing ease_out
+        }
+        // S8: a custom keyframe with the 3D transform chain — the
+        // generated CSS animates perspective(), translateZ() and
+        // rotateX()/rotateY() purely through the transform property.
+        keyframes "wobble" {
+            from { perspective 800 rotate_x -8 rotate_y -6 translate_z 0 opacity 0 }
+            step 50 { perspective 800 rotate_x 8 rotate_y 6 translate_z 6 }
+            to { perspective 800 rotate_x 0 rotate_y 0 translate_z 0 opacity 1 }
+            duration 500
+            easing ease_in_out
         }
     }
 
@@ -85,8 +102,8 @@ app "Motion" {
 
     page About {
         title "About"
-        heading "About Motion"
-        text "The nine predefined KINN animations (fade, the four slides, scale, pop, flip-x, flip-y) ship as CSS in kinnrt.css; the runtime only coordinates classes and waits for exits. Declared keyframes like this app's pop get compiler-generated CSS in the later S8 step — until then their names ride the manifest and render without visible motion unless they match a predefined visual."
+        heading "About Motion" enter "wobble"
+        text "The nine predefined KINN animations (fade, the four slides, scale, pop, flip-x, flip-y) ship as CSS in kinnrt.css; since S8 the declared keyframes and transitions generate their own CSS — this heading enters through the declared wobble keyframe (a 3D transform chain: perspective, translateZ, rotateX, rotateY)."
         link "Back to the demo" open Home
     }
 }

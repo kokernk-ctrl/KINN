@@ -753,3 +753,194 @@ describe('kinnrt animation coordination', () => {
     expect(p.textContent).toBe('hi');
   });
 });
+
+// -- S7: the router core ------------------------------------------------
+
+describe('kinnrt router core (S7)', () => {
+  // The SPA glue (normally generated into app.js) — registered here by
+  // hand exactly like the compiler emits it, so the unit tests exercise
+  // the same contract the generated code rides.
+  function glue(w: any, K: any): void {
+    const HASH =
+      w.location.protocol !== 'http:' && w.location.protocol !== 'https:';
+    let BASE = '/';
+    const curPath = () => {
+      if (HASH) {
+        const h = w.location.hash;
+        return h.length > 1 ? h.replace(/^#\/?/, '') : '';
+      }
+      let p = w.location.pathname;
+      if (p.endsWith('index.html')) p = p.slice(0, p.length - 10);
+      return p.length > BASE.length ? p.slice(BASE.length) : '';
+    };
+    K.onurl = (path: string, mode: number) => {
+      try {
+        w.sessionStorage.setItem('kinn:r:Test', path);
+      } catch {
+        /* privacy mode */
+      }
+      if (HASH) {
+        if (mode && w.location.hash !== '/' + path) w.location.hash = '/' + path;
+      } else if (mode === 1) {
+        w.history.pushState(null, '', BASE + path);
+      } else if (mode === 2) {
+        w.history.replaceState(null, '', BASE + path);
+      }
+    };
+    K.onboot = () => {
+      if (!HASH) {
+        const PN = w.location.pathname;
+        if (PN.endsWith('index.html')) {
+          BASE = PN.slice(0, PN.length - 10);
+        } else {
+          BASE = PN.slice(0, PN.lastIndexOf('/') + 1);
+          const cuts = [1];
+          let q = PN.indexOf('/', 1);
+          while (q !== -1) {
+            cuts.push(q + 1);
+            q = PN.indexOf('/', q + 1);
+          }
+          for (const c of cuts) {
+            if (K.match(PN.slice(c))) {
+              BASE = PN.slice(0, c);
+              break;
+            }
+          }
+        }
+      }
+      w.addEventListener('popstate', () => K.route(curPath(), 0));
+      if (HASH) w.addEventListener('hashchange', () => K.route(curPath(), 0));
+      let saved = '';
+      try {
+        saved = w.sessionStorage.getItem('kinn:r:Test') || '';
+      } catch {
+        /* privacy mode */
+      }
+      const live = curPath();
+      K.route(live || saved, live ? 0 : 2);
+    };
+  }
+
+  function spaManifest(): Record<string, unknown> {
+    return manifest({
+      navigation: 'spa',
+      notFound: 'Missing',
+      routes: [
+        { params: ['id'], path: 'item/:id', re: '^item/([^/]*)$', target: 'ItemDetail' },
+        { params: [], path: 'settings', re: '^settings$', target: 'Settings' },
+        { params: [], path: '', re: '^$', target: 'Home' },
+        { params: [], path: 'missing', re: '^missing$', target: 'Missing' },
+      ],
+      pages: [
+        { name: 'Home', slug: 'home', title: 'Home', view: [] },
+        { name: 'ItemDetail', slug: 'itemdetail', title: 'Item', view: [] },
+        { name: 'Settings', slug: 'settings', title: 'Settings', view: [] },
+        { name: 'Missing', slug: 'missing', title: 'Not found', view: [] },
+      ],
+      paths: { Home: '', ItemDetail: 'item/:id', Settings: 'settings', Missing: 'missing' },
+    });
+  }
+
+  function mountSpa(url: string, seed?: Record<string, string>) {
+    const dom = new JSDOM(
+      '<!doctype html><html><body><main id="main" data-kpage="Home"></main></body></html>',
+      { runScripts: 'outside-only', url },
+    );
+    const w = dom.window as any;
+    if (seed) for (const [k, v] of Object.entries(seed)) w.sessionStorage.setItem(k, v);
+    w.eval(RUNTIME_SRC);
+    const K = w.KinnRT;
+    glue(w, K);
+    K.mount(spaManifest());
+    return { dom, w, K };
+  }
+
+  it('K.match resolves exact and parameterized patterns (first wins)', () => {
+    const { K } = mountSpa('https://kinn.local/index.html');
+    expect(K.match('')).toEqual(['Home', {}]);
+    expect(K.match('settings')).toEqual(['Settings', {}]);
+    expect(K.match('item/42')).toEqual(['ItemDetail', { id: '42' }]);
+    expect(K.match('item/')).toEqual(['ItemDetail', { id: '' }]);
+    expect(K.match('nope')).toBeNull();
+    // Malformed %-escapes do not break matching: the raw segment wins.
+    expect(K.match('item/100%')).toEqual(['ItemDetail', { id: '100%' }]);
+    expect(K.match('item/a%2Fb')).toEqual(['ItemDetail', { id: 'a/b' }]);
+  });
+
+  it('K.route swaps pages, sets params, and resolves :segs to ""', async () => {
+    const { w, K } = mountSpa('https://kinn.local/index.html');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('Home');
+    K.route('item/7', 1);
+    expect(w.location.pathname).toBe('/item/7');
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('ItemDetail');
+    expect(K.h[23]('id')).toBe('7');
+    // A pattern with an unresolved :seg navigates honestly with "".
+    K.route('item/:id', 1);
+    expect(w.location.pathname).toBe('/item/');
+    expect(K.h[23]('id')).toBe('');
+    // Unknown routes render notFound.
+    K.route('nothing/here', 1);
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('Missing');
+    // Idempotent: re-routing the same path does not re-render.
+    const main = w.document.querySelector('[data-kpage]');
+    const marker = w.document.createTextNode('marker');
+    main.appendChild(marker);
+    K.route('nothing/here', 1);
+    expect(marker.parentNode).toBe(main);
+    // The route is saved (the glue's onurl).
+    expect(w.sessionStorage.getItem('kinn:r:Test')).toBe('nothing/here');
+  });
+
+  it('popstate re-routes from the URL; app state survives swaps', async () => {
+    const { w, K } = mountSpa('https://kinn.local/index.html');
+    await new Promise((r) => setTimeout(r, 10));
+    K.route('settings', 1);
+    w.history.back();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('Home');
+    w.history.forward();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('Settings');
+  });
+
+  it('deep links win over the saved route; otherwise the saved one restores', async () => {
+    const { w } = mountSpa('https://kinn.local/item/9', { 'kinn:r:Test': 'settings' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('ItemDetail');
+    expect(w.KinnRT.h[23]('id')).toBe('9');
+
+    const { w: w2 } = mountSpa('https://kinn.local/index.html', { 'kinn:r:Test': 'settings' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w2.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('Settings');
+    expect(w2.location.pathname).toBe('/settings');
+  });
+
+  it('the base-path scan recovers a server-rewritten deep link under a prefix', async () => {
+    // "/app/item/5": the document is index.html under /app/ — the boot
+    // scan finds the shortest prefix whose remainder matches a route.
+    const { w, K } = mountSpa('https://kinn.local/app/item/5');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(w.document.querySelector('[data-kpage]').getAttribute('data-kpage')).toBe('ItemDetail');
+    expect(K.h[23]('id')).toBe('5');
+    K.route('settings', 1);
+    expect(w.location.pathname).toBe('/app/settings');
+  });
+
+  it('MPA mounts are untouched: no router listeners, data-kpage decides', async () => {
+    const h = mount(
+      manifest({
+        pages: [
+          { name: 'Home', slug: 'home', title: 'Home', view: [{ k: 'text', x: 'hello' }] },
+          { name: 'Other', slug: 'other', title: 'Other', view: [] },
+        ],
+      }),
+      {},
+    );
+    await h.flush();
+    expect(h.texts()).toEqual(['hello']);
+    expect(h.K.onurl).toBeUndefined();
+    expect(h.K.onboot).toBeUndefined();
+    expect(h.K.match('anything')).toBeNull(); // MPA manifest has no routes
+  });
+});

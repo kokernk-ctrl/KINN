@@ -1,14 +1,17 @@
-//! The dynamic web app backend (0.4.0 S6): `AppModel` → manifest +
-//! templates + the MPA distribution (C.2/C.4/C.5 of
+//! The dynamic web app backend (0.4.0 S6→S8): `AppModel` → manifest +
+//! templates + the MPA/SPA distribution (C.2/C.4/C.5 of
 //! `docs/DYNAMIC_WEB_ARCHITECTURE.md`).
 //!
-//! S6 scope, honestly gated with E3071: **MPA only** (SPA routing is
-//! S7), **no forms/fields** (S9), and the host builtins `param` and
-//! `store_*`/`json_of`/`save_json` are rejected (S7/S9). Animation
-//! names ride in the templates and the runtime's Anim layer
-//! coordinates the `kinn-enter/exit/hover/press/scroll-<name>` classes
-//! against `kinnrt.css` (the nine predefined visuals shipped in the
-//! dist); compiler-generated CSS for declared names is the S8 step.
+//! S7 scope, honestly gated with E3071: **forms/fields are S9** and
+//! the host builtins `store_*`/`json_of`/`save_json` are rejected
+//! (S9). `param()` is implemented (the router's route-parameter read).
+//! SPA navigation builds a single-document dist: the router in
+//! kinnrt.js owns the URL (history API, hash fallback for `file://`),
+//! deep links and the `notFound` page. Animation names ride the
+//! templates and the runtime's Anim layer coordinates the
+//! `kinn-enter/exit/hover/press/scroll-<name>` classes against
+//! `kinnrt.css` (the nine predefined visuals shipped in the dist) and
+//! the compiler-generated CSS for declared names (S8).
 //!
 //! The dist keeps 0.3's semantic skeleton (landmarks, skip link,
 //! `aria-current`) and renders dynamic content at mount **from the
@@ -22,7 +25,10 @@
 //! nested bodies — literals inlined, C.6), and rebuilding the same app
 //! yields byte-identical output (tested).
 
-use crate::appmodel::{AppElement, AppExpr, AppExprKind, AppModel, AnimAttrs, HandlerModel};
+use crate::appmodel::{
+    AppElement, AppExpr, AppExprKind, AppModel, AnimAttrs, Easing, HandlerModel, KeyframeStepModel,
+    StepAtModel,
+};
 use crate::ast::NavigationMode;
 use crate::backend::webkir::{self, kind_of_type};
 use crate::backend::OutputFile;
@@ -115,13 +121,8 @@ fn e3071(message: &str, line: u32, hint: &str) -> Diagnostic {
 }
 
 fn scope_gates(app: &AppModel) -> Result<(), Diagnostic> {
-    if app.navigation == NavigationMode::Spa {
-        return Err(e3071(
-            "the web runtime does not implement `spa` navigation yet",
-            1,
-            "SPA routing arrives with S7 (0.4.0); declare `navigation mpa` for the multi-page app dist",
-        ));
-    }
+    // S7: SPA navigation is implemented (the kinnrt.js router owns the
+    // URL; E3057 already paired `not_found` with it at check time).
     for p in &app.pages {
         reject_forms(&p.elements, &p.name)?;
     }
@@ -264,6 +265,12 @@ impl<'a> Walk<'a> {
         J::Obj(m)
     }
 
+    /// The `open` href of one element (S7): mode-aware — see
+    /// [`open_href`].
+    fn open_href(&self, page: &str) -> String {
+        open_href(self.app, page)
+    }
+
     fn handlers(&self, idxs: &[usize]) -> J {
         J::Arr(idxs.iter().map(|i| J::N(*i as i64)).collect())
     }
@@ -301,7 +308,7 @@ impl<'a> Walk<'a> {
                 ("x", self.slot(label, shadow)),
                 (
                     "o",
-                    open.as_ref().map(|p| J::S(slug(p))).unwrap_or(J::B(false)),
+                    open.as_ref().map(|p| J::S(self.open_href(p))).unwrap_or(J::B(false)),
                 ),
                 ("h", self.handlers(handlers)),
             ]),
@@ -309,7 +316,7 @@ impl<'a> Walk<'a> {
                 ("k", J::S("link".into())),
                 ("a", Self::anim(anim)),
                 ("x", self.slot(label, shadow)),
-                ("o", open.as_ref().map(|p| J::S(slug(p))).unwrap_or(J::B(false))),
+                ("o", open.as_ref().map(|p| J::S(self.open_href(p))).unwrap_or(J::B(false))),
                 ("h", self.handlers(handlers)),
             ]),
             AppElement::Image { src, alt, anim, handlers } => J::obj(vec![
@@ -457,6 +464,122 @@ pub fn slug(name: &str) -> String {
 }
 
 // ===========================================================================
+// Route table (S7): canonical routes + the SPA manifest shape
+// ===========================================================================
+
+/// One effective route: the pattern (relative, `:name` segments), the
+/// target page, the parameter names in path order, and the
+/// compile-time regex the runtime matches URLs against.
+#[derive(Debug, Clone)]
+pub struct EffectiveRoute {
+    pub path: String,
+    pub target: String,
+    pub params: Vec<String>,
+    pub re: String,
+}
+
+/// Compile a validated route path to an anchored ECMAScript regex
+/// string. The checker (E3055) restricts literal segments to
+/// `[A-Za-z0-9._-]`; escaping stays defensive anyway. `:name` segments
+/// match any run of non-slash characters (empty allowed — a link
+/// without a param value navigates honestly with the empty string).
+fn route_regex(path: &str) -> String {
+    let mut re = String::from("^");
+    for (i, seg) in path.split('/').enumerate() {
+        if i > 0 {
+            re.push('/');
+        }
+        if seg.starts_with(':') {
+            re.push_str("([^/]*)");
+        } else {
+            for c in seg.chars() {
+                if "\\.*+?^${}()|[]".contains(c) {
+                    re.push('\\');
+                }
+                re.push(c);
+            }
+        }
+    }
+    re.push('$');
+    re
+}
+
+fn route_params(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter_map(|s| s.strip_prefix(':').map(|s| s.to_string()))
+        .collect()
+}
+
+/// The effective route table (S7): declared routes in declaration
+/// order, then one implicit route per page no route targets — the
+/// first page maps to `""` (the document root), the others to their
+/// slug. Implicit patterns that would duplicate an existing pattern
+/// are skipped (the declared route wins; the page then has no route of
+/// its own and links resolve through the pattern anyway).
+pub fn effective_routes(app: &AppModel) -> Vec<EffectiveRoute> {
+    let mut out: Vec<EffectiveRoute> = app
+        .routes
+        .iter()
+        .map(|r| EffectiveRoute {
+            params: route_params(&r.path),
+            path: r.path.clone(),
+            target: r.target.clone(),
+            re: route_regex(&r.path),
+        })
+        .collect();
+    let declared: std::collections::BTreeSet<&str> =
+        app.routes.iter().map(|r| r.path.as_str()).collect();
+    let routed: std::collections::BTreeSet<&str> =
+        app.routes.iter().map(|r| r.target.as_str()).collect();
+    for (i, p) in app.pages.iter().enumerate() {
+        if routed.contains(p.name.as_str()) {
+            continue;
+        }
+        // The first page's implicit route IS the document root ("",
+        // regex `^$`); a declared route never has an empty path (E3055),
+        // so the duplicate check only guards real slugs.
+        let path = if i == 0 { String::new() } else { slug(&p.name) };
+        if declared.contains(path.as_str()) {
+            continue;
+        }
+        out.push(EffectiveRoute {
+            path: path.clone(),
+            target: p.name.clone(),
+            params: Vec::new(),
+            re: route_regex(&path),
+        });
+    }
+    out
+}
+
+/// The canonical route pattern of a page (what `open <Page>` and the
+/// shell nav link to): the first effective route targeting it, else
+/// the slug (or `""` for the first page).
+fn canonical_pattern(app: &AppModel, page: &str) -> String {
+    let routes = effective_routes(app);
+    for r in &routes {
+        if r.target == page {
+            return r.path.clone();
+        }
+    }
+    match app.pages.iter().position(|p| p.name == page) {
+        Some(0) | None => String::new(),
+        Some(i) => slug(&app.pages[i].name),
+    }
+}
+
+/// The `open` target href for one element: MPA links/buttons keep the
+/// 0.3 shape (`<slug>.html` — the suffix now comes from the compiler);
+/// SPA emits the canonical route pattern the runtime intercepts.
+fn open_href(app: &AppModel, page: &str) -> String {
+    if app.navigation == NavigationMode::Spa {
+        canonical_pattern(app, page)
+    } else {
+        format!("{}.html", slug(page))
+    }
+}
+
+// ===========================================================================
 // Manifest
 // ===========================================================================
 
@@ -596,17 +719,34 @@ pub fn manifest_json(
         .map(|s| J::obj(vec![("name", J::S(s.name.clone())), ("tag", J::S(kind_of_type(&s.ty).tag()))]))
         .collect();
 
-    let routes: Vec<J> = app
-        .routes
-        .iter()
-        .map(|r| {
-            J::obj(vec![
-                ("params", J::Arr(r.params.iter().map(|p| J::S(p.clone())).collect())),
-                ("path", J::S(r.path.clone())),
-                ("target", J::S(r.target.clone())),
-            ])
-        })
-        .collect();
+    // Routes (S7): SPA apps get the EFFECTIVE table (declared routes in
+    // order, then the implicit per-page routes) with each pattern
+    // pre-compiled to an anchored regex; MPA keeps the declared routes
+    // verbatim (informational — the file per page is the navigation).
+    let routes: Vec<J> = if app.navigation == NavigationMode::Spa {
+        effective_routes(app)
+            .iter()
+            .map(|r| {
+                J::obj(vec![
+                    ("params", J::Arr(r.params.iter().map(|p| J::S(p.clone())).collect())),
+                    ("path", J::S(r.path.clone())),
+                    ("re", J::S(r.re.clone())),
+                    ("target", J::S(r.target.clone())),
+                ])
+            })
+            .collect()
+    } else {
+        app.routes
+            .iter()
+            .map(|r| {
+                J::obj(vec![
+                    ("params", J::Arr(r.params.iter().map(|p| J::S(p.clone())).collect())),
+                    ("path", J::S(r.path.clone())),
+                    ("target", J::S(r.target.clone())),
+                ])
+            })
+            .collect()
+    };
 
     let stores: Vec<J> = app
         .stores
@@ -636,6 +776,28 @@ pub fn manifest_json(
         ]),
     };
 
+    // SPA-only keys ride alongside: `notFound` (E3057 guaranteed the
+    // page exists at check time; the defensive false keeps a hand-fed
+    // manifest honest) and `paths` (page → canonical pattern, what
+    // `open <Page>` links carry and the runtime re-checks against the
+    // route table).
+    let spa_extra: Vec<(&str, J)> = if app.navigation == NavigationMode::Spa {
+        let paths: BTreeMap<String, J> = app
+            .pages
+            .iter()
+            .map(|p| (p.name.clone(), J::S(canonical_pattern(app, &p.name))))
+            .collect();
+        vec![
+            (
+                "notFound",
+                app.not_found.as_ref().map(|n| J::S(n.clone())).unwrap_or(J::B(false)),
+            ),
+            ("paths", J::Obj(paths)),
+        ]
+    } else {
+        Vec::new()
+    };
+
     let manifest = J::obj(vec![
         ("animations", animations),
         ("bindings", J::Arr(w.meta)),
@@ -644,7 +806,10 @@ pub fn manifest_json(
         ("file", J::S(file.to_string())),
         ("handlers", J::Arr(handlers)),
         ("name", J::S(app.name.clone())),
-        ("navigation", J::S("mpa".to_string())),
+        (
+            "navigation",
+            J::S(if app.navigation == NavigationMode::Spa { "spa" } else { "mpa" }.to_string()),
+        ),
         ("pages", J::Arr(pages)),
         ("routes", J::Arr(routes)),
         ("state", J::Arr(state)),
@@ -654,7 +819,7 @@ pub fn manifest_json(
             app.transition.as_ref().map(|t| J::S(t.clone())).unwrap_or(J::B(false)),
         ),
         ("version", J::S(kinc_version())),
-    ]);
+    ].into_iter().chain(spa_extra).collect::<Vec<(&str, J)>>());
 
     bindings_out.extend(w.fns);
     let _ = funcs; // the app fns are already lowered by webkir::app_funcs
@@ -723,25 +888,39 @@ fn kinc_version() -> String {
 // The MPA dist
 // ===========================================================================
 
-/// Generate the dynamic web distribution for a validated MPA app.
-/// Files: `index.html` + `<slug>.html` per extra page + `styles.css` +
-/// `kinnrt.css` (predefined animations) + `app.js` + `kinnrt.js`.
+/// Generate the dynamic web distribution for a validated app (MPA or
+/// SPA — S7): MPA emits `index.html` + `<slug>.html` per extra page;
+/// SPA emits ONE `index.html` and lets the kinnrt.js router own the
+/// URL. Both carry `styles.css` + `kinnrt.css` (predefined animations
+/// + the declared ones' generated CSS, S8) + `app.js` + `kinnrt.js`.
 pub fn generate_app(app: &AppModel, module: &Module, file: &str) -> Result<Vec<OutputFile>, Diagnostic> {
     let mut bindings = Vec::new();
     let manifest = manifest_json(app, &[], module, file, &mut bindings)?;
     let app_js = webkir::app_js_full(app, module, file, &manifest, bindings)?;
+    let anim_css = declared_anim_css(app);
 
     let mut files = Vec::new();
-    for (i, p) in app.pages.iter().enumerate() {
-        let path = if i == 0 {
-            "index.html".to_string()
-        } else {
-            format!("{}.html", slug(&p.name))
-        };
-        files.push(OutputFile::text(&path, &page_html(app, &p.name, i)));
+    if app.navigation == NavigationMode::Spa {
+        // S7: ONE document — the router in kinnrt.js owns the URL, so
+        // the dist is a single index.html (deep links need the host to
+        // serve index.html for unknown paths, or the hash fallback for
+        // file://; both documented in DYNAMIC_WEB_ARCHITECTURE).
+        files.push(OutputFile::text("index.html", &page_html(app, app.pages[0].name.as_str(), 0)));
+    } else {
+        for (i, p) in app.pages.iter().enumerate() {
+            let path = if i == 0 {
+                "index.html".to_string()
+            } else {
+                format!("{}.html", slug(&p.name))
+            };
+            files.push(OutputFile::text(&path, &page_html(app, &p.name, i)));
+        }
     }
     files.push(OutputFile::text("styles.css", &app_styles(app)));
-    files.push(OutputFile::text("kinnrt.css", KINNRT_CSS));
+    // The dist stylesheet: the predefined visuals plus the declared
+    // animations' generated CSS (S8) — appended so a declared name that
+    // collides with a predefined one wins by cascade order.
+    files.push(OutputFile::text("kinnrt.css", &format!("{}{}", KINNRT_CSS, anim_css)));
     files.push(OutputFile::text("app.js", &app_js));
     files.push(OutputFile::text("kinnrt.js", webkir::kinnrt_dist()));
     Ok(files)
@@ -764,17 +943,33 @@ fn page_html(app: &AppModel, page: &str, index: usize) -> String {
             })
         })
         .unwrap_or_else(|| page.to_string());
+    let spa = app.navigation == NavigationMode::Spa;
     let mut nav = String::new();
     for (i, p) in app.pages.iter().enumerate() {
-        let href = if i == 0 { "index.html".to_string() } else { format!("{}.html", slug(&p.name)) };
-        let current = if p.name == page { " aria-current=\"page\"" } else { "" };
+        // MPA: one file per page (0.3 shape). SPA: the canonical route
+        // pattern as href, plus data-nav (the runtime re-truths
+        // aria-current on every route change) and data-open (the
+        // interceptor's hook).
+        let (href, extra) = if spa {
+            (canonical_pattern(app, &p.name), format!(" data-nav=\"{}\" data-open=\"{}\"", html_attr(&p.name), html_attr(&canonical_pattern(app, &p.name))))
+        } else {
+            let h = if i == 0 { "index.html".to_string() } else { format!("{}.html", slug(&p.name)) };
+            (h, String::new())
+        };
+        let current = if p.name == page && !spa { " aria-current=\"page\"" } else { "" };
         nav.push_str(&format!(
-            "        <a href=\"{}\"{}>{}</a>\n",
-            href,
+            "        <a href=\"{}\"{}{}>{}</a>\n",
+            html_attr(&href),
             current,
+            extra,
             crate::backend::web::html_escape(&p.name)
         ));
     }
+    let site_href = if spa {
+        html_attr(&canonical_pattern(app, app.pages[0].name.as_str()))
+    } else {
+        "index.html".to_string()
+    };
     format!(
         "<!doctype html>\n\
 <html lang=\"en\">\n\
@@ -789,7 +984,7 @@ fn page_html(app: &AppModel, page: &str, index: usize) -> String {
 <body>\n\
 <a class=\"kinn-skip\" href=\"#main\">Skip to content</a>\n\
 <header class=\"kinn-header\">\n\
-      <a class=\"kinn-site\" href=\"index.html\">{}</a>\n\
+      <a class=\"kinn-site\" href=\"{}\">{}</a>\n\
     <nav aria-label=\"Pages\">\n\
 {}    </nav>\n\
 </header>\n\
@@ -804,10 +999,230 @@ fn page_html(app: &AppModel, page: &str, index: usize) -> String {
 </html>\n",
         crate::backend::web::html_escape(&title),
         crate::backend::web::html_escape(&app.name),
+        site_href,
         crate::backend::web::html_escape(&app.name),
         nav,
         crate::backend::web::html_escape(page),
     )
+}
+
+/// An attribute-value escape (route patterns are validated
+/// `[A-Za-z0-9._:-]`; page names are identifiers — the quotes and
+/// ampersand defense is for parity with the rest of the skeleton).
+fn html_attr(s: &str) -> String {
+    crate::backend::web::html_escape(s)
+}
+
+// ===========================================================================
+// Declared animations (S8): generated CSS
+// ===========================================================================
+
+/// The nine predefined names (kinnrt.css ships their visuals; a
+/// declared keyframes of the same name wins by cascade order — the
+/// generated rules are appended after the predefined sheet).
+const PREDEFINED_ANIMS: [&str; 9] = [
+    "fade", "slide-up", "slide-down", "slide-left", "slide-right", "scale", "pop", "flip-x",
+    "flip-y",
+];
+
+/// Map a validated easing to its CSS curve.
+fn easing_css(e: &Easing) -> String {
+    match e {
+        Easing::Linear => "linear".to_string(),
+        Easing::Ease => "ease".to_string(),
+        Easing::EaseIn => "ease-in".to_string(),
+        Easing::EaseOut => "ease-out".to_string(),
+        Easing::EaseInOut => "ease-in-out".to_string(),
+        Easing::Cubic(c) => format!("cubic-bezier({},{},{},{})", c[0], c[1], c[2], c[3]),
+    }
+}
+
+/// A minimal float rendering for CSS (0.96 stays "0.96").
+fn float_css(v: f64) -> String {
+    format!("{}", v)
+}
+
+/// One keyframe property value: a number takes the CSS unit (px/deg or
+/// none for scale/opacity); a string passes verbatim (custom units
+/// like "20vw"). E3069 keeps every value literal at check time; the
+/// None path is the defensive skip.
+fn anim_value_css(e: &AppExpr, unit: &str) -> Option<String> {
+    match &e.kind {
+        AppExprKind::Int(v) => Some(format!("{}{}", v, unit)),
+        AppExprKind::Float(v) => Some(format!("{}{}", float_css(*v), unit)),
+        AppExprKind::Str(s) => Some(s.clone()),
+        AppExprKind::Neg(inner) => {
+            // A negated literal (E3069 allows `-10`): the sign rides the
+            // CSS value.
+            anim_value_css(inner, unit).map(|v| format!("-{}", v))
+        }
+        _ => None,
+    }
+}
+
+/// The transform chain of one keyframe step, in the fixed documented
+/// order: perspective, translateZ, x, y, rotate_x, rotate_y, rotate_z,
+/// scale, rotate. (Kin prop, CSS function, unit for numeric values.)
+const TRANSFORM_PROPS: [(&str, &str, &str); 9] = [
+    ("perspective", "perspective", "px"),
+    ("translate_z", "translateZ", "px"),
+    ("x", "translateX", "px"),
+    ("y", "translateY", "px"),
+    ("rotate_x", "rotateX", "deg"),
+    ("rotate_y", "rotateY", "deg"),
+    ("rotate_z", "rotateZ", "deg"),
+    ("scale", "scale", ""),
+    ("rotate", "rotate", "deg"),
+];
+
+/// One step's declarations: `opacity`/`blur` directly, the transform
+/// props as one chained `transform` (3D included — pure CSS, no JS
+/// animation loop). None marks a step the checker already rejected
+/// (E3069); it is skipped defensively.
+fn step_css(step: &KeyframeStepModel) -> Option<String> {
+    let at = match &step.at {
+        StepAtModel::From => "from".to_string(),
+        StepAtModel::To => "to".to_string(),
+        StepAtModel::Step(e) => match &e.kind {
+            AppExprKind::Int(v) if (0..=100).contains(v) => format!("{}%", v),
+            _ => return None,
+        },
+    };
+    let mut decls: Vec<String> = Vec::new();
+    if let Some((_, e)) = step.props.iter().find(|(p, _)| p == "opacity") {
+        if let Some(v) = anim_value_css(e, "") {
+            decls.push(format!("  opacity: {};", v));
+        }
+    }
+    let mut tf: Vec<String> = Vec::new();
+    for (kin, css_fn, unit) in TRANSFORM_PROPS {
+        if let Some((_, e)) = step.props.iter().find(|(p, _)| p == kin) {
+            if let Some(v) = anim_value_css(e, unit) {
+                tf.push(format!("{}({})", css_fn, v));
+            }
+        }
+    }
+    if !tf.is_empty() {
+        decls.push(format!("  transform: {};", tf.join(" ")));
+    }
+    if let Some((_, e)) = step.props.iter().find(|(p, _)| p == "blur") {
+        if let Some(v) = anim_value_css(e, "px") {
+            decls.push(format!("  filter: blur({});", v));
+        }
+    }
+    if decls.is_empty() {
+        return None;
+    }
+    Some(format!("  {} {{\n{}\n  }}\n", at, decls.join("\n")))
+}
+
+/// The trigger rules of one animation name (enter/exit/hover/press/
+/// scroll — the runtime's Anim layer applies the classes; kinnrt.css
+/// documents the contract). `dur`/`delay`/`easing` are the declared
+/// timing with the predefined defaults.
+fn trigger_rules(name: &str, dur: i64, delay: Option<i64>, easing: Option<&Easing>) -> String {
+    // The animation shorthand: <keyframes-name> <duration> [<delay>]
+    // <easing> <fill/direction>. Declared timing with the predefined
+    // defaults (300ms, ease-out in / ease-in out, no delay).
+    let kf = format!("kinn-{}-in", name);
+    let time = match delay {
+        Some(d) => format!("{}ms {}ms", dur, d),
+        None => format!("{}ms", dur),
+    };
+    let in_ease = easing.map(easing_css).unwrap_or_else(|| "ease-out".to_string());
+    let out_ease = easing.map(easing_css).unwrap_or_else(|| "ease-in".to_string());
+    let mut out = String::new();
+    out.push_str(&format!(".kinn-enter-{} {{ animation: {} {} {} both; }}\n", name, kf, time, in_ease));
+    out.push_str(&format!(
+        ".kinn-exit-{} {{ animation: {} {} {} reverse both; }}\n",
+        name, kf, time, out_ease
+    ));
+    out.push_str(&format!(".kinn-hover-{}:hover {{ animation: {} {} {}; }}\n", name, kf, time, in_ease));
+    out.push_str(&format!(".kinn-press-{}:active {{ animation: {} {} {}; }}\n", name, kf, time, in_ease));
+    out.push_str(&format!(".kinn-scroll-{} {{ opacity: 0; }}\n", name));
+    out.push_str(&format!(
+        ".kinn-scroll-{}.kinn-in {{ animation: {} {} {} both; }}\n",
+        name, kf, time, in_ease
+    ));
+    out.push_str(&format!("@media (prefers-reduced-motion: reduce) {{\n  .kinn-enter-{n}, .kinn-exit-{n}, .kinn-hover-{n}, .kinn-press-{n}, .kinn-scroll-{n} {{\n    animation: none !important;\n    transition: none !important;\n    opacity: 1 !important;\n    transform: none !important;\n  }}\n}}\n", n = name));
+    out
+}
+
+/// The declared animations' CSS (S8): keyframes emit their
+/// `@keyframes kinn-<name>-in` (step props → opacity/filter/transform)
+/// plus the five trigger rules; transitions emit ONLY the trigger rules
+/// (their visual is the predefined `kinn-<name>-in` when the name is
+/// one of the nine — a name with no visual anywhere stays inert, the
+/// documented S6 status quo). First declaration wins on duplicate
+/// names (the checker's resolution rule). Returns "" when nothing is
+/// declarable, so MPA dists without animations stay byte-identical.
+pub fn declared_anim_css(app: &AppModel) -> String {
+    let anim = match &app.animation {
+        Some(a) => a,
+        None => return String::new(),
+    };
+    let mut out = String::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut wrote_header = false;
+    let mut header = |out: &mut String| {
+        if !wrote_header {
+            wrote_header = true;
+            out.push_str(
+                "/* -- declared animations (0.4.0 S8): generated from the app's\n   `animation` block, appended after the predefined sheet so a\n   same-named declaration wins by cascade order. First declaration\n   wins on duplicate names (the E3047 resolution rule). */\n\n",
+            );
+        }
+    };
+    for k in &anim.keyframes {
+        if !seen.insert(k.name.clone()) {
+            continue;
+        }
+        // Defensive: E3068 keeps names CSS-fragment-safe at check time.
+        if !k.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || k.name.is_empty() {
+            continue;
+        }
+        let mut steps = String::new();
+        for s in &k.steps {
+            if let Some(css) = step_css(s) {
+                steps.push_str(&css);
+            }
+        }
+        if steps.is_empty() {
+            continue; // no declarable steps: the name stays inert
+        }
+        header(&mut out);
+        out.push_str(&format!("@keyframes kinn-{}-in {{\n{}}}\n", k.name, steps));
+        out.push_str(&trigger_rules(
+            &k.name,
+            k.duration.unwrap_or(300),
+            k.delay,
+            k.easing.as_ref(),
+        ));
+        out.push('\n');
+    }
+    for t in &anim.transitions {
+        if !seen.insert(t.name.clone()) {
+            continue; // a keyframes of the same name already owns it
+        }
+        if !t.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || t.name.is_empty() {
+            continue;
+        }
+        if !PREDEFINED_ANIMS.contains(&t.name.as_str()) {
+            continue; // no visual to time — inert, documented
+        }
+        header(&mut out);
+        out.push_str(&format!(
+            "/* declared transition \"{}\": the predefined visual, the declared timing */\n",
+            t.name
+        ));
+        out.push_str(&trigger_rules(
+            &t.name,
+            t.duration.unwrap_or(300),
+            t.delay,
+            t.easing.as_ref(),
+        ));
+        out.push('\n');
+    }
+    out
 }
 
 /// The app stylesheet: the 0.3 base design plus the dynamic-app rules

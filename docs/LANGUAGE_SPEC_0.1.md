@@ -479,6 +479,8 @@ byte-identical across the rename.
 | E3064 | checker | duplicate page name inside an app — case-insensitive (mirrors E3031) |
 | E3065 | checker | duplicate component name inside an app — case-sensitive (identifier semantics, matching function names) |
 | E3066 | checker | unknown name in the app scope — a binding expression, handler statement, call or `input bind`/`field` target that resolves to no local, `each` loop variable, component prop/state, shared state, computed value, const, function or registered app builtin; app-scoped sibling of E3001, never reuses it (assigned in slice 3) |
+| E3068 | checker | invalid animation name — keyframes/transition names become CSS class fragments (`kinn-enter-<name>`), so they must match `[A-Za-z0-9-]+` (assigned S8 2026-11-28; the reserved slot went live) |
+| E3069 | checker | non-literal keyframe data — a property value that is not a number/string literal (negated numbers allowed) or a `step` percent that is not an integer literal 0..100; the generated CSS is compile-time data (assigned S8 2026-11-28; the reserved slot went live) |
 | E3058 | checker | `param("…")` reads a route parameter no valid route declares (literal arguments only — non-literals are runtime data); anchored on the quoted argument, the hint lists the declared parameters (implemented in slice 3) |
 | E3043 | checker | invalid assignment target inside an app: assigning to a prop, computed value or event builtin in a handler (`fin` locals and `const`s keep the frozen E3004), and `field`/`input bind` targets that are not state fields (live since slice 3) |
 | W3041 | warning | a handler local (`fin`/`var`) shadows an app state field or component state field of the same name — legal, but called out so beginners see the shadow (live since slice 3) |
@@ -489,7 +491,7 @@ byte-identical across the rename.
 | W3040 | warning | `while` inside an event handler — once per `while` statement, nested control flow included; legal, never fatal; `for` never warns (live since slice 4) |
 | E3044 | checker | computed dependency cycle — a computed value that reaches itself directly or through other computed values; anchored on the reference that closes the cycle, naming the whole path; each distinct cycle reports once (live since slice 5) |
 | E3047 | checker | unknown animation name — every `enter`/`exit`/`hover`/`press`/`scroll` on elements and the app-level page `transition` resolve against one namespace (keyframes names + transition names); the hint lists the declared animations (live since slice 5) |
-| E3048 | checker | keyframe property outside the whitelist (opacity, x, y, scale, rotate, blur); anchored on the property name (live since slice 5) |
+| E3048 | checker | keyframe property outside the whitelist (opacity, x, y, scale, rotate, blur, rotate_x, rotate_y, rotate_z, translate_z, perspective — the 3D five chain through `transform`, live since S8); anchored on the property name (live since slice 5) |
 | E3049 | checker | unknown or invalid easing — a named easing (`linear`, `ease`, `ease_in`, `ease_out`, `ease_in_out`) or `cubic(a, b, c, d)` with exactly four numeric literal arguments (live since slice 5) |
 | E3050 | checker | invalid `duration`/`delay` — both must be integer literals in milliseconds (duration positive, delay non-negative); animations generate static CSS, so the values are compile-time data (live since slice 5) |
 | E3059 | checker | store key not a declared (shared) state field — component state fields do not satisfy a store key; anchored on the key identifier (live since slice 5) |
@@ -505,7 +507,8 @@ presence rules and E3042/E3055–E3057/E3062 the declaration-validation
 rules — both frozen by the S2/S3 checker test suites. The app semantic
 layer E3040–E3061/W3040–W3044 and N3040 is **complete** — every code in
 the range is live and frozen by the slice 4/5 checker test suites
-(E3067–E3069 stay reserved; E3060 is registered with its B.11 meaning
+(E3067 stays reserved; E3068/E3069 went live in S8 — animation-name
+shape and literal keyframe data; E3060 is registered with its B.11 meaning
 "store type/shape mismatch against state" but never fires in the 0.4.0
 type model — see the slice-5 rulings). E3039 sits outside those reserved
 ranges and is fully owned by `const` (S1). E2017 likewise sits outside

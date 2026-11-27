@@ -178,13 +178,28 @@ owner-confirmed on 2026-11-22. S1 and S2 are landed (develop @
       Playwright harness (D5) deliberately did NOT land here, keeping
       CI free of browser-runner flakiness; it parks until S11, where
       the browser gate (D.2) is mandatory)
-- [ ] S7 SPA router + MPA hydration/stores; dynamic route params,
-      not-found, honest `file://` fallback
-- [ ] S8 Animations — declared keyframes/transitions → generated CSS
-      (the S6 Phase C predefined set — fade, the four slides, scale,
-      pop, flip-x, flip-y — already ships in kinnrt.css with runtime
-      coordination: enter/exit/hover/press/scroll + exit waits, DONE
-      2026-11-28; S8 narrows to CSS generation for declared names)
+- [x] S7 SPA router (DONE 2026-11-28): `navigation spa` builds a
+      single-document dist — the kinnrt.js router core (route matching
+      on compile-time regexes, `param()` via K.h[23], the page swap)
+      plus the compiler-GENERATED URL adapter in app.js (history API
+      with the hash fallback for file:///srcdoc, base-path recovery
+      for rewritten deep links, popstate/hashchange, the sessionStorage
+      route save/restore, the [data-open] click interceptor, the
+      title/aria-current truthing). Deep links, back/forward, 404
+      through `not_found`, `:param` routes; MPA unchanged; store
+      persistence stays S9 (the runtime's store layer moved to S9 in
+      the size campaign). `navigate(path)` values arrive with S9.
+- [x] S8 declared animations (DONE 2026-11-28): the declared
+      keyframes/transitions generate real CSS (`@keyframes
+      kinn-<name>-in` + the five trigger rules with the declared
+      timing, appended after the predefined sheet so a same-named
+      declaration wins). 3D transforms (perspective, translate_z,
+      rotate_x/rotate_y/rotate_z) chain through `transform` — pure
+      CSS, no JS animation loop; E3068 (name shape) and E3069
+      (literal values / step percents) keep the generated CSS static;
+      per-name reduced-motion blocks. The predefined set (fade, the
+      four slides, scale, pop, flip-x, flip-y) keeps shipping in
+      kinnrt.css with the S6 Phase C runtime coordination.
 - [ ] S9 Forms, validation, local persistence + JSON snapshots
       (local-only, never presented as a backend database)
 - [ ] S10 Studio: folder project browser (Vfs v2), SPA preview, runtime

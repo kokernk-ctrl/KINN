@@ -1,16 +1,17 @@
 # AI Context
 
 Status snapshot for AI assistants (and humans) working on KINN.
-**Last updated: 2026-11-28, 0.4.0 S1–S6 complete (S6 Phase C:
-predefined animations in kinnrt.css + real Anim coordination,
-16,370 B; size-budget
-correction applied): dynamic web
-applications ship — KIR→JS codegen differentially tested byte-for-byte
-against the VM, the 16 KB kinnrt.js reactive runtime, the MPA app dist
-(CLI + wasm FFI), and Studio preview/Problems/terminal integration.
-`website` dists remain byte-identical; android stays E3070.** Update
-this file after significant milestones. Keep it between 500 and 900
-words.
+**Last updated: 2026-11-28, 0.4.0 S1–S8 complete: dynamic web
+applications ship with SPA routing and declared animations — KIR→JS
+codegen differentially tested byte-for-byte against the VM, the 16 KB
+kinnrt.js reactive runtime (16,307 B ≤ 16,384: router core + the
+compiler-generated URL adapter in app.js), the MPA AND single-document
+SPA dists (CLI + wasm FFI, `param()` live, 404/deep-link/back-forward/
+hash-fallback through the router), declared keyframes generating real
+CSS with 3D transforms, and Studio preview/Problems/terminal
+integration. `website` dists remain byte-identical; android stays
+E3070.** Update this file after significant milestones. Keep it
+between 500 and 900 words.
 
 ## What KINN is
 
@@ -44,9 +45,18 @@ backwards compatibility is tested, including contextual keywords).
   reconciliation, one delegated listener set per document,
   sessionStorage state transfer, and the C.7 postMessage envelopes
   (kinnRuntimeError/kinnConsole) Studio consumes into Problems and the
-  terminal. Scope is honest: SPA → E3071/S7, forms/fields and store
-  builtins → E3071/S9, param() → E3071/S7; visible animation waits for
-  S8 CSS. `examples/web/todo_app.kin` is the runnable demo (also the
+  terminal. Scope is honest: forms/fields and store
+  builtins → E3071/S9 (`param()` is live since S7; SPA builds since
+  S7). Since S7 the runtime also carries the router core (route
+  matching on manifest regexes, `param()` through K.h[23], the page
+  swap shared with the MPA mount) and app.js carries the generated URL
+  adapter (history API / hash fallback, base recovery, popstate, the
+  sessionStorage route save/restore, the [data-open] click
+  interceptor, title + aria-current truthing) behind the public
+  K.route/K.match/K.onurl/K.onboot/K.onpage surface; S8 generates the
+  declared animations' CSS (@keyframes + five trigger rules, 3D
+  transform chains, E3068/E3069 keep it compile-time data). The store
+  hydration layer moved to S9 in the size campaign. `examples/web/todo_app.kin` is the runnable demo (also the
   Studio e2e test); `examples/errors/app_div_zero.kin` exercises the
   error path end to end.
 

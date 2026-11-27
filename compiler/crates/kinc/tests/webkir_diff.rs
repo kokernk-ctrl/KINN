@@ -981,6 +981,215 @@ app "Anim" {
 }
 
 // ===========================================================================
+// S7+S8: the SPA dist and the declared-animation CSS
+// ===========================================================================
+
+#[test]
+fn webapp_spa_dist_is_one_document_with_the_effective_routes() {
+    // S7: the SPA manifest carries the EFFECTIVE route table (declared
+    // routes first, then the implicit per-page routes — the first page
+    // is the document root ""), each pattern pre-compiled to an
+    // anchored regex, plus `paths` (the canonical pattern every
+    // `open <Page>` resolves to) and `notFound`. The dist is ONE
+    // index.html; the generated URL adapter rides app.js behind the
+    // K.onurl/K.onboot/K.onpage hooks.
+    let src = r#"*mode = S;
+app "Guide" {
+    navigation spa
+    not_found Missing
+    route "item/:id" -> ItemDetail
+    route "settings" -> Settings
+    page Home { title "Guide" link "Item" open ItemDetail }
+    page ItemDetail { text "Item: " + param("id") }
+    page Settings { text "Settings" }
+    page Missing { text "Nope" }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let files = kinc::backend::webapp::generate_app(app, &c.module, "spa.kin").expect("dist");
+    let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["index.html", "styles.css", "kinnrt.css", "app.js", "kinnrt.js"],
+        "the SPA dist is a single document"
+    );
+    let app_js = text_of(&files, "app.js");
+    assert!(app_js.contains("K.onurl ="));
+    assert!(app_js.contains("K.onboot ="));
+    assert!(app_js.contains("K.onpage ="));
+    assert!(app_js.contains("pushState"));
+    assert!(app_js.contains("popstate"));
+    assert!(app_js.contains("hashchange"));
+    // param() lowers to the K.h[23] router read; the link's `open`
+    // resolves to the canonical pattern (data-open).
+    assert!(app_js.contains("K.h[23]("));
+    // The manifest: navigation mode, notFound, the effective route
+    // table (declared order, then implicit: Home "", Missing
+    // "missing"), each pattern pre-compiled to an anchored regex, and
+    // the canonical paths.
+    assert!(app_js.contains(r#""navigation":"spa""#));
+    assert!(app_js.contains(r#""notFound":"Missing""#));
+    assert!(app_js.contains(r#""path":"item/:id","re":"^item/([^/]*)$""#));
+    assert!(app_js.contains(r#""path":"settings","re":"^settings$""#));
+    assert!(app_js.contains(r#""path":"","re":"^$""#));
+    assert!(app_js.contains(r#""path":"missing","re":"^missing$""#));
+    assert!(app_js.contains(
+        r#""paths":{"Home":"","ItemDetail":"item/:id","Missing":"missing","Settings":"settings"}"#
+    ));
+    assert!(app_js.contains(r#""o":"item/:id""#));
+    // The shell nav carries data-nav/data-open for the runtime.
+    let index = text_of(&files, "index.html");
+    assert!(index.contains("data-nav=\"Home\" data-open=\"\""));
+    assert!(index.contains("data-nav=\"ItemDetail\" data-open=\"item/:id\""));
+}
+
+#[test]
+fn webapp_spa_dist_rejects_forms_honestly() {
+    // E3071 still owns the S9 surface even under `navigation spa`.
+    let src = r#"*mode = B;
+app "F" {
+    navigation spa
+    not_found Missing
+    state { d: string = "" }
+    page Home { form "Add" { field d kind text { label "L" } } }
+    page Missing { text "Nope" }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let err = kinc::backend::webapp::generate_app(app, &c.module, "f.kin").unwrap_err();
+    assert_eq!(err.code, "E3071");
+    assert!(err.message.contains("form"), "{}", err.message);
+}
+
+#[test]
+fn webapp_spa_param_read_is_byte_identical_across_handlers() {
+    // A handler that reads `param("id")` still compiles and the
+    // generated JS calls the router helper; the VM arm (the honest
+    // refusal) is exercised by the kinrt test suite.
+    let src = r#"*mode = S;
+app "P" {
+    navigation spa
+    not_found Missing
+    route "item/:id" -> ItemDetail
+    state { clicks: int = 0 }
+    page Home { button "Go" { on click { clicks = clicks + 1; } } }
+    page ItemDetail {
+        text "id: " + param("id")
+        button "B" { on click { clicks = clicks + 1; } }
+    }
+    page Missing { text "Nope" }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let files = kinc::backend::webapp::generate_app(app, &c.module, "p.kin").expect("dist");
+    let app_js = text_of(&files, "app.js");
+    assert!(app_js.contains("K.h[23](S.pop())"), "param reads route through K.h[23]");
+}
+
+#[test]
+fn webapp_declared_animations_generate_css_with_3d_transforms() {
+    // S8: declared keyframes emit `@keyframes kinn-<name>-in` (step
+    // props in the fixed transform order — perspective, translateZ, x,
+    // y, rotate_x, rotate_y, rotate_z, scale, rotate — with blur as a
+    // filter), the five trigger rules with the declared timing, and a
+    // per-name reduced-motion block. A declared name that collides
+    // with a predefined one ("pop") wins by cascade order (appended
+    // after the predefined sheet).
+    let src = r#"*mode = S;
+app "Anim8" {
+    animation {
+        keyframes "spin" {
+            from { rotate_x 0 rotate_y 0 translate_z 0 perspective 900 opacity 0 }
+            step 50 { rotate_x 180 blur 2 }
+            to { rotate_x 360 rotate_y 25 rotate_z -10 translate_z 4 scale 1 opacity 1 }
+            duration 400
+            delay 10
+            easing ease_in_out
+        }
+        keyframes "pop" {
+            from { opacity 0 scale 0.5 }
+            to { opacity 1 scale 1 }
+            duration 150
+        }
+        transition "fade" { duration 120 easing linear }
+    }
+    page Home { text "x" enter "spin" hover "pop" exit "fade" }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let files = kinc::backend::webapp::generate_app(app, &c.module, "anim.kin").expect("dist");
+    let css = text_of(&files, "kinnrt.css");
+    // The predefined sheet still ships verbatim first.
+    assert!(css.contains(".kinn-enter-fade { animation: kinn-fade-in 300ms ease-out both; }"));
+    // The declared keyframes: each step's transform chain carries only
+    // what THAT step declares (CSS keyframes replace per-step — the
+    // declaration is the contract), in the fixed order perspective,
+    // translateZ, x, y, rotate_x, rotate_y, rotate_z, scale, rotate.
+    assert!(css.contains("@keyframes kinn-spin-in {"));
+    assert!(css.contains("transform: perspective(900px) translateZ(0px) rotateX(0deg) rotateY(0deg);"));
+    assert!(css.contains("50% {"));
+    assert!(css.contains("transform: rotateX(180deg);"));
+    assert!(css.contains("filter: blur(2px);"));
+    assert!(css.contains("transform: translateZ(4px) rotateX(360deg) rotateY(25deg) rotateZ(-10deg) scale(1);"));
+    // Declared timing (duration 400ms, delay 10ms, ease-in-out).
+    assert!(css.contains(".kinn-enter-spin { animation: kinn-spin-in 400ms 10ms ease-in-out both; }"));
+    assert!(css.contains(".kinn-exit-spin { animation: kinn-spin-in 400ms 10ms ease-in-out reverse both; }"));
+    assert!(css.contains(".kinn-hover-spin:hover { animation: kinn-spin-in 400ms 10ms ease-in-out; }"));
+    assert!(css.contains(".kinn-press-spin:active { animation: kinn-spin-in 400ms 10ms ease-in-out; }"));
+    assert!(css.contains(".kinn-scroll-spin { opacity: 0; }"));
+    assert!(css.contains(".kinn-scroll-spin.kinn-in { animation: kinn-spin-in 400ms 10ms ease-in-out both; }"));
+    // The per-name reduced-motion override.
+    assert!(css.contains(".kinn-enter-spin, .kinn-exit-spin, .kinn-hover-spin, .kinn-press-spin, .kinn-scroll-spin {"));
+    // The declared "pop" overrides the predefined timing (cascade
+    // order: generated rules come later).
+    let pre = css.find(".kinn-enter-pop { animation: kinn-pop-in 300ms ease-out both; }");
+    let decl = css.find(".kinn-enter-pop { animation: kinn-pop-in 150ms ease-out both; }");
+    assert!(decl.is_some(), "declared pop timing emitted");
+    if let (Some(a), Some(b)) = (pre, decl) {
+        assert!(b > a, "generated rules come after the predefined sheet");
+    }
+    // A declared transition retimes the predefined visual.
+    assert!(css.contains(".kinn-enter-fade { animation: kinn-fade-in 120ms linear both; }"));
+    // String values pass verbatim (custom units).
+    let src2 = src.replace("from { rotate_x 0", "from { x \"20vw\" rotate_x 0");
+    let c2 = kinc::driver::compile(&src2).expect("compile");
+    let files2 = kinc::backend::webapp::generate_app(&c2.app.as_ref().unwrap(), &c2.module, "anim.kin")
+        .expect("dist");
+    assert!(text_of(&files2, "kinnrt.css").contains("translateX(20vw)"));
+}
+
+#[test]
+fn webapp_effective_routes_skip_duplicating_declared_patterns() {
+    // The implicit route for an unrouted page is its slug — unless a
+    // declared route already owns that pattern (the declared route
+    // wins; the page then has no route of its own).
+    let src = r#"*mode = S;
+app "D" {
+    navigation spa
+    not_found Missing
+    route "settings" -> Config
+    page Home { text "h" }
+    page Config { text "c" }
+    page Settings { text "s" }
+    page Missing { text "m" }
+}"#;
+    let c = kinc::driver::compile(src).expect("compile");
+    let app = c.app.as_ref().expect("app model");
+    let files = kinc::backend::webapp::generate_app(app, &c.module, "d.kin").expect("dist");
+    let app_js = text_of(&files, "app.js");
+    // Home "" and Missing "missing" are implicit; "settings" exists
+    // ONCE (the declared one, targeting Config); Settings gets no
+    // implicit duplicate.
+    assert_eq!(app_js.matches("\"path\":\"settings\"").count(), 1);
+    assert!(app_js.contains("\"paths\":{\"Config\":\"settings\",\"Home\":\"\",\"Missing\":\"missing\",\"Settings\":\"settings\"}"));
+}
+
+fn text_of(files: &[kinc::backend::OutputFile], name: &str) -> String {
+    let f = files.iter().find(|f| f.path == name).unwrap_or_else(|| panic!("{} emitted", name));
+    String::from_utf8_lossy(&f.data).into_owned()
+}
+
+// ===========================================================================
 // Corpus: synthesized .kin edge cases in tests/fixtures/webdiff/
 // ===========================================================================
 

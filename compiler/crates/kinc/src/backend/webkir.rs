@@ -52,7 +52,7 @@ use crate::appmodel::{
     AppExpr, AppExprKind, AppModel, AppStmt, AppStmtKind, ComputedModel, ForIterModel,
     HandlerModel,
 };
-use crate::ast::{AssignOp, BinOp, Type};
+use crate::ast::{AssignOp, BinOp, NavigationMode, Type};
 use crate::diagnostics::Diagnostic;
 use kinrt::kir::{CastTarget, Instr, NativeId, ValKind};
 use kinrt::{FuncDef, Module, Value};
@@ -104,9 +104,10 @@ pub fn js_module(module: &Module, file: &str) -> String {
 
 
 /// Host builtins the web runtime does not implement yet (E3071 scope
-/// gates, S6): `param` is S7 routing; the store/JSON trio is S9.
-const HOST_BUILTINS: [(&str, &str, &str); 6] = [
-    ("param", "S7", "route parameters arrive with SPA routing (S7)"),
+/// gates, S9): the store/JSON set. `param` left this table in S7 —
+/// it lowers to `Instr::Native(NativeId::Param)` and reads the live
+/// route table in kinnrt.js (K.h[23]).
+const HOST_BUILTINS: [(&str, &str, &str); 5] = [
     ("store_save", "S9", "store persistence arrives with S9"),
     ("store_load", "S9", "store persistence arrives with S9"),
     ("store_clear", "S9", "store persistence arrives with S9"),
@@ -305,9 +306,119 @@ pub fn app_js_full(
     for i in 0..combined_module.funcs.len() {
         js.push_str(&gen_func(&combined_module, i, file));
     }
+    // The SPA glue (S7): router-owned clicks + the title/aria-current
+    // truthing on every page swap. Generated per SPA app (app.js has no
+    // size budget; kinnrt.js keeps only the router core behind the
+    // public K.navigate/K.onpage surface). Registered BEFORE mount so
+    // the first page swap already runs through it. MPA apps emit
+    // nothing — their navigation is plain files.
+    if app.navigation == NavigationMode::Spa {
+        js.push_str(&spa_glue(app));
+    }
     js.push_str(&format!("K.mount({});\n", manifest));
     js.push_str("})(globalThis.KinnRT);\n");
     Ok(js)
+}
+
+/// The generated SPA glue (S7): the document's URL adapter + the
+/// router-owned click interceptor + the page-swap truthing. kinnrt.js
+/// owns route matching, `param()`, and the page swap; this block (in
+/// app.js, which carries the per-app code) owns everything
+/// document-specific: the history API (pushState/replaceState +
+/// popstate) with the hash fallback for non-http documents (file://,
+/// about:srcdoc, blob:), the base-path analysis (the document's
+/// directory, or the shortest pathname prefix whose remainder matches
+/// a route — what a server-rewritten deep link looks like), the
+/// sessionStorage route save/restore, and the `aria-current`/title
+/// truthing after every swap. Deterministic: a fixed block plus the
+/// JSON-escaped app name literal.
+fn spa_glue(app: &AppModel) -> String {
+    let name = crate::backend::web::html_escape(&app.name);
+    format!(
+        "/* S7 SPA glue (generated): the URL adapter. kinnrt.js owns\n\
+   matching, param() and the page swap; this block owns the URL. */\n\
+(function () {{\n\
+  var W = window, D = document;\n\
+  var HASH = W.location.protocol !== \"http:\" && W.location.protocol !== \"https:\";\n\
+  var PN = W.location.pathname;\n\
+  var BASE = \"/\"; /* resolved at boot (below), once M exists */\n\
+  /* Base path: the document's directory, or the shortest prefix whose\n\
+     remainder matches a route (a server-rewritten deep link). */\n\
+  function baseOf() {{\n\
+    if (HASH) return \"/\";\n\
+    if (PN.endsWith(\"index.html\")) {{\n\
+      return PN.slice(0, PN.length - 10);\n\
+    }}\n\
+    var base = PN.slice(0, PN.lastIndexOf(\"/\") + 1);\n\
+    var cuts = [1], q = PN.indexOf(\"/\", 1);\n\
+    while (q !== -1) {{ cuts.push(q + 1); q = PN.indexOf(\"/\", q + 1); }}\n\
+    for (var k = 0; k < cuts.length; k++) {{\n\
+      if (K.match(PN.slice(cuts[k]))) {{ base = PN.slice(0, cuts[k]); break; }}\n\
+    }}\n\
+    return base;\n\
+  }}\n\
+  function curPath() {{\n\
+    if (HASH) {{\n\
+      var h = W.location.hash;\n\
+      return h.length > 1 ? h.replace(/^#\\/?/, \"\") : \"\";\n\
+    }}\n\
+    /* The document's own `index.html` tail is the root route, not a\n\
+       path segment. */\n\
+    var p = W.location.pathname;\n\
+    if (p.endsWith(\"index.html\")) p = p.slice(0, p.length - 10);\n\
+    return p.length > BASE.length ? p.slice(BASE.length) : \"\";\n\
+  }}\n\
+  /* URL writes + the route save (the runtime calls this on every\n\
+     navigation: mode 1 = push, 2 = replace, 0 = the URL is already\n\
+     right). */\n\
+  K.onurl = function (path, mode) {{\n\
+    try {{ W.sessionStorage.setItem(\"kinn:r:NAME\", path); }} catch (e) {{}}\n\
+    if (HASH) {{\n\
+      if (mode && W.location.hash !== \"/\" + path) W.location.hash = \"/\" + path;\n\
+    }} else if (mode === 1) {{\n\
+      W.history.pushState(null, \"\", BASE + path);\n\
+    }} else if (mode === 2) {{\n\
+      W.history.replaceState(null, \"\", BASE + path);\n\
+    }}\n\
+  }};\n\
+  /* Boot: back/forward listeners, then the first route — a deep link\n\
+     wins over the saved route; the saved route restores a reload. */\n\
+  K.onboot = function () {{\n\
+    BASE = baseOf(); /* K.match needs the manifest — M exists now */\n\
+    W.addEventListener(\"popstate\", function () {{ K.route(curPath(), 0); }});\n\
+    if (HASH) W.addEventListener(\"hashchange\", function () {{ K.route(curPath(), 0); }});\n\
+    var saved = \"\";\n\
+    try {{ saved = W.sessionStorage.getItem(\"kinn:r:NAME\") || \"\"; }} catch (e) {{}}\n\
+    var live = curPath();\n\
+    K.route(live || saved, live ? 0 : 2);\n\
+  }};\n\
+  /* Router-owned clicks: [data-open] targets navigate through the\n\
+     router instead of their href (kinnrt's own click dispatch runs\n\
+     first, so user handlers write state before the view re-mounts). */\n\
+  D.addEventListener(\"click\", function (ev) {{\n\
+    var t = ev.target;\n\
+    t = t && t.closest ? t.closest(\"[data-open]\") : null;\n\
+    if (!t) return;\n\
+    var p = t.getAttribute(\"data-open\");\n\
+    if (p === null) return;\n\
+    ev.preventDefault();\n\
+    K.route(p, 1);\n\
+  }});\n\
+  /* Page-swap truthing: the document title and the shell nav's\n\
+     aria-current. */\n\
+  K.onpage = function (page) {{\n\
+    D.title = page.title + \" · \" + \"NAME\";\n\
+    var ls = D.querySelectorAll(\"[data-nav]\");\n\
+    for (var i = 0; i < ls.length; i++) {{\n\
+      if (ls[i].getAttribute(\"data-nav\") === page.name) ls[i].setAttribute(\"aria-current\", \"page\");\n\
+      else ls[i].removeAttribute(\"aria-current\");\n\
+    }}\n\
+  }};\n\
+}})();\n\
+",
+    )
+    .replace("kinn:r:NAME", &format!("kinn:r:{}", name))
+    .replace(" + \"NAME\"", &format!(" + \"{}\"", name))
 }
 
 /// The app program pieces S5 emits: the app-side KIR functions (`app:init`,
@@ -555,6 +666,15 @@ fn js_tokenize(src: &str) -> Vec<Tok> {
         flush(&mut toks, &mut buf);
         // punctuation (longest first)
         let three: String = b[i..(i + 3).min(n)].iter().collect();
+        // `...` (spread) must be ONE token: three separate dots would
+        // make the emitter treat the following identifier as a property
+        // (`.s` member access) and skip its rename.
+        if three == "..." {
+            toks.push(Tok::Punct(three.clone()));
+            last_meaning = Some(three);
+            i += 3;
+            continue;
+        }
         if three == "===" || three == "!==" || three == "<<=" || three == ">>=" {
             toks.push(Tok::Punct(three));
             last_meaning = Some("===".to_string());
@@ -773,7 +893,41 @@ fn js_minify(src: &str) -> String {
     let toks = js_tokenize(src);
     let decls = js_decls(&toks);
     let map = js_name_map(&decls, src);
-    js_emit(&toks, &map)
+    let out = js_emit(&toks, &map);
+    // Optional catch binding (ES2019): `catch (e) {}` with an unused
+    // binding becomes `catch {}`. Only empty bodies match, so a used
+    // binding (k_call's envelope enrichment) is never touched.
+    // Statement-final semicolons before `}` are dead weight (148 in
+    // the current artifact) — the source has no `;}` inside a string
+    // or regex literal (verified by test), so the textual pass is
+    // exact.
+    js_drop_empty_catch(&out).replace(";}", "}")
+}
+
+/// `catch (<ident>) {}` → `catch {}` (the binding is provably unused).
+fn js_drop_empty_catch(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let b: Vec<char> = src.chars().collect();
+    let n = b.len();
+    let mut i = 0;
+    while i < n {
+        if b[i] == 'c'
+            && b[i + 1..].starts_with("atch(".chars().collect::<Vec<char>>().as_slice())
+        {
+            let mut k = i + 6; // after "catch("
+            while k < n && (b[k].is_ascii_alphanumeric() || b[k] == '_' || b[k] == '$') {
+                k += 1;
+            }
+            if k < n && b[k] == ')' && k + 1 < n && b[k + 1] == '{' && k + 2 < n && b[k + 2] == '}' {
+                out.push_str("catch{}");
+                i = k + 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
 }
 
 // ===========================================================================
@@ -909,7 +1063,7 @@ fn analyze(f: &FuncDef, module: &Module) -> Vec<TypeState> {
             Instr::Native(id) => {
                 let arity = match id {
                     NativeId::Len | NativeId::Abs | NativeId::Str | NativeId::Upper
-                    | NativeId::Lower | NativeId::Trim => 1,
+                    | NativeId::Lower | NativeId::Trim | NativeId::Param => 1,
                     _ => 2,
                 };
                 let mut operand: Option<ValKind> = None;
@@ -927,6 +1081,7 @@ fn analyze(f: &FuncDef, module: &Module) -> Vec<TypeState> {
                     NativeId::Contains => ValKind::Bool,
                     NativeId::Split => ValKind::Array(Box::new(ValKind::Str)),
                     NativeId::Join => ValKind::Str,
+                    NativeId::Param => ValKind::Str,
                 };
                 next.stack.push(result);
                 targets.push(ip + 1);
@@ -1443,6 +1598,11 @@ fn gen_native(
         NativeId::Contains => binop(body, ip, "K.h[19]", None, false),
         NativeId::Split => binop(body, ip, "K.h[20]", None, false),
         NativeId::Join => binop(body, ip, "K.h[21]", None, false),
+        // S7 route-parameter read: k_param(name) consults the router's
+        // current params (kinnrt.js). Never errors — an unknown name is
+        // the empty string (the checker's E3058 already caught literal
+        // misspellings; dynamic names are runtime data).
+        NativeId::Param => body.push_str("S.push(K.h[23](S.pop()));"),
     }
 }
 
@@ -2285,9 +2445,16 @@ impl<'a, 'b> FnAppLower<'a, 'b> {
         }
         match name {
             "param" => {
-                // Handled at build level (E3071) — unreachable here because
-                // app_funcs rejects before lowering runs.
-                unreachable!("param() is rejected by the E3071 scope gate");
+                // S7: a route-parameter read. Lowered as a native so the
+                // KIR stays app-scoped; the JS side reads the router's
+                // current params through the K.h[23] helper (k_param in
+                // kinnrt.js) — see gen_native's NativeId::Param arm.
+                for a in args {
+                    self.lower_expr(a);
+                }
+                self.at(line);
+                self.emit(Instr::Native(NativeId::Param), line);
+                return;
             }
             "store_save" | "store_load" | "store_clear" | "json_of" | "save_json" => {
                 unreachable!("host builtins are rejected by the E3071 scope gate");

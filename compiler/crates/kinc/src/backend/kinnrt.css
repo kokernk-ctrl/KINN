@@ -17,15 +17,18 @@
                                  has seen it (browsers without one
                                  never get the class, so they render)
 
-   Declared (non-predefined) names ride the manifest; the compiler
-   generates their CSS in the later S8 step — until then a declared
-   name without CSS simply renders without visible motion (the S6
-   status quo, honestly gated).
+   Declared (non-predefined) names get their CSS GENERATED (S8,
+   2026-11-28): `@keyframes kinn-<name>-in` plus these same five
+   trigger shapes with the declared timing, appended AFTER this sheet
+   so a same-named declaration wins by cascade order. A declared name
+   whose steps generate nothing (no declarable steps) stays inert —
+   it renders without visible motion, honestly.
 
    Mobile rules (C.6): only transform and opacity animate. The
    predefined timings are fixed (300ms in / 250ms out); declared
    duration/easing values are validated (E3049/E3050) and used by the
-   S8 generator. prefers-reduced-motion disables everything and the
+   S8 generator (E3068/E3069 keep the declared data literal so the
+   CSS is compile-time static). prefers-reduced-motion disables everything and the
    runtime's JS path skips entirely; :focus-visible outlines live in
    styles.css and are never touched here.
 

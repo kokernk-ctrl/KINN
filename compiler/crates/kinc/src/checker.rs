@@ -1392,7 +1392,45 @@ fn owner_prefix(owner: &str) -> String {
 /// or `cubic(a, b, c, d)` with four numeric literal arguments.
 fn check_animation_block(c: &mut Checker, anim: &AnimationDecl) {
     for k in &anim.keyframes {
+        // E3068 (S8): animation names become CSS class fragments
+        // (`kinn-enter-<name>`); a shape outside `[A-Za-z0-9-]` cannot.
+        if !k.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') || k.name.is_empty() {
+            let mut d = Diagnostic::error(
+                "E3068",
+                format!("invalid animation name `\"{}\"`", k.name),
+                k.line,
+                k.col,
+                k.name.chars().count().max(1) as u32,
+            );
+            d.hint = Some(
+                "animation names become CSS class fragments — use letters, digits and `-` (like \"slide-up\")"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+        }
         for step in &k.steps {
+            // E3069 (S8): the generated CSS is static, so keyframe
+            // values are compile-time data (a number or string
+            // literal) and `step` percents integer literals 0..100.
+            if let StepAt::Step(e) = &step.at {
+                let bad = match &e.kind {
+                    ExprKind::IntLit(v) => !(0..=100).contains(v),
+                    _ => true,
+                };
+                if bad {
+                    let mut d = Diagnostic::error(
+                        "E3069",
+                        "a keyframe `step` percent must be an integer literal 0..100".to_string(),
+                        e.line,
+                        e.col,
+                        1,
+                    );
+                    d.hint = Some(
+                        "animations generate static CSS — write `step 50`, not an expression".to_string(),
+                    );
+                    c.diags.push(d.in_file(c.file.clone()));
+                }
+            }
             for prop in &step.props {
                 if !KEYFRAME_PROPS.contains(&prop.name.as_str()) {
                     let mut d = Diagnostic::error(
@@ -1408,6 +1446,28 @@ fn check_animation_block(c: &mut Checker, anim: &AnimationDecl) {
                     ));
                     c.diags.push(d.in_file(c.file.clone()));
                 }
+                let literal = matches!(
+                    &prop.value.kind,
+                    ExprKind::IntLit(_) | ExprKind::FloatLit(_) | ExprKind::StrLit(_)
+                ) || matches!(&prop.value.kind, ExprKind::Unary { op: UnOp::Neg, expr }
+                    if matches!(expr.kind, ExprKind::IntLit(_) | ExprKind::FloatLit(_)));
+                if !literal {
+                    let mut d = Diagnostic::error(
+                        "E3069",
+                        format!(
+                            "the keyframe property `{}` needs a literal value — the generated CSS is compile-time data",
+                            prop.name
+                        ),
+                        prop.value.line,
+                        prop.value.col,
+                        1,
+                    );
+                    d.hint = Some(
+                        "write `opacity 0.5` or `x \"20vw\"` — expressions cannot animate (S8 generates the CSS statically)"
+                            .to_string(),
+                    );
+                    c.diags.push(d.in_file(c.file.clone()));
+                }
             }
         }
         if let Some(dur) = &k.duration {
@@ -1421,6 +1481,20 @@ fn check_animation_block(c: &mut Checker, anim: &AnimationDecl) {
         }
     }
     for t in &anim.transitions {
+        if !t.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') || t.name.is_empty() {
+            let mut d = Diagnostic::error(
+                "E3068",
+                format!("invalid animation name `\"{}\"`", t.name),
+                t.line,
+                t.col,
+                t.name.chars().count().max(1) as u32,
+            );
+            d.hint = Some(
+                "animation names become CSS class fragments — use letters, digits and `-` (like \"slide-up\")"
+                    .to_string(),
+            );
+            c.diags.push(d.in_file(c.file.clone()));
+        }
         if let Some(dur) = &t.duration {
             check_anim_millis(c, dur, "duration", 1);
         }
@@ -1433,9 +1507,15 @@ fn check_animation_block(c: &mut Checker, anim: &AnimationDecl) {
     }
 }
 
-/// The keyframe property whitelist (B.8): mapped to opacity, translate,
-/// scale, rotate and blur in the generated CSS.
-const KEYFRAME_PROPS: [&str; 6] = ["opacity", "x", "y", "scale", "rotate", "blur"];
+/// The keyframe property whitelist (B.8 + S8 3D): mapped to opacity,
+/// filter, and one `transform` chain in the generated CSS — the 3D
+/// entries (`rotate_x`, `rotate_y`, `rotate_z`, `translate_z`,
+/// `perspective`) chain as `rotateX(…) rotateY(…) rotateZ(…)
+/// translateZ(…) perspective(…)`, pure CSS, no JS animation loop.
+const KEYFRAME_PROPS: [&str; 11] = [
+    "opacity", "x", "y", "scale", "rotate", "blur", "rotate_x", "rotate_y", "rotate_z",
+    "translate_z", "perspective",
+];
 
 /// The named easings (B.8); `cubic(a, b, c, d)` is the sixth shape.
 const NAMED_EASINGS: [&str; 5] = ["linear", "ease", "ease_in", "ease_out", "ease_in_out"];
@@ -6733,6 +6813,100 @@ mod tests {
             "            to { opacity 1 x 10 y 10 scale 1 rotate 5 blur 1 }\n",
             "            duration 200\n",
             "        }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn three_d_keyframe_properties_pass_the_whitelist() {
+        // S8: the 3D transform props chain into one CSS `transform`.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"spin\" {\n",
+            "            from { rotate_x 0 rotate_y 0 rotate_z 0 translate_z 0 perspective 900 }\n",
+            "            to { rotate_x 360 rotate_y 25 rotate_z -10 translate_z 4 perspective 900 }\n",
+            "            duration 400\n",
+            "            easing linear\n",
+            "        }\n",
+            "    }\n",
+            "    page Home { text \"x\" enter \"spin\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn animation_names_with_bad_shape_are_e3068() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"my anim\" { from { opacity 0 } to { opacity 1 } }\n",
+            "        transition \"bad/name\" { duration 150 }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3068").collect();
+        assert_eq!(hits.len(), 2, "{:#?}", diags);
+        assert!(hits[0].message.contains("my anim"), "{:#?}", diags);
+        assert!(hits[1].message.contains("bad/name"), "{:#?}", diags);
+        assert_eq!(hits[0].line, 3, "{:#?}", diags);
+        assert!(hits[0].hint.as_ref().unwrap().contains("CSS class"), "{:#?}", diags);
+    }
+
+    #[test]
+    fn non_literal_keyframe_values_are_e3069() {
+        let diags = check_src(concat!(
+            "app \"A\" {\n",
+            "    state { n: int = 0 }\n",
+            "    animation {\n",
+            "        keyframes \"k\" { from { opacity n } to { opacity 1 + n } step 50 { x 2 } }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+        let hits: Vec<_> = diags.iter().filter(|d| d.code == "E3069").collect();
+        assert_eq!(hits.len(), 2, "{:#?}", diags);
+        assert!(hits[0].message.contains("opacity"), "{:#?}", diags);
+        assert_eq!(hits[0].line, 4, "{:#?}", diags);
+        // String literals are fine (custom units).
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"k\" { from { x \"20vw\" } to { x \"0vw\" } }\n",
+            "    }\n",
+            "    page Home { text \"x\" }\n",
+            "}\n",
+        ));
+    }
+
+    #[test]
+    fn bad_step_percents_are_e3069() {
+        for (line, label) in [
+            ("step n", "an expression percent"),
+            ("step 0.5", "a float percent"),
+            ("step 101", "an out-of-range percent"),
+            ("step -1", "a negative percent"),
+        ] {
+            let src = format!(
+                "app \"A\" {{\n    state {{ n: int = 0 }}\n    animation {{\n        keyframes \"k\" {{ from {{ opacity 0 }} {} {{ opacity 1 }} }}\n    }}\n    page Home {{ text \"x\" }}\n}}\n",
+                line
+            );
+            let diags = check_src(&src);
+            assert!(
+                diags.iter().any(|d| d.code == "E3069" && d.message.contains("percent")),
+                "{} — {:#?}",
+                label,
+                diags
+            );
+        }
+        // Integers 0..100 pass.
+        clean(concat!(
+            "app \"A\" {\n",
+            "    animation {\n",
+            "        keyframes \"k\" { from { opacity 0 } step 50 { opacity 0.5 } to { opacity 1 } }\n",
             "    }\n",
             "    page Home { text \"x\" }\n",
             "}\n",

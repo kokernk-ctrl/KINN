@@ -1,0 +1,83 @@
+// examples/web/spa_app.kin — the 0.4.0 S7 single-page app surface
+// (docs/DYNAMIC_WEB_ARCHITECTURE.md, router section).
+//
+// STATUS (0.4.0 S7): `navigation spa` builds for real — ONE
+// index.html whose router (kinnrt.js + the generated URL adapter)
+// owns the URL: deep links, back/forward, `:param` routes, the 404
+// page and the sessionStorage route restore all work. `param("id")`
+// reads the live route parameter; links and buttons with `open <Page>`
+// navigate through the router without a reload (their `:param`
+// segments resolve to "" until S9's navigate() brings real values).
+// History mode needs the app served from the server root (or the
+// same-session base recovery); file:// documents automatically fall
+// back to hash routing (#/item/5). No forms/fields (S9) and no store
+// builtins (S9) — those still report E3071 honestly. Android is
+// E3070.
+//
+// Try it:   kinn build examples/web/spa_app.kin --target web --out dist
+//           (serve dist/ — e.g. `python3 -m http.server` — or just
+//            open dist/index.html from disk: hash routing kicks in)
+
+*mode = S;
+
+app "Guide" {
+    navigation spa
+    not_found Missing
+    transition "fade"
+
+    route "item/:id" -> ItemDetail
+    route "settings" -> Settings
+
+    state {
+        visits: int = 0
+        items: [string] = ["alpha", "beta", "gamma"]
+    }
+
+    computed label = "Open: " + str(visits)
+
+    animation {
+        keyframes "fade" {
+            from { opacity 0 }
+            to { opacity 1 }
+            duration 200
+            easing ease_out
+        }
+    }
+
+    page Home {
+        title "Guide"
+        heading "Guide" enter "fade"
+        text label enter "fade"
+        link "Item alpha" open ItemDetail
+        link "Item beta" open ItemDetail
+        link "Settings" open Settings
+        button "Count a visit" {
+            on click { visits = visits + 1; }
+        }
+        each items as it key it {
+            text it scroll "fade"
+        }
+    }
+
+    page ItemDetail {
+        title "Item"
+        heading "Item" enter "fade"
+        text "Item: " + param("id")
+        link "Back home" open Home
+        link "Settings" open Settings
+    }
+
+    page Settings {
+        title "Settings"
+        heading "Settings" enter "fade"
+        text "Visits so far: " + str(visits)
+        link "Home" open Home
+    }
+
+    page Missing {
+        title "Not found"
+        heading "Not found" enter "fade"
+        text "This page does not exist."
+        link "Home" open Home
+    }
+}

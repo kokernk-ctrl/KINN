@@ -19,10 +19,12 @@
 // position-free AppModel (component templates, the binding graph with
 // exact static dependency sets, handler KIR function names, routes,
 // animations, store keys). Since S5+S6 dynamic apps BUILD for real on
-// the web target — this one still declines honestly: it declares
-// `navigation spa` (S7) and uses `form`/`field` + store builtins
-// (S9), so `kinn build` reports E3071 naming the roadmap step. See
-// todo_app.kin for the runnable MPA surface. Android stays E3070.
+// the web target, and S7 made `navigation spa` real (see spa_app.kin)
+// — this one still declines honestly: it uses `form`/`field` + store
+// builtins (S9), so `kinn build` reports E3071 naming the roadmap
+// step. See todo_app.kin (MPA), spa_app.kin (SPA router) and
+// anim_app.kin (declared animations) for the runnable surfaces.
+// Android stays E3070.
 //
 // Try it:   kinn ast examples/web/tasks_app.kin
 //           kinn check examples/web/tasks_app.kin

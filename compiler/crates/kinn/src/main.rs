@@ -399,10 +399,11 @@ fn build_command(args: &[String]) -> ExitCode {
                 return ExitCode::from(2);
             }
             println!(
-                "built web app \"{}\" ({} page{}, MPA) → {}{}",
+                "built web app \"{}\" ({} page{}, {}) → {}{}",
                 app.name,
                 app.pages.len(),
                 if app.pages.len() == 1 { "" } else { "s" },
+                if app.navigation == kinc::ast::NavigationMode::Spa { "SPA" } else { "MPA" },
                 out_dir.display(),
                 project_note,
             );

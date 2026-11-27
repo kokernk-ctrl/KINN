@@ -42,6 +42,12 @@ pub enum NativeId {
     Split,
     /// `join(a, sep)`: [string] × string → string.
     Join,
+    /// `param(name)`: string → string (0.4.0 S7, app scope only). Reads
+    /// the current route parameter of that name from the web router;
+    /// the checker resolves `param` only inside `app` programs, and app
+    /// code never runs on the plain VM (the web backend translates it),
+    /// so the VM arm is an honest refusal, not an implementation.
+    Param,
 }
 
 impl NativeId {
@@ -58,6 +64,7 @@ impl NativeId {
             NativeId::Contains => "contains",
             NativeId::Split => "split",
             NativeId::Join => "join",
+            NativeId::Param => "param",
         }
     }
 }
